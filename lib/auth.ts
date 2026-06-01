@@ -5,6 +5,8 @@ export type AuthUser = {
   accountType: "personal" | "team" | "organization";
   organizationName?: string;
   organizationApprovalStatus?: "none" | "requested" | "approved";
+  createdAt?: string;
+  isDemo?: boolean;
 };
 
 export const AUTH_STORAGE_KEY = "rocketry-house.auth-user";
@@ -13,8 +15,14 @@ export const demoUser: AuthUser = {
   id: "mock-user-mira",
   name: "Mira Park",
   email: "mira@rocketry.house",
-  accountType: "personal"
+  accountType: "personal",
+  createdAt: "2026-05-01T00:00:00.000Z",
+  isDemo: true
 };
+
+export function isDemoAccount(user: AuthUser | null) {
+  return Boolean(user?.isDemo || user?.id === demoUser.id || user?.email === demoUser.email);
+}
 
 export function readMockUser() {
   if (typeof window === "undefined") return null;
