@@ -1279,6 +1279,8 @@ function sampleFlightPoint(result: SimulationResult, time: number) {
       return {
         time,
         altitude: (previous.altitude ?? 0) + ((next.altitude ?? 0) - (previous.altitude ?? 0)) * mix,
+        lateralDrift: (previous.lateralDrift ?? 0) + ((next.lateralDrift ?? 0) - (previous.lateralDrift ?? 0)) * mix,
+        angleDeg: (previous.angleDeg ?? 0) + ((next.angleDeg ?? 0) - (previous.angleDeg ?? 0)) * mix,
         velocity: (previous.velocity ?? 0) + ((next.velocity ?? 0) - (previous.velocity ?? 0)) * mix,
         thrust: (previous.thrust ?? 0) + ((next.thrust ?? 0) - (previous.thrust ?? 0)) * mix
       };
