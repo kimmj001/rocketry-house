@@ -110,6 +110,7 @@ export function runRocketEstimateWithMotor(components: RocketComponent[], motor?
   let lateralVelocity = 0;
   let maxDrift = 0;
   let attitudeRad = 0;
+  let angularRateRadS = 0;
   let attitudeDeg = 0;
   let tumbleTime: number | undefined;
   let maxAltitude = 0;
@@ -125,31 +126,42 @@ export function runRocketEstimateWithMotor(components: RocketComponent[], motor?
     const massKg = dryMassKg + propellantMassKg * (1 - burnedFraction);
     const airDensityKgM3 = SEA_LEVEL_AIR_DENSITY * Math.exp(-Math.max(0, altitude) / 8500);
     const drag = 0.5 * airDensityKgM3 * velocity * Math.abs(velocity) * cd * referenceAreaM2;
-    const relativeCrosswind = windSpeedMps - lateralVelocity;
+    const relativeCrosswind = lateralVelocity - windSpeedMps;
     const flightSpeed = Math.sqrt(velocity ** 2 + lateralVelocity ** 2);
-    const angleOfAttackRad = Math.atan2(relativeCrosswind, Math.max(Math.abs(velocity), 1));
+    const relativeAirSpeed = Math.sqrt(velocity ** 2 + relativeCrosswind ** 2);
+    const apparentWindAngleRad = Math.atan2(relativeCrosswind, Math.max(Math.abs(velocity), 0.25));
+    const angleOfAttackRad = apparentWindAngleRad - attitudeRad;
     const dynamicPressure = 0.5 * airDensityKgM3 * (flightSpeed ** 2 + relativeCrosswind ** 2);
     const railGuidance = altitude < railLengthM ? 0 : 1;
-    const windIntensity = windSpeedMps / Math.max(Math.abs(velocity) + 3, 3);
-    const stabilityDeficit = Math.max(0, 1.15 - stabilityMargin);
-    const stabilityDamping = Math.max(0.18, Math.min(1.35, stabilityMargin / 2.2 + finAuthority * 0.18));
-    const finWeathercocking = Math.max(0.25, Math.min(2.4, finAuthority * Math.max(stabilityMargin, 0.15)));
-    const targetAttitudeRad = railGuidance
-      ? Math.max(-1.15, Math.min(1.15, angleOfAttackRad * (0.52 + Math.min(finWeathercocking, 2.4) * 0.34)))
-      : 0;
-    const attitudeResponse = Math.max(0.6, Math.min(13, 1.0 + controlAuthority * 1.65 + (dynamicPressure * referenceAreaM2 * finAuthority) / Math.max(massKg * 15, 1)));
-    attitudeRad += (targetAttitudeRad - attitudeRad) * Math.min(0.32, attitudeResponse * dt);
-    if (railGuidance && stabilityDeficit > 0) attitudeRad += Math.sin(time * 10.5) * (0.22 + windSpeedMps * 0.026) * stabilityDeficit * dt;
+    const windIntensity = windSpeedMps / Math.max(Math.abs(velocity), 0.8);
+    const stabilityDeficit = Math.max(0, 1.05 - stabilityMargin);
+    const overstableWeathercock = Math.max(0, stabilityMargin - 1.7);
+    const stabilityDamping = Math.max(0.16, Math.min(1.15, 0.26 + finAuthority * 0.16 + Math.max(stabilityMargin, 0) * 0.12));
+    const staticMarginM = Math.max(0, (cpMm - cgMm) / 1000);
+    const normalForceSlope = Math.max(1.4, Math.min(11, 2.0 + finAuthority * 2.8 + Math.max(stabilityMargin, 0) * 0.85));
+    const normalForce = dynamicPressure * referenceAreaM2 * normalForceSlope * Math.sin(angleOfAttackRad);
+    const pitchInertia = Math.max(massKg * lengthM ** 2 * 0.055, 0.015);
+    const aeroMoment = normalForce * staticMarginM;
+    const railExitBoost = railGuidance ? Math.max(1, 1.8 - Math.min(velocity, 35) / 35) : 0;
+    const momentGain = (1.0 + windIntensity * 1.55 + overstableWeathercock * 0.2) * railExitBoost;
+    const pitchDamping = angularRateRadS * (0.55 + dynamicPressure * referenceAreaM2 * lengthM / Math.max(massKg, 0.1));
+    const angularAcceleration = ((aeroMoment * momentGain) / pitchInertia - pitchDamping) * railGuidance;
+    angularRateRadS += angularAcceleration * dt;
+    angularRateRadS = Math.max(-4.8, Math.min(4.8, angularRateRadS));
+    attitudeRad += angularRateRadS * dt;
+    const apparentLimitRad = Math.max(0.35, Math.min(1.35, Math.abs(apparentWindAngleRad) * (1.15 + overstableWeathercock * 0.18) + windIntensity * 0.32));
+    attitudeRad = Math.max(-apparentLimitRad, Math.min(apparentLimitRad, attitudeRad));
+    if (railGuidance && stabilityDeficit > 0) attitudeRad += Math.sin(time * 12.5) * (0.28 + windSpeedMps * 0.04) * stabilityDeficit * dt;
 
     const verticalThrust = thrust * Math.cos(attitudeRad);
     const lateralThrust = thrust * Math.sin(attitudeRad);
-    const sideForce = dynamicPressure * sideAreaM2 * Math.sin(angleOfAttackRad - attitudeRad) * (0.22 + 0.28 * finAuthority);
-    const crosswindPush = Math.sign(relativeCrosswind)
+    const sideForce = -normalForce * 0.45;
+    const crosswindPush = Math.sign(windSpeedMps - lateralVelocity)
       * 0.5
       * airDensityKgM3
-      * relativeCrosswind ** 2
+      * Math.abs(windSpeedMps - lateralVelocity) ** 2
       * sideAreaM2
-      * (0.42 + Math.min(finAuthority, 2.8) * 0.18)
+      * (0.55 + Math.min(finAuthority, 2.8) * 0.2)
       / stabilityDamping;
     const lateralDrag = -0.5 * airDensityKgM3 * lateralVelocity * Math.abs(lateralVelocity) * 0.82 * sideAreaM2;
     const weathercockPenalty = Math.abs(attitudeRad) * windIntensity * Math.max(0, thrust);
@@ -167,9 +179,9 @@ export function runRocketEstimateWithMotor(components: RocketComponent[], motor?
       velocity = 0;
     }
     const flightPathAngleDeg = Math.atan2(lateralVelocity, Math.max(velocity, 0.1)) * (180 / Math.PI);
-    const visualAttitudeDeg = flightPathAngleDeg + Math.sin(time * 14) * stabilityDeficit * windSpeedMps * 1.15;
+    const visualAttitudeDeg = attitudeRad * (180 / Math.PI) + Math.sin(time * 14) * stabilityDeficit * windSpeedMps * 1.15;
     attitudeDeg = Number(visualAttitudeDeg.toFixed(2));
-    if (!tumbleTime && altitude > railLengthM && windSpeedMps > 0.4 && (controlAuthority < 0.55 || weathercockPenalty > thrust * 0.42) && Math.abs(angleOfAttackRad - attitudeRad) > 0.38) {
+    if (!tumbleTime && altitude > railLengthM && windSpeedMps > 0.4 && (controlAuthority < 0.55 || Math.abs(attitudeRad) > 0.82 || weathercockPenalty > thrust * 0.42) && Math.abs(angleOfAttackRad) > 0.38) {
       tumbleTime = time;
     }
     maxVelocity = Math.max(maxVelocity, Math.abs(velocity));
@@ -187,6 +199,7 @@ export function runRocketEstimateWithMotor(components: RocketComponent[], motor?
         altitude: Math.round(altitude),
         lateralDrift: Number(lateralDrift.toFixed(1)),
         angleDeg: Number(attitudeDeg.toFixed(1)),
+        pressure: Number(flightPathAngleDeg.toFixed(1)),
         velocity: Number(velocity.toFixed(1)),
         acceleration: Number(acceleration.toFixed(2)),
         thrust: Math.round(thrust)
