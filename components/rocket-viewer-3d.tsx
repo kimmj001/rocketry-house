@@ -23,6 +23,82 @@ function cylinderLength(component: RocketComponent) {
   return Math.max(component.length / UNIT, 0.02);
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getFinPlanformPoints(component: RocketComponent) {
+  const root = component.finRootChord ?? component.length;
+  const tip = component.finTipChord ?? component.length * 0.48;
+  const span = component.finSpan ?? component.diameter * 1.25;
+  const sweep = component.finSweep ?? component.length * 0.25;
+  const freeform = [
+    { x: 0, y: 0 },
+    { x: 44, y: 12 },
+    { x: 155, y: 0 },
+    { x: 118, y: 54 },
+    { x: 68, y: 86 },
+    { x: 12, y: 38 }
+  ];
+
+  if (component.finPlanform === "Freeform") {
+    const source = component.finFreeformPoints?.length ? component.finFreeformPoints : freeform;
+    return source.map((point) => ({ x: clamp(point.x, -root * 0.4, root * 1.4), y: clamp(point.y, 0, span * 1.35) }));
+  }
+
+  if (component.finPlanform === "Forward swept") {
+    return [
+      { x: 0, y: 0 },
+      { x: root, y: 0 },
+      { x: root + sweep, y: span },
+      { x: Math.max(0, sweep) + Math.max(26, tip * 0.18), y: span }
+    ];
+  }
+
+  if (component.finPlanform === "Elliptical") {
+    return [
+      { x: 0, y: 0 },
+      { x: root * 0.24, y: span * 0.2 },
+      { x: root * 0.58, y: span * 0.96 },
+      { x: root * 0.9, y: span * 0.84 },
+      { x: root, y: 0 }
+    ];
+  }
+
+  if (component.finPlanform === "Split fin") {
+    return [
+      { x: 0, y: 0 },
+      { x: root * 0.34, y: 0 },
+      { x: root * 0.48, y: span * 0.44 },
+      { x: root * 0.62, y: span * 0.15 },
+      { x: root, y: span * 0.15 },
+      { x: sweep + tip, y: span },
+      { x: sweep, y: span },
+      { x: root * 0.38, y: span * 0.5 }
+    ];
+  }
+
+  if (component.finPlanform === "Tube fin") {
+    return [
+      { x: 0, y: span * 0.18 },
+      { x: root * 0.18, y: 0 },
+      { x: root * 0.82, y: 0 },
+      { x: root, y: span * 0.18 },
+      { x: root, y: span * 0.82 },
+      { x: root * 0.82, y: span },
+      { x: root * 0.18, y: span },
+      { x: 0, y: span * 0.82 }
+    ];
+  }
+
+  return [
+    { x: 0, y: 0 },
+    { x: root, y: 0 },
+    { x: sweep + tip, y: span },
+    { x: sweep, y: span }
+  ];
+}
+
 function materialFor(component: RocketComponent) {
   if (component.type === "body_tube" || component.type === "payload_section") return { color: "#e7dfd0", opacity: 0.86 };
   if (component.type === "motor_mount" || component.type === "motor_retainer" || component.type === "engine_block") return { color: "#5b626a", opacity: 0.86 };
@@ -42,7 +118,13 @@ function NoseCone({ component, total }: { component: RocketComponent; total: num
     for (let i = 0; i <= segments; i += 1) {
       const t = i / segments;
       const z = t * (length - shoulderLength);
-      const r = baseRadius * Math.sin((t * Math.PI) / 2) ** 0.72;
+      const shape = component.noseShape ?? "Ogive";
+      const r =
+        shape === "Conical" ? baseRadius * t :
+        shape === "Elliptical" ? baseRadius * Math.sqrt(Math.max(0, 1 - (1 - t) ** 2)) :
+        shape === "Haack" ? baseRadius * Math.sqrt(Math.max(0, (Math.acos(1 - 2 * t) - Math.sin(2 * Math.acos(1 - 2 * t)) / 2) / Math.PI)) :
+        shape === "Parabolic" ? baseRadius * (2 * t - t ** 2) :
+        baseRadius * Math.sin((t * Math.PI) / 2) ** 0.72;
       profile.push(new THREE.Vector2(r, z));
     }
     profile.push(new THREE.Vector2(baseRadius * 0.86, length - shoulderLength));
@@ -51,7 +133,7 @@ function NoseCone({ component, total }: { component: RocketComponent; total: num
     const geo = new THREE.LatheGeometry(profile, 72);
     geo.rotateX(Math.PI / 2);
     return geo;
-  }, [component]);
+  }, [component.diameter, component.length, component.noseShape, component.shapeParameter, component.position]);
   const tipZ = (component.position - total / 2) / UNIT;
   return (
     <mesh geometry={geometry} position={[0, 0, tipZ]}>
@@ -74,6 +156,29 @@ function TubeShell({ component, total }: { component: RocketComponent; total: nu
       <mesh position={[0, length / 2 + 0.004, 0]}>
         <torusGeometry args={[r * 0.985, 0.012, 10, 64]} />
         <meshStandardMaterial color="#d7b56d" transparent opacity={0.28} roughness={0.35} />
+      </mesh>
+    </group>
+  );
+}
+
+function TransitionShell({ component, total }: { component: RocketComponent; total: number }) {
+  const z = axialCenter(component, total);
+  const foreRadius = Math.max((component.foreDiameter ?? component.diameter) / 2 / UNIT, 0.018);
+  const aftRadius = Math.max((component.aftDiameter ?? component.diameter * 0.8) / 2 / UNIT, 0.018);
+  const length = cylinderLength(component);
+  return (
+    <group position={[0, 0, z]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh>
+        <cylinderGeometry args={[aftRadius, foreRadius, length, 72, 1, true]} />
+        <meshStandardMaterial color="#e7dfd0" transparent opacity={0.84} metalness={0.08} roughness={0.44} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[0, -length / 2, 0]}>
+        <torusGeometry args={[aftRadius, 0.01, 10, 64]} />
+        <meshStandardMaterial color="#d7b56d" transparent opacity={0.32} roughness={0.35} />
+      </mesh>
+      <mesh position={[0, length / 2, 0]}>
+        <torusGeometry args={[foreRadius, 0.01, 10, 64]} />
+        <meshStandardMaterial color="#d7b56d" transparent opacity={0.32} roughness={0.35} />
       </mesh>
     </group>
   );
@@ -106,50 +211,38 @@ function RingPair({ component, total }: { component: RocketComponent; total: num
 
 function FinPlate({ component, total, angle, selected = false }: { component: RocketComponent; total: number; angle: number; selected?: boolean }) {
   const geometry = useMemo(() => {
-    const root = component.finRootChord ?? component.length;
-    const tip = component.finTipChord ?? component.length * 0.48;
-    const span = component.finSpan ?? component.diameter * 1.55;
-    const sweep = component.finSweep ?? component.length * 0.22;
     const thickness = Math.max(component.wallThickness, 2.5) / UNIT;
     const bodyRadius = component.diameter / 2 / UNIT;
+    const planform = getFinPlanformPoints(component);
 
     const radial = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
     const tangent = new THREE.Vector3(-Math.sin(angle), Math.cos(angle), 0);
-    const zRootLead = (component.position - total / 2) / UNIT;
-    const zRootTrail = (component.position + root - total / 2) / UNIT;
-    const zTipLead = (component.position + sweep - total / 2) / UNIT;
-    const zTipTrail = (component.position + sweep + tip - total / 2) / UNIT;
 
-    const makePoint = (r: number, z: number, side: number) =>
-      radial.clone().multiplyScalar(r).add(tangent.clone().multiplyScalar((side * thickness) / 2)).add(new THREE.Vector3(0, 0, z));
+    const makePoint = (point: { x: number; y: number }, side: number) => {
+      const r = bodyRadius + point.y / UNIT;
+      const z = (component.position + point.x - total / 2) / UNIT;
+      return radial.clone().multiplyScalar(r).add(tangent.clone().multiplyScalar((side * thickness) / 2)).add(new THREE.Vector3(0, 0, z));
+    };
 
-    const front = [
-      makePoint(bodyRadius, zRootLead, 1),
-      makePoint(bodyRadius, zRootTrail, 1),
-      makePoint(bodyRadius + span / UNIT, zTipTrail, 1),
-      makePoint(bodyRadius + span / UNIT, zTipLead, 1)
-    ];
-    const back = [
-      makePoint(bodyRadius, zRootLead, -1),
-      makePoint(bodyRadius, zRootTrail, -1),
-      makePoint(bodyRadius + span / UNIT, zTipTrail, -1),
-      makePoint(bodyRadius + span / UNIT, zTipLead, -1)
-    ];
+    const front = planform.map((point) => makePoint(point, 1));
+    const back = planform.map((point) => makePoint(point, -1));
     const vertices = [...front, ...back];
-    const faces = [
-      0, 1, 2, 0, 2, 3,
-      4, 6, 5, 4, 7, 6,
-      0, 4, 5, 0, 5, 1,
-      1, 5, 6, 1, 6, 2,
-      2, 6, 7, 2, 7, 3,
-      3, 7, 4, 3, 4, 0
-    ];
+    const faces: number[] = [];
+    for (let index = 1; index < planform.length - 1; index += 1) {
+      faces.push(0, index, index + 1);
+      faces.push(planform.length, planform.length + index + 1, planform.length + index);
+    }
+    for (let index = 0; index < planform.length; index += 1) {
+      const next = (index + 1) % planform.length;
+      faces.push(index, planform.length + index, planform.length + next);
+      faces.push(index, planform.length + next, next);
+    }
     const geo = new THREE.BufferGeometry();
     geo.setFromPoints(vertices);
     geo.setIndex(faces);
     geo.computeVertexNormals();
     return geo;
-  }, [angle, component.diameter, component.finRootChord, component.finSpan, component.finSweep, component.finTipChord, component.length, component.position, component.wallThickness, total]);
+  }, [angle, component.diameter, component.finFreeformPoints, component.finPlanform, component.finRootChord, component.finSpan, component.finSweep, component.finTipChord, component.length, component.position, component.wallThickness, total]);
 
   return (
     <mesh geometry={geometry}>
@@ -285,6 +378,7 @@ function ComponentMesh({ component, total, selected = false, onSelect }: { compo
     return <NoseCone component={component} total={total} />;
   }
   if (component.type === "fins") return <FinSet component={component} total={total} />;
+  if (component.type === "transition") return <TransitionShell component={component} total={total} />;
   if (component.type === "centering_rings") return <RingPair component={component} total={total} />;
   if (component.type === "motor_nozzle") return <MotorNozzle component={component} total={total} />;
   if (component.type === "coupler" || component.type === "bulkhead") return <InternalBand component={component} total={total} />;
