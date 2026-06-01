@@ -11,6 +11,7 @@ import { FileUploadBox } from "@/components/file-upload-box";
 import { TelemetryChart } from "@/components/charts";
 import { mockProjects } from "@/lib/mock-data";
 import { mockSavedMotors } from "@/lib/motor-library";
+import { isDemoAccount, readMockUser } from "@/lib/auth";
 import { defaultMotorParameters, propellantProfiles, simulateMotor } from "@/lib/motor-simulation";
 import { runRocketEstimateWithMotor } from "@/lib/rocket-simulation";
 import { sortComponents, totalLength } from "@/lib/cad/geometry";
@@ -27,28 +28,57 @@ const safetyWarnings = [
 ];
 
 const flow = ["Design Motor", "Simulate Motor", "Save Motor", "Build Rocket", "Insert Motor", "Simulate Rocket", "Publish / Fork / Sell"];
-const buildPageClass = "h-[100dvh] overflow-y-auto bg-space-radial px-6 pb-32 pt-24";
+const buildPageClass = "min-h-screen bg-space-radial px-6 pb-32 pt-24";
+
+const defaultFreeformFinPoints = [
+  { x: 0, y: 0 },
+  { x: 44, y: 12 },
+  { x: 155, y: 0 },
+  { x: 118, y: 54 },
+  { x: 68, y: 86 },
+  { x: 12, y: 38 }
+];
 
 const finShapePresets = [
   {
     name: "Clipped delta",
     note: "Common sport/high-power baseline",
-    patch: { finRootChord: 165, finTipChord: 72, finSpan: 86, finSweep: 52, finCount: 4, wallThickness: 4 }
+    patch: { finPlanform: "Clipped delta", finRootChord: 165, finTipChord: 72, finSpan: 86, finSweep: 52, finCount: 4, wallThickness: 4 }
   },
   {
     name: "Trapezoidal",
     note: "OpenRocket-style general purpose",
-    patch: { finRootChord: 155, finTipChord: 92, finSpan: 78, finSweep: 28, finCount: 4, wallThickness: 4 }
+    patch: { finPlanform: "Trapezoidal", finRootChord: 155, finTipChord: 92, finSpan: 78, finSweep: 28, finCount: 4, wallThickness: 4 }
   },
   {
     name: "Swept tapered",
     note: "Looks fast, keeps aft CP authority",
-    patch: { finRootChord: 175, finTipChord: 62, finSpan: 82, finSweep: 66, finCount: 4, wallThickness: 4 }
+    patch: { finPlanform: "Swept tapered", finRootChord: 175, finTipChord: 62, finSpan: 82, finSweep: 66, finCount: 4, wallThickness: 4 }
   },
   {
     name: "Elliptical reference",
     note: "Low-drag visual target",
-    patch: { finRootChord: 145, finTipChord: 118, finSpan: 68, finSweep: 18, finCount: 3, wallThickness: 3 }
+    patch: { finPlanform: "Elliptical", finRootChord: 145, finTipChord: 118, finSpan: 68, finSweep: 18, finCount: 3, wallThickness: 3 }
+  },
+  {
+    name: "Forward swept",
+    note: "Visual study with forward leading edge",
+    patch: { finPlanform: "Forward swept", finRootChord: 150, finTipChord: 64, finSpan: 76, finSweep: -28, finCount: 3, wallThickness: 4 }
+  },
+  {
+    name: "Split fin",
+    note: "Two-panel high-power style cue",
+    patch: { finPlanform: "Split fin", finRootChord: 170, finTipChord: 56, finSpan: 88, finSweep: 48, finCount: 4, wallThickness: 4 }
+  },
+  {
+    name: "Tube fin",
+    note: "Ring/tube stabilizer layout",
+    patch: { finPlanform: "Tube fin", finRootChord: 96, finTipChord: 96, finSpan: 62, finSweep: 0, finCount: 6, wallThickness: 3 }
+  },
+  {
+    name: "Freeform vertices",
+    note: "Edit each vertex below",
+    patch: { finPlanform: "Freeform", finRootChord: 170, finTipChord: 68, finSpan: 92, finSweep: 36, finCount: 4, wallThickness: 4, finFreeformPoints: defaultFreeformFinPoints }
   }
 ] satisfies Array<{ name: string; note: string; patch: Partial<RocketComponent> }>;
 
@@ -79,6 +109,74 @@ const grainGeometryModes = [
   ["Rod and tube", "Coaxial reference geometry used for comparison datasets."],
   ["Custom", "Reserved for imported profiles and future sketch-based grain geometry."]
 ] as const;
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getFinPlanformPoints(component: RocketComponent) {
+  const root = component.finRootChord ?? component.length;
+  const tip = component.finTipChord ?? component.length * 0.48;
+  const span = component.finSpan ?? component.diameter;
+  const sweep = component.finSweep ?? component.length * 0.25;
+
+  if (component.finPlanform === "Freeform") {
+    const source = component.finFreeformPoints?.length ? component.finFreeformPoints : defaultFreeformFinPoints;
+    return source.map((point) => ({ x: clamp(point.x, -root * 0.4, root * 1.4), y: clamp(point.y, 0, span * 1.35) }));
+  }
+
+  if (component.finPlanform === "Forward swept") {
+    return [
+      { x: 0, y: 0 },
+      { x: root, y: 0 },
+      { x: root + sweep, y: span },
+      { x: Math.max(0, sweep) + Math.max(26, tip * 0.18), y: span }
+    ];
+  }
+
+  if (component.finPlanform === "Elliptical") {
+    return [
+      { x: 0, y: 0 },
+      { x: root * 0.24, y: span * 0.2 },
+      { x: root * 0.58, y: span * 0.96 },
+      { x: root * 0.9, y: span * 0.84 },
+      { x: root, y: 0 }
+    ];
+  }
+
+  if (component.finPlanform === "Split fin") {
+    return [
+      { x: 0, y: 0 },
+      { x: root * 0.34, y: 0 },
+      { x: root * 0.48, y: span * 0.44 },
+      { x: root * 0.62, y: span * 0.15 },
+      { x: root, y: span * 0.15 },
+      { x: sweep + tip, y: span },
+      { x: sweep, y: span },
+      { x: root * 0.38, y: span * 0.5 }
+    ];
+  }
+
+  if (component.finPlanform === "Tube fin") {
+    return [
+      { x: 0, y: span * 0.18 },
+      { x: root * 0.18, y: 0 },
+      { x: root * 0.82, y: 0 },
+      { x: root, y: span * 0.18 },
+      { x: root, y: span * 0.82 },
+      { x: root * 0.82, y: span },
+      { x: root * 0.18, y: span },
+      { x: 0, y: span * 0.82 }
+    ];
+  }
+
+  return [
+    { x: 0, y: 0 },
+    { x: root, y: 0 },
+    { x: sweep + tip, y: span },
+    { x: sweep, y: span }
+  ];
+}
 
 const rocketComponentPalette = [
   {
@@ -202,7 +300,10 @@ function createRocketComponent(type: RocketComponentType, components: RocketComp
   if (type === "nose_cone") return { ...base, length: 150, position: 0, mass: 38, noseShape: "Ogive", shapeParameter: 1, finish: "Regular paint" };
   if (type === "body_tube") return { ...base, length: 220, position: length, mass: 48, automaticDiameter: true, finish: "Regular paint" };
   if (type === "transition") return { ...base, length: 75, foreDiameter: diameter, aftDiameter: Math.round(diameter * 0.78), mass: 18, finish: "Regular paint" };
-  if (type === "fins") return { ...base, name: label ?? "Trapezoidal fin set", length: 120, position: Math.max(0, length - 160), mass: 42, finRootChord: 120, finTipChord: 70, finSpan: 45, finSweep: 32, finCount: 3, finCantDeg: 0, finRotationDeg: 0, finCrossSection: "Square", finFilletRadius: 0 };
+  if (type === "fins") {
+    const planform: RocketComponent["finPlanform"] = label?.includes("Freeform") ? "Freeform" : label?.includes("Elliptical") ? "Elliptical" : "Trapezoidal";
+    return { ...base, name: label ?? "Trapezoidal fin set", length: 120, position: Math.max(0, length - 160), mass: 42, finPlanform: planform, finFreeformPoints: planform === "Freeform" ? defaultFreeformFinPoints : undefined, finRootChord: 120, finTipChord: 70, finSpan: 45, finSweep: 32, finCount: 3, finCantDeg: 0, finRotationDeg: 0, finCrossSection: "Square", finFilletRadius: 0 };
+  }
   if (type === "motor_mount") return { ...base, name: "Inner tube / motor mount", length: 180, diameter: 29, position: Math.max(0, length - 200), mass: 32 };
   if (type === "rail_buttons") return { ...base, length: 18, diameter: 8, position: Math.max(0, length * 0.42), mass: 8, name: "Rail button pair" };
   if (type === "launch_lug") return { ...base, length: 35, diameter: 6, position: Math.max(0, length * 0.42), mass: 6 };
@@ -308,8 +409,9 @@ export function MotorBuilder() {
       createdAt: new Date().toISOString().slice(0, 10),
       updatedAt: new Date().toISOString().slice(0, 10)
     };
-    const existing = readStoredMotors();
-    localStorage.setItem(MOTOR_STORAGE_KEY, JSON.stringify([motor, ...existing]));
+    const existing = readStoredMotors().filter((item) => !mockSavedMotors.some((mockMotor) => mockMotor.id === item.id));
+    localStorage.setItem(getMotorStorageKey(), JSON.stringify([motor, ...existing]));
+    window.dispatchEvent(new Event("rocketry-motors-change"));
     setModalOpen(false);
   }
 
@@ -361,8 +463,17 @@ export function MotorBuilder() {
 }
 
 export function MotorLibrary({ detailId }: { detailId?: string }) {
-  const [motors, setMotors] = useState<SavedMotor[]>(mockSavedMotors);
-  useEffect(() => setMotors(readStoredMotors()), []);
+  const [motors, setMotors] = useState<SavedMotor[]>([]);
+  useEffect(() => {
+    const sync = () => setMotors(readStoredMotors());
+    sync();
+    window.addEventListener("rocketry-auth-change", sync);
+    window.addEventListener("rocketry-motors-change", sync);
+    return () => {
+      window.removeEventListener("rocketry-auth-change", sync);
+      window.removeEventListener("rocketry-motors-change", sync);
+    };
+  }, []);
   const selected = detailId ? motors.find((motor) => motor.id === detailId) ?? motors[0] : undefined;
 
   return (
@@ -370,9 +481,15 @@ export function MotorLibrary({ detailId }: { detailId?: string }) {
       <div className="mx-auto max-w-7xl">
         <BuilderHeader eyebrow="Account Library" title={selected ? selected.name : "Saved motors"} copy="These are account-owned motors. The top-level product navigation stays project-first; saved motors live under the user account and can be imported into Build > Rocket." />
         {selected ? <MotorDetail motor={selected} /> : (
-          <div className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {motors.map((motor) => <MotorCard key={motor.id} motor={motor} />)}
-          </div>
+          motors.length ? (
+            <div className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+              {motors.map((motor) => <MotorCard key={motor.id} motor={motor} />)}
+            </div>
+          ) : (
+            <Card className="mt-8 p-8 text-center text-orange-50/65">
+              No motors saved for this account yet. Build and save a motor first, then import it into the rocket builder.
+            </Card>
+          )
         )}
       </div>
     </main>
@@ -382,9 +499,10 @@ export function MotorLibrary({ detailId }: { detailId?: string }) {
 export function RocketBuilder() {
   const project = mockProjects.find((item) => item.slug === "bps-scout-f-reference") ?? mockProjects[0];
   const [components, setComponents] = useState<RocketComponent[]>(project.components);
-  const [motors, setMotors] = useState<SavedMotor[]>(mockSavedMotors);
-  const [selectedMotorId, setSelectedMotorId] = useState<string>(mockSavedMotors[0]?.id ?? "");
-  const [result, setResult] = useState<SimulationResult>(() => runRocketEstimateWithMotor(project.components, mockSavedMotors[0]));
+  const [motors, setMotors] = useState<SavedMotor[]>([]);
+  const [selectedMotorId, setSelectedMotorId] = useState<string>("");
+  const [windSpeedMps, setWindSpeedMps] = useState(1.7);
+  const [result, setResult] = useState<SimulationResult>(() => runRocketEstimateWithMotor(project.components, undefined, { windSpeedMps: 1.7 }));
   const [launchRun, setLaunchRun] = useState(0);
   const [selectedComponentId, setSelectedComponentId] = useState(project.components[0]?.id ?? "");
   const [designView, setDesignView] = useState<"Side view" | "3D Figure">("Side view");
@@ -393,13 +511,26 @@ export function RocketBuilder() {
   const selectedComponent = components.find((component) => component.id === selectedComponentId) ?? components[0];
 
   useEffect(() => {
-    const storedMotors = readStoredMotors();
-    setMotors(storedMotors);
-    setSelectedMotorId((current) => storedMotors.some((motor) => motor.id === current) ? current : storedMotors[0]?.id || "");
+    const sync = () => {
+      const storedMotors = readStoredMotors();
+      setMotors(storedMotors);
+      setSelectedMotorId((current) => storedMotors.some((motor) => motor.id === current) ? current : storedMotors[0]?.id || "");
+    };
+    sync();
+    window.addEventListener("rocketry-auth-change", sync);
+    window.addEventListener("rocketry-motors-change", sync);
+    return () => {
+      window.removeEventListener("rocketry-auth-change", sync);
+      window.removeEventListener("rocketry-motors-change", sync);
+    };
   }, []);
 
+  useEffect(() => {
+    setResult(runRocketEstimateWithMotor(components, selectedMotor, { windSpeedMps }));
+  }, [components, selectedMotor, windSpeedMps]);
+
   function simulateRocket() {
-    setResult(runRocketEstimateWithMotor(components, selectedMotor));
+    setResult(runRocketEstimateWithMotor(components, selectedMotor, { windSpeedMps }));
     setLaunchRun((run) => run + 1);
   }
 
@@ -481,7 +612,7 @@ export function RocketBuilder() {
               setDesignView={setDesignView}
               selectedMotor={selectedMotor}
             />
-            <RocketLaunchScene runId={launchRun} result={result} hasMotor={Boolean(selectedMotor)} components={componentsWithMotor} onRun={simulateRocket} />
+            <RocketLaunchScene runId={launchRun} result={result} hasMotor={Boolean(selectedMotor)} components={componentsWithMotor} windSpeedMps={windSpeedMps} setWindSpeedMps={setWindSpeedMps} onRun={simulateRocket} />
             <RocketCADWorkspace components={components} updateComponent={updateComponent} addPayloadBay={addPayloadBay} selectedComponentId={selectedComponentId} />
             <RocketGraphSet result={result} />
             <EngineeringReferencePanel title="Rocket flight model" equations={flightEquations} outputs={flightGraphOutputs} />
@@ -495,6 +626,7 @@ export function RocketBuilder() {
                 <Metric label="CP" value={`${result.cpMm} mm`} />
                 <Metric label="Stability" value={`${result.stabilityMargin} calibers`} />
                 <Metric label="Apogee" value={`${result.predictedAltitudeM} m`} />
+                <Metric label="Wind drift" value={`${result.maxDriftM ?? 0} m @ ${windSpeedMps.toFixed(1)} m/s`} />
               </div>
               <div className="mt-4 space-y-2">
                 {result.warnings.map((warning) => <p key={warning.message} className={`rounded-md p-2 text-xs ${warning.level === "critical" ? "bg-red-500/12 text-red-100" : "bg-white/[0.04] text-orange-50/65"}`}>{warning.message}</p>)}
@@ -667,10 +799,7 @@ function RocketSideProfile({ components, result, selectedId, select }: { compone
     result.cpMm,
     ...sorted.map((component) => {
       if (component.type === "fins") {
-        const root = component.finRootChord ?? component.length;
-        const tip = component.finTipChord ?? component.length * 0.5;
-        const sweep = component.finSweep ?? 0;
-        return component.position + Math.max(root, sweep + tip);
+        return component.position + Math.max(...getFinPlanformPoints(component).map((point) => point.x), component.length);
       }
 
       return component.position + component.length;
@@ -725,15 +854,13 @@ function RocketSideProfile({ components, result, selectedId, select }: { compone
             return <path key={component.id} onClick={() => select(component.id)} d={`M${x} ${yMid} C${x + w * 0.36} ${yMid - h * 0.5} ${x + w * 0.78} ${yMid - h * 0.5} ${x + w} ${yMid - h / 2} V${yMid + h / 2} C${x + w * 0.78} ${yMid + h * 0.5} ${x + w * 0.36} ${yMid + h * 0.5} ${x} ${yMid} Z`} fill="none" stroke={stroke} strokeWidth={isSelected ? 2.4 : 1.5} />;
           }
           if (component.type === "fins") {
-            const root = (component.finRootChord ?? component.length) * scaleX;
-            const tip = (component.finTipChord ?? component.length * 0.5) * scaleX;
-            const span = (component.finSpan ?? component.diameter) * scaleY;
-            const sweep = (component.finSweep ?? 0) * scaleX;
+            const points = getFinPlanformPoints(component);
             return (
               <g key={component.id} onClick={() => select(component.id)}>
-                {[1, -1].map((side) => (
-                  <path key={side} d={`M${x} ${yMid + side * h / 2} L${x + root} ${yMid + side * h / 2} L${x + sweep + tip} ${yMid + side * (h / 2 + span)} L${x + sweep} ${yMid + side * (h / 2 + span)} Z`} fill="rgba(59,130,246,0.08)" stroke={stroke} strokeWidth={isSelected ? 2.4 : 1.5} />
-                ))}
+                {[1, -1].map((side) => {
+                  const path = points.map((point, index) => `${index === 0 ? "M" : "L"}${x + point.x * scaleX} ${yMid + side * (h / 2 + point.y * scaleY)}`).join(" ");
+                  return <path key={side} d={`${path} Z`} fill="rgba(59,130,246,0.08)" stroke={stroke} strokeWidth={isSelected ? 2.4 : 1.5} />;
+                })}
               </g>
             );
           }
@@ -778,7 +905,7 @@ function ComponentConfigurationPanel({ component, updateComponent }: { component
   );
 }
 
-function RocketLaunchScene({ runId, result, hasMotor, components, onRun }: { runId: number; result: SimulationResult; hasMotor: boolean; components: RocketComponent[]; onRun: () => void }) {
+function RocketLaunchScene({ runId, result, hasMotor, components, windSpeedMps, setWindSpeedMps, onRun }: { runId: number; result: SimulationResult; hasMotor: boolean; components: RocketComponent[]; windSpeedMps: number; setWindSpeedMps: (value: number) => void; onRun: () => void }) {
   const [phase, setPhase] = useState<"idle" | "countdown" | "ignition" | "rail" | "ascent" | "coast" | "parachute" | "complete">("idle");
   const [clock, setClock] = useState(0);
 
@@ -828,14 +955,21 @@ function RocketLaunchScene({ runId, result, hasMotor, components, onRun }: { run
   const descentPx = parachuteProgress * 92;
   const railProgress = phase === "ignition" ? 0 : phase === "rail" ? Math.min(1, (clock - 2.45) / 0.75) : phase === "ascent" || phase === "coast" || phase === "parachute" || phase === "complete" ? 1 : 0;
   const liftPx = isActive ? 24 + railProgress * 170 + normalizedAltitude * 820 - descentPx : 0;
-  const driftPx = isActive ? normalizedAltitude * 18 : 0;
+  const windDriftM = sample.lateralDrift ?? 0;
+  const driftPx = isActive ? clamp(windDriftM * 18, -620, 620) : 0;
+  const flightPathAngle = isActive ? clamp(sample.angleDeg ?? 0, -84, 84) : 0;
   const cameraLift = isActive ? Math.min(620, normalizedAltitude * 820) : 0;
   const farCloudDrop = isActive ? normalizedAltitude * 260 : 0;
   const groundDrop = isActive ? normalizedAltitude * 460 : 0;
   const countdown = Math.max(0, 2 - clock);
   const isThrusting = (phase === "ignition" || phase === "rail" || phase === "ascent") && (sample.thrust ?? 0) > 0;
   const plumeScale = isThrusting ? Math.min(1.9, Math.max(0.25, (sample.thrust ?? 0) / Math.max(result.averageThrustN, 1))) : 0;
-  const rocketSvgTransform = `translate(${driftPx.toFixed(1)} ${(-liftPx).toFixed(1)})`;
+  const rocketSvgTransform = `translate(${driftPx.toFixed(1)} ${(-liftPx).toFixed(1)}) rotate(${flightPathAngle.toFixed(1)})`;
+  const trajectoryPath = `M772 ${(690 + cameraLift).toFixed(1)} C${(772 + driftPx * 0.18).toFixed(1)} ${(610 + cameraLift - liftPx * 0.25).toFixed(1)} ${(772 + driftPx * 0.62).toFixed(1)} ${(560 + cameraLift - liftPx * 0.65).toFixed(1)} ${(772 + driftPx).toFixed(1)} ${(534 + cameraLift - liftPx).toFixed(1)}`;
+  const windOptions = Array.from({ length: 16 }, (_, index) => index);
+  const selectedWindOption = Number.isInteger(windSpeedMps) && windSpeedMps >= 0 && windSpeedMps <= 15 ? String(windSpeedMps) : "custom";
+  const stabilityWindNote = result.tumbleTimeS ? `Tumble predicted near T+${result.tumbleTimeS}s` : windSpeedMps > 0 && result.stabilityMargin < 1.5 ? "Low margin: wind can bend the trajectory" : windSpeedMps > 0 ? "Nose follows computed flight-path angle" : "Calm wind setting";
+  const windArrowLength = clamp(60 + windSpeedMps * 15, 60, 290);
   const status =
     phase === "countdown" ? "Ignition armed" :
     phase === "ignition" ? "Ignition and smoke rise" :
@@ -915,6 +1049,11 @@ function RocketLaunchScene({ runId, result, hasMotor, components, onRun }: { run
           </g>
 
           <rect width="1600" height="900" fill="#020617" opacity={skyDarkness.toFixed(2)} />
+          <g transform="translate(116 160)" opacity={windSpeedMps > 0 ? 0.86 : 0.32}>
+            <line x1="0" x2={windArrowLength} y1="0" y2="0" stroke="#ffffff" strokeWidth="5" strokeLinecap="round" strokeDasharray="14 12" />
+            <path d={`M${windArrowLength} 0 L${windArrowLength - 22} -13 L${windArrowLength - 22} 13 Z`} fill="#ffffff" />
+            <text x="0" y="-22" fill="#ffffff" fontSize="22" fontWeight="700">Wind {windSpeedMps.toFixed(1)} m/s</text>
+          </g>
           <g opacity={starOpacity.toFixed(2)} fill="#ffffff">
             {Array.from({ length: 44 }, (_, index) => {
               const cx = (index * 137) % 1580 + 10;
@@ -943,6 +1082,7 @@ function RocketLaunchScene({ runId, result, hasMotor, components, onRun }: { run
             <text x="1456" y="112" fill="#ffffff" fontSize="20" fontWeight="700" opacity="0.82">Altitude</text>
           </g>
 
+          {isActive ? <path d={trajectoryPath} fill="none" stroke="#fef3c7" strokeWidth="4" strokeDasharray="14 13" strokeLinecap="round" opacity="0.72" /> : null}
           <g transform={`translate(772 ${(534 + cameraLift).toFixed(1)}) ${rocketSvgTransform}`} filter="url(#launchShadow)">
             <g transform="translate(0 -122)">
               <CadRocketLaunchSvg components={components} height={238} />
@@ -992,10 +1132,41 @@ function RocketLaunchScene({ runId, result, hasMotor, components, onRun }: { run
               <Play className="h-4 w-4" />{phase === "idle" ? "Run" : "Rerun"}
             </Button>
           </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-[120px_1fr]">
+            <label className="text-white/72">
+              Wind preset
+              <select
+                value={selectedWindOption}
+                onChange={(event) => {
+                  if (event.target.value !== "custom") setWindSpeedMps(Number(event.target.value));
+                }}
+                className="mt-1 w-full rounded-md border border-white/18 bg-black/45 px-2 py-1 text-white"
+              >
+                {windOptions.map((option) => <option key={option} value={option}>{option} m/s</option>)}
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <label className="text-white/72">
+              Wind speed
+              <input
+                type="number"
+                min="0"
+                max="40"
+                step="0.1"
+                value={Number(windSpeedMps.toFixed(1))}
+                onChange={(event) => setWindSpeedMps(clamp(Number(event.target.value) || 0, 0, 40))}
+                className="mt-1 w-full rounded-md border border-white/18 bg-black/45 px-2 py-1 text-white"
+              />
+            </label>
+            <p className="sm:col-span-2 rounded bg-white/10 px-2 py-1 text-white/78">{stabilityWindNote}</p>
+          </div>
           <div className="mt-3 grid grid-cols-3 gap-2">
             <span className="rounded bg-white/12 px-2 py-1">T+ {phase === "countdown" ? "0.0" : flightTime.toFixed(1)}s</span>
             <span className="rounded bg-white/12 px-2 py-1">{Math.round(sample.altitude ?? 0)} m</span>
             <span className="rounded bg-white/12 px-2 py-1">{Math.round(sample.velocity ?? 0)} m/s</span>
+            <span className="rounded bg-white/12 px-2 py-1">{Math.round(Math.abs(windDriftM))} m drift</span>
+            <span className="rounded bg-white/12 px-2 py-1">{Math.round(flightPathAngle)} deg path</span>
+            <span className="rounded bg-white/12 px-2 py-1">{windSpeedMps.toFixed(1)} m/s wind</span>
           </div>
         </div>
         <div className="absolute bottom-4 left-4 right-4 rounded-md border border-white/25 bg-black/35 p-3 text-xs text-white shadow-lg backdrop-blur">
@@ -1059,16 +1230,20 @@ function CadRocketLaunchSvg({ components, height }: { components: RocketComponen
         <g>
           {[-1, 1].map((side) => {
             const yRoot = yFor(fins.position);
-            const root = (fins.finRootChord ?? fins.length) * scaleY;
-            const tip = (fins.finTipChord ?? fins.length * 0.48) * scaleY;
-            const span = Math.max(14, Math.min(42, ((fins.finSpan ?? fins.diameter) / maxDiameter) * bodyWidth * 0.8));
-            const sweep = (fins.finSweep ?? fins.length * 0.22) * scaleY;
+            const planform = getFinPlanformPoints(fins);
+            const maxSpan = Math.max(...planform.map((point) => point.y), 1);
+            const span = Math.max(14, Math.min(46, ((fins.finSpan ?? fins.diameter) / maxDiameter) * bodyWidth * 0.86));
             const attachX = side * bodyWidth * 0.43;
-            const outerX = side * (bodyWidth * 0.43 + span);
+            const path = planform.map((point, index) => {
+              const axialY = yRoot + point.x * scaleY;
+              const radialX = side * (bodyWidth * 0.43 + (point.y / maxSpan) * span);
+              const x = Math.abs(point.y) < 0.01 ? attachX : radialX;
+              return `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${axialY.toFixed(1)}`;
+            }).join(" ");
             return (
               <path
                 key={side}
-                d={`M${attachX} ${yRoot} L${attachX} ${yRoot + root} L${outerX} ${yRoot + sweep + tip} L${outerX} ${yRoot + sweep} Z`}
+                d={`${path} Z`}
                 fill="#ef4444"
                 stroke="#7f1d1d"
                 strokeWidth="1.2"
@@ -1280,37 +1455,41 @@ function ConfigSelect({ label, value, options, onChange }: { label: string; valu
 
 function FinShapeDesigner({ component, updateComponent }: { component: RocketComponent; updateComponent: (id: string, patch: Partial<RocketComponent>) => void }) {
   const root = component.finRootChord ?? component.length;
-  const tip = component.finTipChord ?? component.length * 0.48;
   const span = component.finSpan ?? component.diameter;
-  const sweep = component.finSweep ?? component.length * 0.25;
-  const width = 210;
-  const height = 120;
-  const scaleX = width / Math.max(root, sweep + tip, 1);
-  const scaleY = height / Math.max(span, 1);
-  const points = [
-    [12, height - 12],
-    [12 + root * scaleX, height - 12],
-    [12 + (sweep + tip) * scaleX, height - 12 - span * scaleY],
-    [12 + sweep * scaleX, height - 12 - span * scaleY]
-  ];
+  const width = 260;
+  const height = 150;
+  const rawPoints = getFinPlanformPoints(component);
+  const maxX = Math.max(...rawPoints.map((point) => point.x), root, 1);
+  const minX = Math.min(...rawPoints.map((point) => point.x), 0);
+  const maxY = Math.max(...rawPoints.map((point) => point.y), span, 1);
+  const scaleX = width / Math.max(maxX - minX, 1);
+  const scaleY = height / Math.max(maxY, 1);
+  const points = rawPoints.map((point) => [16 + (point.x - minX) * scaleX, height + 10 - point.y * scaleY]);
   const polygon = points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const editablePoints = component.finFreeformPoints?.length ? component.finFreeformPoints : defaultFreeformFinPoints;
+
+  function updateFreeformPoint(index: number, axis: "x" | "y", value: number) {
+    const next = editablePoints.map((point, pointIndex) => pointIndex === index ? { ...point, [axis]: Math.round(value) } : point);
+    updateComponent(component.id, { finPlanform: "Freeform", finFreeformPoints: next });
+  }
 
   return (
     <div className="mt-4 rounded-lg border border-cyan-200/15 bg-cyan-200/[0.04] p-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-cyan-100">Fin shape first</p>
-          <p className="mt-1 text-xs text-orange-50/55">Choose a familiar planform, then refine root chord, tip chord, span, sweep, count, and thickness.</p>
+          <p className="mt-1 text-xs text-orange-50/55">Choose a familiar planform, or use Freeform vertices to sketch a custom fin outline before refining dimensions.</p>
         </div>
         <span className="rounded-md bg-black/25 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-orange-50/45">planform preview</span>
       </div>
       <div className="mt-3 grid gap-3 lg:grid-cols-[230px_1fr]">
-        <svg viewBox="0 0 230 140" className="h-36 w-full rounded-md border border-white/10 bg-[#070a12]">
-          <line x1="12" x2="218" y1={height - 12} y2={height - 12} stroke="#f4d399" strokeOpacity="0.38" />
+        <svg viewBox="0 0 292 178" className="h-44 w-full rounded-md border border-white/10 bg-[#070a12]">
+          <line x1="16" x2="276" y1={height + 10} y2={height + 10} stroke="#f4d399" strokeOpacity="0.38" />
           <polygon points={polygon} fill="#5fb8ff" fillOpacity="0.72" stroke="#bae6fd" strokeWidth="2" />
-          <text x="12" y="134" fill="#f4d399" fontSize="10">root</text>
-          <text x="132" y="28" fill="#bae6fd" fontSize="10">tip</text>
-          <text x="174" y="74" fill="#bae6fd" fontSize="10">span</text>
+          {component.finPlanform === "Freeform" ? points.map(([x, y], index) => <circle key={index} cx={x} cy={y} r="4" fill="#fed7aa" stroke="#020617" strokeWidth="1.5" />) : null}
+          <text x="16" y="172" fill="#f4d399" fontSize="10">root/chord axis</text>
+          <text x="206" y="40" fill="#bae6fd" fontSize="10">span</text>
+          <text x="18" y="18" fill="#bae6fd" fontSize="10">{component.finPlanform ?? "Trapezoidal"}</text>
         </svg>
         <div className="grid gap-2 sm:grid-cols-2">
           {finShapePresets.map((preset) => (
@@ -1321,6 +1500,31 @@ function FinShapeDesigner({ component, updateComponent }: { component: RocketCom
           ))}
         </div>
       </div>
+      {component.finPlanform === "Freeform" ? (
+        <div className="mt-3 rounded-md border border-white/10 bg-black/20 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-cyan-100">Freeform vertices</p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => updateComponent(component.id, { finFreeformPoints: [...editablePoints, { x: root * 0.5, y: span * 0.5 }] })} className="rounded border border-white/10 px-2 py-1 text-[11px] text-orange-50/70">Add point</button>
+              <button type="button" onClick={() => updateComponent(component.id, { finFreeformPoints: defaultFreeformFinPoints })} className="rounded border border-white/10 px-2 py-1 text-[11px] text-orange-50/70">Reset</button>
+            </div>
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {editablePoints.map((point, index) => (
+              <div key={index} className="rounded-md border border-white/10 bg-white/[0.03] p-2">
+                <div className="mb-2 flex items-center justify-between text-[11px] text-orange-50/45">
+                  <span>Point {index + 1}</span>
+                  {editablePoints.length > 4 ? <button type="button" onClick={() => updateComponent(component.id, { finFreeformPoints: editablePoints.filter((_, pointIndex) => pointIndex !== index) })}>Remove</button> : null}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-[11px] text-orange-50/55">x mm<input type="number" value={Math.round(point.x)} onChange={(event) => updateFreeformPoint(index, "x", Number(event.target.value) || 0)} className="mt-1 w-full rounded bg-[#0f1420] px-2 py-1 text-orange-50" /></label>
+                  <label className="text-[11px] text-orange-50/55">span mm<input type="number" min="0" value={Math.round(point.y)} onChange={(event) => updateFreeformPoint(index, "y", Number(event.target.value) || 0)} className="mt-1 w-full rounded bg-[#0f1420] px-2 py-1 text-orange-50" /></label>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2007,17 +2211,26 @@ function mergeMeasured(curve: MotorSimulationResult["curve"], measuredCurve?: Mo
   return curve.map((point, index) => ({ ...point, measuredThrust: measuredCurve?.[index]?.thrust }));
 }
 
+function getMotorStorageKey() {
+  if (typeof window === "undefined") return MOTOR_STORAGE_KEY;
+  const user = readMockUser();
+  return user?.id ? `${MOTOR_STORAGE_KEY}:${user.id}` : MOTOR_STORAGE_KEY;
+}
+
 function readStoredMotors() {
-  if (typeof window === "undefined") return mockSavedMotors;
+  if (typeof window === "undefined") return [];
   try {
-    const parsed = JSON.parse(localStorage.getItem(MOTOR_STORAGE_KEY) ?? "[]") as SavedMotor[];
-    const merged = [
-      ...parsed,
-      ...mockSavedMotors.filter((mockMotor) => !parsed.some((savedMotor) => savedMotor.id === mockMotor.id))
-    ];
-    return merged.length ? merged : mockSavedMotors;
+    const user = readMockUser();
+    const parsed = JSON.parse(localStorage.getItem(getMotorStorageKey()) ?? "[]") as SavedMotor[];
+    if (isDemoAccount(user)) {
+      return [
+        ...parsed,
+        ...mockSavedMotors.filter((mockMotor) => !parsed.some((savedMotor) => savedMotor.id === mockMotor.id))
+      ];
+    }
+    return parsed;
   } catch {
-    return mockSavedMotors;
+    return [];
   }
 }
 
