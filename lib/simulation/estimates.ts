@@ -13,6 +13,41 @@ export type SimulationInput = {
 
 const GRAVITY = 9.80665;
 
+function finPlanformArea(component: RocketComponent) {
+  const root = component.finRootChord ?? component.length;
+  const tip = component.finTipChord ?? component.length * 0.48;
+  const span = component.finSpan ?? component.diameter;
+  const sweep = component.finSweep ?? component.length * 0.25;
+  const points = component.finPlanform === "Freeform" && component.finFreeformPoints?.length
+    ? component.finFreeformPoints
+    : [
+        { x: 0, y: 0 },
+        { x: root, y: 0 },
+        { x: sweep + tip, y: span },
+        { x: sweep, y: span }
+      ];
+  const area = Math.abs(points.reduce((sum, point, index) => {
+    const next = points[(index + 1) % points.length];
+    return sum + point.x * next.y - next.x * point.y;
+  }, 0)) / 2;
+  return Math.max(area, root * span * 0.25);
+}
+
+function finPlanformCentroidX(component: RocketComponent) {
+  const root = component.finRootChord ?? component.length;
+  const tip = component.finTipChord ?? component.length * 0.48;
+  const sweep = component.finSweep ?? component.length * 0.25;
+  const points = component.finPlanform === "Freeform" && component.finFreeformPoints?.length
+    ? component.finFreeformPoints
+    : [
+        { x: 0, y: 0 },
+        { x: root, y: 0 },
+        { x: sweep + tip, y: component.finSpan ?? component.diameter },
+        { x: sweep, y: component.finSpan ?? component.diameter }
+      ];
+  return points.reduce((sum, point) => sum + point.x, 0) / Math.max(points.length, 1);
+}
+
 export function estimateMass(components: RocketComponent[]) {
   return Math.round(components.reduce((sum, component) => sum + component.mass, 0));
 }
@@ -27,6 +62,40 @@ export function estimateCg(components: RocketComponent[]) {
 
 export function estimateCp(components: RocketComponent[]) {
   const length = totalLength(components);
+  const diameter = Math.max(...components.map((component) => component.diameter), 1);
+  let normalForce = 0;
+  let moment = 0;
+
+  for (const component of components) {
+    if (component.type === "nose_cone") {
+      const cn = 2;
+      const cp = component.position + component.length * 0.466;
+      normalForce += cn;
+      moment += cn * cp;
+    }
+
+    if (component.type === "transition") {
+      const fore = component.foreDiameter ?? component.diameter;
+      const aft = component.aftDiameter ?? component.diameter;
+      const cn = Math.max(0.08, Math.abs(aft ** 2 - fore ** 2) / Math.max(diameter ** 2, 1));
+      const cp = component.position + component.length * 0.55;
+      normalForce += cn;
+      moment += cn * cp;
+    }
+
+    if (component.type === "fins") {
+      const area = finPlanformArea(component);
+      const count = component.finCount ?? 3;
+      const span = component.finSpan ?? component.diameter;
+      const cp = component.position + finPlanformCentroidX(component);
+      const cn = Math.max(0.4, count * (area / Math.max(diameter ** 2, 1)) * (span / Math.max(diameter, 1)) * 0.38);
+      normalForce += cn;
+      moment += cn * cp;
+    }
+  }
+
+  if (normalForce > 0) return Math.round(moment / normalForce);
+
   const finComponent = components.find((component) => component.type === "fins");
   const finInfluence = finComponent ? finComponent.position + finComponent.length * 0.35 : length * 0.67;
   return Math.round(length * 0.48 + finInfluence * 0.52);
