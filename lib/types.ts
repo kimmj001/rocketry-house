@@ -43,6 +43,8 @@ export type RocketComponent = {
   finSpan?: number;
   finSweep?: number;
   finCount?: number;
+  finPlanform?: "Clipped delta" | "Trapezoidal" | "Swept tapered" | "Elliptical" | "Freeform" | "Forward swept" | "Split fin" | "Tube fin";
+  finFreeformPoints?: Array<{ x: number; y: number }>;
   noseShape?: "Ogive" | "Conical" | "Elliptical" | "Haack" | "Parabolic";
   shapeParameter?: number;
   foreDiameter?: number;
@@ -60,6 +62,8 @@ export type RocketComponent = {
 export type TelemetryPoint = {
   time: number;
   altitude?: number;
+  lateralDrift?: number;
+  angleDeg?: number;
   velocity?: number;
   acceleration?: number;
   thrust?: number;
@@ -140,6 +144,10 @@ export type SimulationResult = {
   flightTimeS: number;
   railExitVelocityMps: number;
   dragCoefficientEstimate: number;
+  windSpeedMps?: number;
+  maxDriftM?: number;
+  tumbleTimeS?: number;
+  weathercockAngleDeg?: number;
   timeSeries: TelemetryPoint[];
   warnings: SimulationWarning[];
 };
