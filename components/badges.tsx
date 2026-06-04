@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 export function VerificationBadge({ status }: { status: VerificationStatus }) {
   const strong = status === "Flight verified" || status === "Telemetry attached" || status === "Static fire data";
   return (
-    <span className={cn("inline-flex rounded-full px-2.5 py-1 text-xs font-medium", strong ? "bg-cyan-300/15 text-cyan-100" : "bg-orange-300/15 text-orange-100")}>
+    <span className={cn("inline-flex rounded-full px-2.5 py-1 text-xs font-medium", strong ? "bg-cyan-100 text-cyan-800" : "bg-orange-100 text-orange-800")}>
       {status}
     </span>
   );
@@ -20,5 +20,5 @@ export function StabilityBadge({ margin }: { margin: number }) {
 }
 
 export function PriceTag({ cents }: { cents: number }) {
-  return <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold">{cents === 0 ? "Free" : `$${(cents / 100).toFixed(0)}`}</span>;
+  return <span className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white">{cents === 0 ? "Free" : `$${(cents / 100).toFixed(0)}`}</span>;
 }

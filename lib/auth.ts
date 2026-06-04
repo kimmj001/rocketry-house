@@ -5,6 +5,7 @@ export type AuthUser = {
   accountType: "personal" | "team" | "organization";
   organizationName?: string;
   organizationApprovalStatus?: "none" | "requested" | "approved";
+  avatarUrl?: string;
   createdAt?: string;
   isDemo?: boolean;
 };
@@ -16,6 +17,7 @@ export const demoUser: AuthUser = {
   name: "Mira Park",
   email: "mira@rocketry.house",
   accountType: "personal",
+  avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=160&q=80",
   createdAt: "2026-05-01T00:00:00.000Z",
   isDemo: true
 };

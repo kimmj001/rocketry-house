@@ -9,8 +9,11 @@ import {
   CommunityPost,
   communityComments,
   communityPosts,
-  currentCommunityUser
+  currentCommunityUser,
+  getCommunityAuthorFromAuth
 } from "@/lib/community-data";
+import { readMockUser } from "@/lib/auth";
+import { loadPersistentRecords, loadPersistentSet, savePersistentRecord, savePersistentSet } from "@/lib/cloud-persistence";
 
 const LOCAL_POSTS_KEY = "rocketry-house-community-posts";
 const LIKED_POSTS_KEY = "rocketry-house-community-liked-posts";
@@ -49,6 +52,7 @@ function readStoredSet(key: string) {
 
 function storeSet(key: string, value: Set<string>) {
   setStoredItem(key, JSON.stringify(Array.from(value)));
+  void savePersistentSet("community_state", key, value);
 }
 
 function readStoredComments(slug: string) {
@@ -62,6 +66,7 @@ function readStoredComments(slug: string) {
 
 function storeComments(slug: string, comments: CommunityComment[]) {
   setStoredItem(`${COMMENT_KEY_PREFIX}${slug}`, JSON.stringify(comments));
+  void savePersistentRecord("community_comments", slug, comments);
 }
 
 export function CommunityPostDetail({ slug, initialPost, related }: { slug: string; initialPost?: CommunityPost; related: CommunityPost[] }) {
@@ -72,6 +77,7 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
   const [reported, setReported] = useState(false);
   const [copied, setCopied] = useState(false);
   const [reply, setReply] = useState("");
+  const [author, setAuthor] = useState(currentCommunityUser);
   const [sortMode, setSortMode] = useState<"Most helpful" | "Newest">("Most helpful");
 
   useEffect(() => {
@@ -83,6 +89,21 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
     setLiked(readStoredSet(LIKED_POSTS_KEY).has(slug));
     setBookmarked(readStoredSet(BOOKMARKED_POSTS_KEY).has(slug));
     setReported(readStoredSet(REPORTED_POSTS_KEY).has(slug));
+    void loadPersistentRecords<CommunityPost>("community_posts").then((records) => {
+      const cloudPost = records.find((record) => record.record_key === slug)?.payload;
+      if (cloudPost) setPost(cloudPost);
+    });
+    void loadPersistentRecords<CommunityComment[]>("community_comments").then((records) => {
+      const cloudComments = records.find((record) => record.record_key === slug)?.payload;
+      if (cloudComments?.length) setComments(cloudComments);
+    });
+    void loadPersistentSet("community_state", LIKED_POSTS_KEY).then((value) => setLiked(value.has(slug)));
+    void loadPersistentSet("community_state", BOOKMARKED_POSTS_KEY).then((value) => setBookmarked(value.has(slug)));
+    void loadPersistentSet("community_state", REPORTED_POSTS_KEY).then((value) => setReported(value.has(slug)));
+    const syncAuthor = () => setAuthor(getCommunityAuthorFromAuth(readMockUser()));
+    syncAuthor();
+    window.addEventListener("rocketry-auth-change", syncAuthor);
+    return () => window.removeEventListener("rocketry-auth-change", syncAuthor);
   }, [initialPost, slug]);
 
   const sortedComments = useMemo(() => {
@@ -102,7 +123,7 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
     if (!body) return;
     const comment: CommunityComment = {
       id: `local-comment-${Date.now()}`,
-      author: currentCommunityUser,
+      author,
       body,
       time: "just now",
       likes: 0
@@ -204,7 +225,7 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
             <div className="mt-5 space-y-6">
               {sortedComments.map((comment) => (
                 <div key={comment.id} className="flex gap-4 border-b border-slate-100 pb-6 last:border-b-0">
-                  <Avatar name={comment.author.name} />
+                  <Avatar name={comment.author.name} avatarUrl={comment.author.avatarUrl} />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-semibold">{comment.author.name}</p>
@@ -223,13 +244,13 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
 
             <div className="sticky bottom-0 mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-lg">
               <div className="flex gap-3">
-                <Avatar name={currentCommunityUser.name} />
+                <Avatar name={author.name} avatarUrl={author.avatarUrl} />
                 <div className="flex-1">
                   <textarea
                     value={reply}
                     onChange={(event) => setReply(event.target.value)}
                     className="min-h-24 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none placeholder:text-slate-400 focus:border-orange-300"
-                    placeholder={`Write as ${currentCommunityUser.name}`}
+                    placeholder={`Write as ${author.name}`}
                   />
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                     <p className="text-sm text-slate-500">Real-name reply. Keep it technical, lawful, and evidence-oriented.</p>
@@ -272,7 +293,7 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
 function AuthorBlock({ post }: { post: CommunityPost }) {
   return (
     <div className="mt-5 flex items-center gap-3">
-      <Avatar name={post.author.name} />
+      <Avatar name={post.author.name} avatarUrl={post.author.avatarUrl} />
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-semibold">{post.author.name}</p>
@@ -285,11 +306,15 @@ function AuthorBlock({ post }: { post: CommunityPost }) {
   );
 }
 
-function Avatar({ name }: { name: string }) {
+function Avatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
   return (
-    <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-cyan-200 to-violet-300 font-bold text-slate-900">
-      {name.trim()[0] ?? "R"}
-    </div>
+    avatarUrl ? (
+      <img src={avatarUrl} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover ring-1 ring-slate-200" />
+    ) : (
+      <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-cyan-200 to-violet-300 font-bold text-slate-900">
+        {name.trim()[0] ?? "R"}
+      </div>
+    )
   );
 }
 

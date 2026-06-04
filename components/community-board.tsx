@@ -26,8 +26,11 @@ import {
   CommunityPost,
   communityPosts,
   communityTopics,
-  currentCommunityUser
+  currentCommunityUser,
+  getCommunityAuthorFromAuth
 } from "@/lib/community-data";
+import { readMockUser } from "@/lib/auth";
+import { loadPersistentRecords, loadPersistentSet, savePersistentRecord, savePersistentSet } from "@/lib/cloud-persistence";
 
 const LOCAL_POSTS_KEY = "rocketry-house-community-posts";
 const LIKED_POSTS_KEY = "rocketry-house-community-liked-posts";
@@ -67,6 +70,7 @@ function readStoredSet(key: string) {
 
 function storeSet(key: string, value: Set<string>) {
   setStoredItem(key, JSON.stringify(Array.from(value)));
+  void savePersistentSet("community_state", key, value);
 }
 
 function slugify(value: string) {
@@ -87,6 +91,8 @@ export function CommunityBoard() {
   const [liked, setLiked] = useState<Set<string>>(new Set());
   const [bookmarked, setBookmarked] = useState<Set<string>>(new Set());
   const [reported, setReported] = useState<Set<string>>(new Set());
+  const [author, setAuthor] = useState(currentCommunityUser);
+  const [teamOnly, setTeamOnly] = useState(false);
   const [draft, setDraft] = useState({
     topic: "CAD review",
     title: "",
@@ -101,6 +107,20 @@ export function CommunityBoard() {
     setLiked(readStoredSet(LIKED_POSTS_KEY));
     setBookmarked(readStoredSet(BOOKMARKED_POSTS_KEY));
     setReported(readStoredSet(REPORTED_POSTS_KEY));
+    void loadPersistentRecords<CommunityPost>("community_posts").then((records) => {
+      const cloudPosts = records.map((record) => record.payload);
+      const local = readStoredPosts();
+      const merged = [...cloudPosts, ...local.filter((post) => !cloudPosts.some((cloud) => cloud.slug === post.slug))];
+      setLocalPosts(merged);
+      setStoredItem(LOCAL_POSTS_KEY, JSON.stringify(merged));
+    });
+    void loadPersistentSet("community_state", LIKED_POSTS_KEY).then((value) => value.size && setLiked(value));
+    void loadPersistentSet("community_state", BOOKMARKED_POSTS_KEY).then((value) => value.size && setBookmarked(value));
+    void loadPersistentSet("community_state", REPORTED_POSTS_KEY).then((value) => value.size && setReported(value));
+    const syncAuthor = () => setAuthor(getCommunityAuthorFromAuth(readMockUser()));
+    syncAuthor();
+    window.addEventListener("rocketry-auth-change", syncAuthor);
+    return () => window.removeEventListener("rocketry-auth-change", syncAuthor);
   }, []);
 
   const posts = useMemo(() => [...localPosts, ...communityPosts], [localPosts]);
@@ -108,8 +128,9 @@ export function CommunityBoard() {
     const normalizedQuery = query.trim().toLowerCase();
     const filtered = posts.filter((post) => {
       const matchesTopic = activeTopic === "All topics" || post.topic === activeTopic;
+      const matchesTeam = !teamOnly || post.author.team === author.team;
       const haystack = [post.title, post.preview, post.topic, post.author.name, post.author.team, post.linkedProject, ...post.evidenceLinks].join(" ").toLowerCase();
-      return matchesTopic && (!normalizedQuery || haystack.includes(normalizedQuery));
+      return matchesTopic && matchesTeam && (!normalizedQuery || haystack.includes(normalizedQuery));
     });
 
     return filtered.sort((a, b) => {
@@ -117,7 +138,7 @@ export function CommunityBoard() {
       if (sortMode === "Most viewed") return viewNumber(b.views) - viewNumber(a.views);
       return b.likes + b.comments * 2 + Number(Boolean(b.best)) * 500 - (a.likes + a.comments * 2 + Number(Boolean(a.best)) * 500);
     });
-  }, [activeTopic, posts, query, sortMode]);
+  }, [activeTopic, author.team, posts, query, sortMode, teamOnly]);
 
   const bestPosts = visiblePosts.filter((post) => post.best || post.likes > 150).slice(0, 3);
   const recommendedPosts = visiblePosts.filter((post) => post.recommended || bookmarked.has(post.slug)).slice(0, 5);
@@ -142,7 +163,7 @@ export function CommunityBoard() {
       title,
       preview: paragraphs[0]?.slice(0, 180) ?? body.slice(0, 180),
       body: paragraphs.length ? paragraphs : [body],
-      author: currentCommunityUser,
+      author,
       time: "just now",
       views: "0",
       likes: 0,
@@ -157,6 +178,7 @@ export function CommunityBoard() {
     const next = [post, ...localPosts];
     setLocalPosts(next);
     setStoredItem(LOCAL_POSTS_KEY, JSON.stringify(next));
+    void savePersistentRecord("community_posts", post.slug, post);
     setDraft({ topic: "CAD review", title: "", body: "", linkedProject: "", evidenceLinks: "", images: [] });
     setComposerOpen(false);
   }
@@ -203,10 +225,10 @@ export function CommunityBoard() {
               </div>
             </div>
             <div className="mt-4 flex items-center gap-3">
-              <Avatar name={currentCommunityUser.name} />
+              <Avatar name={author.name} avatarUrl={author.avatarUrl} />
               <div>
-                <p className="font-semibold">{currentCommunityUser.name}</p>
-                <p className="text-sm text-slate-500">{currentCommunityUser.role}</p>
+                <p className="font-semibold">{author.name}</p>
+                <p className="text-sm text-slate-500">{author.role}</p>
               </div>
             </div>
             <div className="mt-5 grid gap-3">
@@ -214,9 +236,9 @@ export function CommunityBoard() {
                 <PenLine className="h-4 w-4" />
                 Write post
               </Button>
-              <Button variant="outline" className="border-slate-200 bg-white text-slate-800 hover:bg-slate-50">
+              <Button variant="outline" onClick={() => setTeamOnly((value) => !value)} className="border-slate-200 bg-white text-slate-800 hover:bg-slate-50">
                 <UsersRound className="h-4 w-4" />
-                My team discussions
+                {teamOnly ? "Showing my team" : "My team discussions"}
               </Button>
             </div>
             <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
@@ -230,7 +252,7 @@ export function CommunityBoard() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-xl font-semibold">Write with verified profile</h2>
-                <p className="mt-1 text-sm text-slate-500">Visible author: {currentCommunityUser.name}, {currentCommunityUser.team}</p>
+                <p className="mt-1 text-sm text-slate-500">Visible author: {author.name}, {author.team}</p>
               </div>
               <button className="text-sm font-semibold text-slate-500 hover:text-slate-900" onClick={() => setComposerOpen(false)}>Close</button>
             </div>
@@ -497,7 +519,7 @@ function ImageStrip({ images, compact }: { images: string[]; compact?: boolean }
 function AuthorBlock({ post }: { post: CommunityPost }) {
   return (
     <div className="mt-4 flex items-center gap-3">
-      <Avatar name={post.author.name} />
+      <Avatar name={post.author.name} avatarUrl={post.author.avatarUrl} />
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-semibold">{post.author.name}</p>
@@ -510,11 +532,15 @@ function AuthorBlock({ post }: { post: CommunityPost }) {
   );
 }
 
-function Avatar({ name }: { name: string }) {
+function Avatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
   return (
-    <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-cyan-200 to-violet-300 font-bold text-slate-900">
-      {name.trim()[0] ?? "R"}
-    </div>
+    avatarUrl ? (
+      <img src={avatarUrl} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover ring-1 ring-slate-200" />
+    ) : (
+      <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-cyan-200 to-violet-300 font-bold text-slate-900">
+        {name.trim()[0] ?? "R"}
+      </div>
+    )
   );
 }
 

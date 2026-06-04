@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+.env.local
+.env*.local
+pnpm-install.js
+pnpm.exe
+pnpm.zip
+.pnpm-standalone
+*.log
+*.tsbuildinfo

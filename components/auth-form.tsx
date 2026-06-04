@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { Building2, LockKeyhole, Mail, Rocket, Send, UserRoundPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { demoUser, writeMockUser } from "@/lib/auth";
+import { AuthUser, demoUser, writeMockUser } from "@/lib/auth";
+import { savePersistentRecord } from "@/lib/cloud-persistence";
 import { sampleOrganizations } from "@/lib/team-data";
 import { getSupabaseClient, isMockMode } from "@/lib/supabase";
 
@@ -14,9 +15,9 @@ type AuthMode = "sign-in" | "sign-up";
 
 export function AuthForm({ mode }: { mode: AuthMode }) {
   const router = useRouter();
-  const [name, setName] = useState("Mira Park");
-  const [email, setEmail] = useState("mira@rocketry.house");
-  const [password, setPassword] = useState("rocket-house-access");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [accountType, setAccountType] = useState<"personal" | "team" | "organization">("personal");
   const [organizationName, setOrganizationName] = useState<string>(sampleOrganizations[0].name);
   const [approvalRequested, setApprovalRequested] = useState(false);
@@ -28,14 +29,6 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
     const type = new URLSearchParams(window.location.search).get("type");
     if (type === "personal" || type === "team" || type === "organization") {
       setAccountType(type);
-      if (type === "team") {
-        setName("New Rocket Team");
-        setEmail("team@rocketry.house");
-      }
-      if (type === "organization") {
-        setName("New Aerospace Organization");
-        setEmail("organization@rocketry.house");
-      }
     }
   }, []);
 
@@ -47,34 +40,65 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
     setLoading(true);
     setStatus("");
     const supabase = getSupabaseClient();
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
 
     try {
+      if (!trimmedEmail || !password) {
+        throw new Error("Email and password are required.");
+      }
+
+      if (isSignUp && !trimmedName) {
+        throw new Error("Display name is required.");
+      }
+
       if (supabase && !isMockMode) {
         const response = isSignUp
           ? await supabase.auth.signUp({
-              email,
+              email: trimmedEmail,
               password,
               options: {
                 data: {
-                  name,
+                  name: trimmedName,
                   account_type: accountType,
-                  organization_name: accountType === "team" ? organizationName : accountType === "organization" ? name : undefined,
+                  organization_name: accountType === "team" ? organizationName : accountType === "organization" ? trimmedName : undefined,
                   organization_approval_status: accountType === "team" ? "requested" : accountType === "organization" ? "approved" : "none"
                 }
               }
             })
-          : await supabase.auth.signInWithPassword({ email, password });
+          : await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
         if (response.error) throw response.error;
+        const metadata = response.data.user?.user_metadata ?? {};
+        const savedUser: AuthUser = {
+          id: response.data.user?.id ?? `local-${Date.now()}`,
+          name: String(metadata.name ?? trimmedName ?? trimmedEmail.split("@")[0]),
+          email: response.data.user?.email ?? trimmedEmail,
+          accountType: (metadata.account_type === "team" || metadata.account_type === "organization" || metadata.account_type === "personal")
+            ? metadata.account_type
+            : accountType,
+          organizationName: typeof metadata.organization_name === "string" ? metadata.organization_name : accountType === "team" ? organizationName : accountType === "organization" ? trimmedName : undefined,
+          organizationApprovalStatus: (metadata.organization_approval_status === "requested" || metadata.organization_approval_status === "approved" || metadata.organization_approval_status === "none")
+            ? metadata.organization_approval_status
+            : accountType === "team" ? "requested" : accountType === "organization" ? "approved" : "none",
+          createdAt: new Date().toISOString(),
+          isDemo: false
+        };
+        writeMockUser(savedUser);
+        void savePersistentRecord("profiles", savedUser.id, savedUser);
+      } else {
+        const localUser: AuthUser = {
+          id: isSignUp ? `local-${Date.now()}` : `local-signin-${trimmedEmail.toLowerCase()}`,
+          name: isSignUp ? trimmedName : trimmedEmail.split("@")[0],
+          email: trimmedEmail,
+          accountType,
+          organizationName: accountType === "team" ? organizationName : accountType === "organization" ? trimmedName : undefined,
+          organizationApprovalStatus: accountType === "team" ? "requested" : accountType === "organization" ? "approved" : "none",
+          createdAt: new Date().toISOString(),
+          isDemo: false
+        };
+        writeMockUser(localUser);
+        void savePersistentRecord("profiles", localUser.id, localUser);
       }
-
-      writeMockUser({
-        id: isMockMode ? `mock-${Date.now()}` : demoUser.id,
-        name: isSignUp ? name : demoUser.name,
-        email,
-        accountType,
-        organizationName: accountType === "team" ? organizationName : accountType === "organization" ? name : undefined,
-        organizationApprovalStatus: accountType === "team" ? "requested" : accountType === "organization" ? "approved" : "none"
-      });
       router.push("/profile");
       router.refresh();
     } catch (error) {
@@ -86,6 +110,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
 
   function continueDemo() {
     writeMockUser(demoUser);
+    void savePersistentRecord("profiles", demoUser.id, demoUser);
     router.push("/profile");
     router.refresh();
   }

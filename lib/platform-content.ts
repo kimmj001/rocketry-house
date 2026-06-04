@@ -4,7 +4,6 @@ export const platformNav = [
   ["Community", "/community"],
   ["Upload", "/upload"],
   ["Rankings", "/ranking"],
-  ["Team", "/team"],
   ["Profile", "/profile"]
 ] as const;
 

@@ -16,7 +16,7 @@ export default async function CheckoutPage({ params }: { params: Promise<{ slug:
         <h1 className="mt-3 text-3xl font-semibold">{project.title}</h1>
         <p className="mt-3 text-orange-50/68">A completed purchase unlocks paid downloads, evidence packages, and forking permissions.</p>
         <div className="mt-6 rounded-lg bg-white/[0.05] p-4"><p className="text-sm text-orange-50/58">Total</p><p className="text-3xl font-semibold">{formatPrice(project.priceCents)}</p></div>
-        <CheckoutButton />
+        <CheckoutButton project={project} />
       </Card>
     </main>
   );

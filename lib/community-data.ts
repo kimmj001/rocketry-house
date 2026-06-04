@@ -3,6 +3,7 @@ export type CommunityAuthor = {
   role: string;
   team: string;
   badge: string;
+  avatarUrl?: string;
   profileType: "Personal" | "Team" | "Organization";
 };
 
@@ -39,8 +40,27 @@ export const currentCommunityUser: CommunityAuthor = {
   role: "Rocketry House builder",
   team: "UNIST Nova Lab",
   badge: "Verified profile",
+  avatarUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=160&q=80",
   profileType: "Personal"
 };
+
+export function getCommunityAuthorFromAuth(user: {
+  name: string;
+  accountType: "personal" | "team" | "organization";
+  organizationName?: string;
+  avatarUrl?: string;
+} | null): CommunityAuthor {
+  if (!user) return currentCommunityUser;
+  const profileType = user.accountType === "organization" ? "Organization" : user.accountType === "team" ? "Team" : "Personal";
+  return {
+    name: user.name,
+    role: user.accountType === "organization" ? "Organization owner" : user.accountType === "team" ? "Team representative" : "Rocketry House builder",
+    team: user.organizationName ?? (user.accountType === "personal" ? "Independent builder" : user.name),
+    badge: user.accountType === "personal" ? "Verified profile" : "Verified account",
+    avatarUrl: user.avatarUrl,
+    profileType
+  };
+}
 
 export const communityTopics = [
   "All topics",

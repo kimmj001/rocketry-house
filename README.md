@@ -35,9 +35,28 @@ Then apply:
 ```bash
 supabase db push
 psql "$DATABASE_URL" -f supabase/seed.sql
+psql "$DATABASE_URL" -f supabase/cloud-persistence.sql
 ```
 
-Without those env vars, the app runs entirely from `lib/mock-data.ts`.
+Without those env vars, the app runs from mock data plus browser-local backup.
+
+### Persistence model
+
+Rocketry House protects user-created MVP data with a two-layer persistence path:
+
+- Local backup: community posts, comments, likes, bookmarks, upload drafts, inline CAD JSON, saved motors, purchases, profiles, and selected file metadata are cached in browser storage.
+- Supabase sync: when `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are present, the same records are upserted into `user_data_records`.
+- Supabase Storage: selected upload files are sent to the `rocketry-house-files` bucket when Supabase is configured. In mock mode, file metadata is still retained locally.
+
+Run both SQL files before relying on cloud sync:
+
+```bash
+psql "$DATABASE_URL" -f supabase/schema.sql
+psql "$DATABASE_URL" -f supabase/cloud-persistence.sql
+psql "$DATABASE_URL" -f supabase/seed.sql
+```
+
+For a public production launch, tighten the permissive MVP RLS policies in `supabase/cloud-persistence.sql` so rows are scoped to authenticated users instead of browser/device owner keys.
 
 ## Deploy
 

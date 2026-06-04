@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { SiteNav } from "@/components/site-nav";
+import { ScrollNormalizer } from "@/components/scroll-normalizer";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
@@ -14,8 +15,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" className="dark">
       <body className={`${inter.variable} font-sans antialiased`}>
-        <SiteNav />
-        {children}
+        <ScrollNormalizer />
+        <div className="site-scroll-root" data-site-scroll-root tabIndex={-1}>
+          <SiteNav />
+          {children}
+        </div>
       </body>
     </html>
   );

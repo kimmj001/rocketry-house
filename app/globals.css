@@ -26,15 +26,14 @@
 
 html {
   height: 100%;
-  overflow: hidden;
-  scroll-behavior: smooth;
-  touch-action: pan-y;
+  overflow-x: hidden;
+  overflow-y: hidden;
 }
 
 body {
   height: 100%;
-  overflow: hidden;
-  touch-action: pan-y;
+  overflow-x: hidden;
+  overflow-y: hidden;
   background:
     linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px),
@@ -43,13 +42,18 @@ body {
   color: hsl(var(--foreground));
 }
 
-main {
+.site-scroll-root {
+  position: fixed;
+  inset: 0;
   height: 100dvh;
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior-y: contain;
-  scrollbar-gutter: stable;
-  touch-action: pan-y;
+  outline: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+main {
+  min-height: 100dvh;
 }
 
 ::selection {

@@ -1,16 +1,15 @@
 import Link from "next/link";
-import { Boxes, GitFork, Rocket, ScrollText, Wand2 } from "lucide-react";
+import { Boxes, GitFork, ScrollText, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [
   { label: "Overview", href: (slug: string) => `/projects/${slug}`, value: "overview", icon: ScrollText },
   { label: "CAD", href: (slug: string) => `/cad/${slug}`, value: "cad", icon: Boxes },
-  { label: "Simulation", href: (slug: string) => `/simulation/${slug}`, value: "simulation", icon: Rocket },
   { label: "Forks", href: (slug: string) => `/forks/${slug}`, value: "forks", icon: GitFork },
   { label: "Checkout", href: (slug: string) => `/checkout/${slug}`, value: "checkout", icon: Wand2 }
 ];
 
-export function ProjectTabs({ slug, active = "overview" }: { slug: string; active?: "overview" | "cad" | "simulation" | "forks" | "checkout" }) {
+export function ProjectTabs({ slug, active = "overview" }: { slug: string; active?: "overview" | "cad" | "forks" | "checkout" }) {
   return (
     <nav aria-label="Project workspace" className="flex flex-wrap items-center gap-2 border-b border-white/10 pb-3">
       {tabs.map((tab) => {

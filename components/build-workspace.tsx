@@ -12,6 +12,7 @@ import { TelemetryChart } from "@/components/charts";
 import { mockProjects } from "@/lib/mock-data";
 import { mockSavedMotors } from "@/lib/motor-library";
 import { isDemoAccount, readMockUser } from "@/lib/auth";
+import { loadPersistentRecords, savePersistentRecord } from "@/lib/cloud-persistence";
 import { defaultMotorParameters, propellantProfiles, simulateMotor } from "@/lib/motor-simulation";
 import { runRocketEstimateWithMotor } from "@/lib/rocket-simulation";
 import { sortComponents, totalLength } from "@/lib/cad/geometry";
@@ -411,6 +412,7 @@ export function MotorBuilder() {
     };
     const existing = readStoredMotors().filter((item) => !mockSavedMotors.some((mockMotor) => mockMotor.id === item.id));
     localStorage.setItem(getMotorStorageKey(), JSON.stringify([motor, ...existing]));
+    void savePersistentRecord("saved_motors", motor.id, motor);
     window.dispatchEvent(new Event("rocketry-motors-change"));
     setModalOpen(false);
   }
@@ -467,6 +469,7 @@ export function MotorLibrary({ detailId }: { detailId?: string }) {
   useEffect(() => {
     const sync = () => setMotors(readStoredMotors());
     sync();
+    void syncPersistentMotors();
     window.addEventListener("rocketry-auth-change", sync);
     window.addEventListener("rocketry-motors-change", sync);
     return () => {
@@ -517,6 +520,7 @@ export function RocketBuilder() {
       setSelectedMotorId((current) => storedMotors.some((motor) => motor.id === current) ? current : storedMotors[0]?.id || "");
     };
     sync();
+    void syncPersistentMotors();
     window.addEventListener("rocketry-auth-change", sync);
     window.addEventListener("rocketry-motors-change", sync);
     return () => {
@@ -947,10 +951,10 @@ function RocketLaunchScene({ runId, result, hasMotor, components, windSpeedMps, 
   const atmosphereAltitudeM = Math.max(currentAltitudeM, normalizedAltitude * displayCeilingM);
   const skyDarkness = Math.min(0.72, Math.max(0, (atmosphereAltitudeM - 1000) / 9000) * 0.72);
   const starOpacity = Math.min(0.88, Math.max(0, (atmosphereAltitudeM - 10000) / 4200) * 0.88);
-  const markerStepM = sceneAltitudeM < 1200 ? 250 : sceneAltitudeM < 4000 ? 500 : sceneAltitudeM < 12000 ? 1000 : 5000;
-  const visibleAltitudeSpanM = markerStepM * 4.8;
-  const markerBaseM = Math.floor(sceneAltitudeM / markerStepM) * markerStepM;
-  const altitudeMarkers = Array.from({ length: 13 }, (_, index) => markerBaseM + (index - 5) * markerStepM).filter((marker) => marker >= 0);
+  const altitudeAxisStepM = displayCeilingM <= 1600 ? 250 : displayCeilingM <= 5000 ? 500 : displayCeilingM <= 18000 ? 1000 : 5000;
+  const visibleAltitudeSpanM = altitudeAxisStepM * 4.8;
+  const markerBaseM = Math.floor(sceneAltitudeM / altitudeAxisStepM) * altitudeAxisStepM;
+  const altitudeMarkers = Array.from({ length: 13 }, (_, index) => markerBaseM + (index - 5) * altitudeAxisStepM).filter((marker) => marker >= 0);
   const parachuteProgress = phase === "parachute" ? Math.min(1, Math.max(0, (clock - 7.2) / 2)) : phase === "complete" ? 1 : 0;
   const descentPx = parachuteProgress * 92;
   const railProgress = phase === "ignition" ? 0 : phase === "rail" ? Math.min(1, (clock - 2.45) / 0.75) : phase === "ascent" || phase === "coast" || phase === "parachute" || phase === "complete" ? 1 : 0;
@@ -1068,7 +1072,7 @@ function RocketLaunchScene({ runId, result, hasMotor, components, windSpeedMps, 
               const y = 690 - ((marker - sceneAltitudeM) / visibleAltitudeSpanM) * 620;
               if (y < 76 || y > 820) return null;
               const isMajor = marker % 1000 === 0;
-              const isCurrentBand = Math.abs(marker - sceneAltitudeM) < markerStepM * 0.38;
+              const isCurrentBand = Math.abs(marker - sceneAltitudeM) < altitudeAxisStepM * 0.38;
               const label = marker >= 1000 ? `${Number((marker / 1000).toFixed(marker % 1000 === 0 ? 0 : 1))} km` : `${marker} m`;
               return (
                 <g key={marker} opacity={isCurrentBand ? 0.78 : 0.48}>
@@ -2234,6 +2238,20 @@ function readStoredMotors() {
   } catch {
     return [];
   }
+}
+
+async function syncPersistentMotors() {
+  if (typeof window === "undefined") return;
+  const records = await loadPersistentRecords<SavedMotor>("saved_motors");
+  if (!records.length) return;
+  const cloudMotors = records.map((record) => record.payload);
+  const localMotors = readStoredMotors();
+  const merged = [
+    ...cloudMotors,
+    ...localMotors.filter((motor) => !cloudMotors.some((cloudMotor) => cloudMotor.id === motor.id))
+  ];
+  localStorage.setItem(getMotorStorageKey(), JSON.stringify(merged.filter((motor) => !mockSavedMotors.some((mockMotor) => mockMotor.id === motor.id))));
+  window.dispatchEvent(new Event("rocketry-motors-change"));
 }
 
 function insertMotorComponent(components: RocketComponent[], motor: SavedMotor) {

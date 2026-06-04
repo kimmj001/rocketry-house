@@ -1,22 +1,62 @@
-import { UploadCloud } from "lucide-react";
+"use client";
+
+import { useRef, useState } from "react";
+import { CheckCircle2, UploadCloud } from "lucide-react";
+import { uploadPersistentFiles } from "@/lib/cloud-persistence";
 
 type FileUploadBoxProps = {
   title?: string;
   description?: string;
   formats?: string;
   status?: "required" | "recommended" | "optional";
+  onFilesSelected?: (title: string, files: File[]) => void;
 };
 
 export function FileUploadBox({
   title = "Upload CAD files, messy telemetry, media proof, ZIP archives, interoperable XML, STL, STEP, PDFs, images, and videos.",
   description = "CSV/JSON/TXT are scanned for likely time, altitude, velocity, acceleration, thrust, pressure, and GPS columns. Unknown data falls back to a raw preview and manual mapping.",
   formats = "CSV, JSON, TXT, PDF, images, video links, ZIP, .ork-like XML, STL, STEP",
-  status = "optional"
+  status = "optional",
+  onFilesSelected
 }: FileUploadBoxProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [syncState, setSyncState] = useState("");
+
+  function selectFiles(nextFiles: FileList | null) {
+    const selected = Array.from(nextFiles ?? []);
+    setFiles(selected);
+    if (selected.length) {
+      setSyncState("Saving file record...");
+      onFilesSelected?.(title, selected);
+      void uploadPersistentFiles(title, selected)
+        .then((records) => {
+          const cloudCount = records.filter((record) => record.publicUrl).length;
+          setSyncState(cloudCount ? `${cloudCount} file${cloudCount === 1 ? "" : "s"} uploaded to cloud storage.` : "File metadata saved locally. Add Supabase env vars for cloud file storage.");
+        })
+        .catch(() => setSyncState("File names were kept in this session, but persistent upload failed."));
+    }
+  }
+
   return (
-    <div className="rounded-lg border border-dashed border-orange-200/30 bg-white/[0.03] p-5 text-left transition hover:border-orange-200/55 hover:bg-white/[0.06]">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => inputRef.current?.click()}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") inputRef.current?.click();
+      }}
+      className="cursor-pointer rounded-lg border border-dashed border-orange-200/30 bg-white/[0.03] p-5 text-left transition hover:border-orange-200/55 hover:bg-white/[0.06]"
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(event) => selectFiles(event.target.files)}
+      />
       <div className="flex items-start justify-between gap-4">
-        <UploadCloud className="h-7 w-7 shrink-0 text-orange-200" />
+        {files.length ? <CheckCircle2 className="h-7 w-7 shrink-0 text-emerald-200" /> : <UploadCloud className="h-7 w-7 shrink-0 text-orange-200" />}
         <span className="rounded-full border border-white/12 bg-white/8 px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-orange-50/58">
           {status}
         </span>
@@ -24,6 +64,15 @@ export function FileUploadBox({
       <p className="mt-4 font-medium">{title}</p>
       <p className="mt-2 text-sm leading-6 text-orange-50/58">{description}</p>
       <p className="mt-4 rounded-md bg-black/12 p-2 text-xs text-cyan-100/62">{formats}</p>
+      {files.length ? (
+        <div className="mt-3 space-y-1 rounded-md bg-emerald-300/10 p-2 text-xs text-emerald-50/80">
+          {files.slice(0, 3).map((file) => <p key={`${file.name}-${file.size}`}>{file.name}</p>)}
+          {files.length > 3 ? <p>+{files.length - 3} more files</p> : null}
+          {syncState ? <p className="text-emerald-50/65">{syncState}</p> : null}
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-orange-50/42">Click to choose files.</p>
+      )}
     </div>
   );
 }

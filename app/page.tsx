@@ -119,7 +119,7 @@ export default function Home() {
                 <div key={name} className="rounded-md bg-white/[0.04] p-3 text-sm">{name}</div>
               ))}
             </div>
-            <Button href="/team" asChild variant="outline" className="mt-5 w-full">View teams</Button>
+            <Button href="/ranking" asChild variant="outline" className="mt-5 w-full">View team rankings</Button>
           </Card>
         </div>
       </section>
