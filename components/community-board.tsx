@@ -48,7 +48,7 @@ function setStoredItem(key: string, value: string) {
   if (typeof window !== "undefined" && window.localStorage) window.localStorage.setItem(key, value);
 }
 
-type SortMode = "Best" | "Newest" | "Most viewed";
+type SortMode = "Newest" | "Best" | "Most viewed";
 
 function readStoredPosts() {
   if (typeof window === "undefined") return [];
@@ -82,11 +82,26 @@ function viewNumber(value: string) {
   return Number(value.replace(/,/g, "")) || 0;
 }
 
+function postScore(post: CommunityPost) {
+  return post.likes + post.comments * 2 + Number(Boolean(post.best)) * 500;
+}
+
+function postFreshness(post: CommunityPost) {
+  if (post.createdAt) return new Date(post.createdAt).getTime();
+  const slugTime = post.slug.split("-").at(-1);
+  if (slugTime) {
+    const parsed = Number.parseInt(slugTime, 36);
+    if (Number.isFinite(parsed) && parsed > 1_000_000_000_000) return parsed;
+  }
+  const staticIndex = communityPosts.findIndex((item) => item.slug === post.slug);
+  return staticIndex === -1 ? 0 : communityPosts.length - staticIndex;
+}
+
 export function CommunityBoard() {
   const [localPosts, setLocalPosts] = useState<CommunityPost[]>([]);
   const [activeTopic, setActiveTopic] = useState("All topics");
   const [query, setQuery] = useState("");
-  const [sortMode, setSortMode] = useState<SortMode>("Best");
+  const [sortMode, setSortMode] = useState<SortMode>("Newest");
   const [composerOpen, setComposerOpen] = useState(false);
   const [liked, setLiked] = useState<Set<string>>(new Set());
   const [bookmarked, setBookmarked] = useState<Set<string>>(new Set());
@@ -134,13 +149,13 @@ export function CommunityBoard() {
     });
 
     return filtered.sort((a, b) => {
-      if (sortMode === "Newest") return Number(Boolean(b.createdLocally)) - Number(Boolean(a.createdLocally));
+      if (sortMode === "Newest") return postFreshness(b) - postFreshness(a);
       if (sortMode === "Most viewed") return viewNumber(b.views) - viewNumber(a.views);
-      return b.likes + b.comments * 2 + Number(Boolean(b.best)) * 500 - (a.likes + a.comments * 2 + Number(Boolean(a.best)) * 500);
+      return postScore(b) - postScore(a);
     });
   }, [activeTopic, author.team, posts, query, sortMode, teamOnly]);
 
-  const bestPosts = visiblePosts.filter((post) => post.best || post.likes > 150).slice(0, 3);
+  const bestPosts = visiblePosts.filter((post) => post.best || post.likes > 150).sort((a, b) => postScore(b) - postScore(a)).slice(0, 3);
   const recommendedPosts = visiblePosts.filter((post) => post.recommended || bookmarked.has(post.slug)).slice(0, 5);
 
   function toggleSet(slug: string, key: string, setter: (value: Set<string>) => void, current: Set<string>) {
@@ -171,6 +186,7 @@ export function CommunityBoard() {
       evidenceLinks: draft.evidenceLinks.split(",").map((item) => item.trim()).filter(Boolean),
       images: draft.images,
       linkedProject: draft.linkedProject.trim() || undefined,
+      createdAt: new Date().toISOString(),
       createdLocally: true,
       commentList: []
     };
@@ -289,7 +305,7 @@ export function CommunityBoard() {
                   <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     {draft.images.map((image, index) => (
                       <div key={image} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white">
-                        <img src={image} alt={`Attached community image ${index + 1}`} className="h-32 w-full object-cover" />
+                        <img src={image} alt={`Attached community image ${index + 1}`} className="max-h-48 w-full object-contain p-2" />
                         <button
                           type="button"
                           onClick={() => setDraft((current) => ({ ...current, images: current.images.filter((_, itemIndex) => itemIndex !== index) }))}
@@ -381,8 +397,8 @@ export function CommunityBoard() {
                 <label className="flex items-center gap-2 text-sm text-slate-500">
                   <SlidersHorizontal className="h-4 w-4" />
                   <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="rounded-md border border-slate-200 bg-white px-2 py-2 text-slate-700">
-                    <option>Best</option>
                     <option>Newest</option>
+                    <option>Best</option>
                     <option>Most viewed</option>
                   </select>
                 </label>
@@ -510,7 +526,7 @@ function ImageStrip({ images, compact }: { images: string[]; compact?: boolean }
   return (
     <div className={`mt-4 grid gap-2 ${compact ? "grid-cols-2" : "grid-cols-2 md:grid-cols-3"}`}>
       {images.slice(0, compact ? 2 : 3).map((image, index) => (
-        <img key={`${image}-${index}`} src={image} alt={`Community attachment ${index + 1}`} className={`${compact ? "h-24" : "h-40"} w-full rounded-xl border border-slate-200 object-cover`} />
+        <img key={`${image}-${index}`} src={image} alt={`Community attachment ${index + 1}`} className={`${compact ? "max-h-32" : "max-h-72"} w-full rounded-xl border border-slate-200 bg-white object-contain p-2`} />
       ))}
     </div>
   );

@@ -31,6 +31,7 @@ export type CommunityPost = {
   linkedProject?: string;
   best?: boolean;
   recommended?: boolean;
+  createdAt?: string;
   createdLocally?: boolean;
   commentList?: CommunityComment[];
 };
