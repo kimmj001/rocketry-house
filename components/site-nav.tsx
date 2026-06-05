@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Rocket, ShieldCheck } from "lucide-react";
+import { Rocket } from "lucide-react";
 import { AccountNav } from "@/components/account-nav";
 import { platformNav } from "@/lib/platform-content";
 
@@ -18,12 +18,7 @@ export function SiteNav() {
             </Link>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <Link href="/admin" aria-label="Admin moderation" className="hidden rounded-md p-2 hover:bg-white/10 sm:inline-flex">
-            <ShieldCheck className="h-4 w-4" />
-          </Link>
-          <AccountNav />
-        </div>
+        <AccountNav />
       </nav>
     </header>
   );

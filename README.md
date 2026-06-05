@@ -107,4 +107,3 @@ Rocketry House is for educational and lawful rocketry use only. The UI includes 
 - Fork tree
 - Mock checkout
 - Purchases/downloads
-- Admin moderation

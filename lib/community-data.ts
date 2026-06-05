@@ -50,12 +50,13 @@ export function getCommunityAuthorFromAuth(user: {
   accountType: "personal" | "team" | "organization";
   organizationName?: string;
   avatarUrl?: string;
+  headline?: string;
 } | null): CommunityAuthor {
   if (!user) return currentCommunityUser;
   const profileType = user.accountType === "organization" ? "Organization" : user.accountType === "team" ? "Team" : "Personal";
   return {
     name: user.name,
-    role: user.accountType === "organization" ? "Organization owner" : user.accountType === "team" ? "Team representative" : "Rocketry House builder",
+    role: user.headline?.trim() || (user.accountType === "organization" ? "Organization owner" : user.accountType === "team" ? "Team representative" : "Rocketry House builder"),
     team: user.organizationName ?? (user.accountType === "personal" ? "Independent builder" : user.name),
     badge: user.accountType === "personal" ? "Verified profile" : "Verified account",
     avatarUrl: user.avatarUrl,
