@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Building2, LockKeyhole, Mail, Rocket, Send, UserRoundPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { AuthUser, demoUser, writeMockUser } from "@/lib/auth";
+import { AuthUser, writeMockUser } from "@/lib/auth";
 import { savePersistentRecord } from "@/lib/cloud-persistence";
 import { sampleOrganizations } from "@/lib/team-data";
 import { getSupabaseClient, isMockMode } from "@/lib/supabase";
@@ -108,13 +108,6 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
     }
   }
 
-  function continueDemo() {
-    writeMockUser(demoUser);
-    void savePersistentRecord("profiles", demoUser.id, demoUser);
-    router.push("/profile");
-    router.refresh();
-  }
-
   return (
     <main className="min-h-screen bg-space-radial px-6 py-24">
       <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[1fr_440px]">
@@ -192,7 +185,6 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
 
           <div className="mt-6 grid gap-3">
             <Button onClick={submit} disabled={loading}>{loading ? "Working..." : isSignUp ? "Create account" : "Sign in"}</Button>
-            <Button variant="outline" onClick={continueDemo}>Continue with personal account</Button>
           </div>
 
           <p className="mt-5 text-center text-sm text-orange-50/60">
