@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { ProjectCard } from "@/components/project-card";
 import { mockSavedMotors } from "@/lib/motor-library";
 import { mockProjects } from "@/lib/mock-data";
-import { isDemoAccount, readMockUser, type AuthUser, writeMockUser } from "@/lib/auth";
+import { isDemoAccount, readMockUser, type AuthUser, updateLocalAccountUser, writeMockUser } from "@/lib/auth";
 import { prestigeBadges } from "@/lib/platform-content";
 import { sampleOrganizations } from "@/lib/team-data";
 import { savePersistentRecord, uploadPersistentFiles } from "@/lib/cloud-persistence";
@@ -96,6 +96,7 @@ export function ProfileAccount() {
       if (!localPreview) return;
       const previewUser = { ...user, avatarUrl: localPreview };
       writeMockUser(previewUser);
+      updateLocalAccountUser(previewUser);
       setUser(previewUser);
     };
     reader.readAsDataURL(file);
@@ -105,6 +106,7 @@ export function ProfileAccount() {
       const publicUrl = records[0]?.publicUrl;
       const nextUser = { ...readMockUser(), ...user, avatarUrl: publicUrl ?? readMockUser()?.avatarUrl ?? user.avatarUrl } as AuthUser;
       writeMockUser(nextUser);
+      updateLocalAccountUser(nextUser);
       setUser(nextUser);
       await savePersistentRecord("profiles", nextUser.id, nextUser);
       setPhotoStatus(publicUrl ? "Profile photo synced to cloud storage." : "Profile photo saved locally. Cloud file storage will sync when Supabase Storage accepts uploads.");
@@ -142,6 +144,7 @@ export function ProfileAccount() {
     };
 
     writeMockUser(nextUser);
+    updateLocalAccountUser(nextUser);
     setUser(nextUser);
     setDraftFromUser(nextUser);
     setEditing(false);

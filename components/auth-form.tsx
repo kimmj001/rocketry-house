@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Building2, LockKeyhole, Mail, Rocket, Send, UserRoundPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { AuthUser, writeMockUser } from "@/lib/auth";
+import { AuthUser, authenticateLocalAccount, createLocalAccount, isValidEmail, normalizeEmail, validatePassword, writeMockUser } from "@/lib/auth";
 import { savePersistentRecord } from "@/lib/cloud-persistence";
 import { sampleOrganizations } from "@/lib/team-data";
 import { getSupabaseClient, isMockMode } from "@/lib/supabase";
@@ -41,13 +41,17 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
     setStatus("");
     const supabase = getSupabaseClient();
     const trimmedName = name.trim();
-    const trimmedEmail = email.trim();
+    const trimmedEmail = normalizeEmail(email);
     const selectedOrganization = accountType === "team" && organizationName ? organizationName : undefined;
 
     try {
       if (!trimmedEmail || !password) {
         throw new Error("Email and password are required.");
       }
+      if (!isValidEmail(trimmedEmail)) {
+        throw new Error("Enter a valid email address.");
+      }
+      validatePassword(password);
 
       if (isSignUp && !trimmedName) {
         throw new Error("Display name is required.");
@@ -87,18 +91,25 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         writeMockUser(savedUser);
         void savePersistentRecord("profiles", savedUser.id, savedUser);
       } else {
-        const localUser: AuthUser = {
-          id: isSignUp ? `local-${Date.now()}` : `local-signin-${trimmedEmail.toLowerCase()}`,
-          name: isSignUp ? trimmedName : trimmedEmail.split("@")[0],
-          email: trimmedEmail,
-          accountType,
-          organizationName: accountType === "team" ? selectedOrganization : accountType === "organization" ? trimmedName : undefined,
-          organizationApprovalStatus: accountType === "team" && selectedOrganization ? "requested" : accountType === "organization" ? "approved" : "none",
-          createdAt: new Date().toISOString(),
-          isDemo: false
-        };
-        writeMockUser(localUser);
-        void savePersistentRecord("profiles", localUser.id, localUser);
+        if (isSignUp) {
+          const localUser: AuthUser = {
+            id: "",
+            name: trimmedName,
+            email: trimmedEmail,
+            accountType,
+            organizationName: accountType === "team" ? selectedOrganization : accountType === "organization" ? trimmedName : undefined,
+            organizationApprovalStatus: accountType === "team" && selectedOrganization ? "requested" : accountType === "organization" ? "approved" : "none",
+            createdAt: new Date().toISOString(),
+            isDemo: false
+          };
+          const savedLocalUser = await createLocalAccount(localUser, password);
+          writeMockUser(savedLocalUser);
+          void savePersistentRecord("profiles", savedLocalUser.id, savedLocalUser);
+        } else {
+          const savedLocalUser = await authenticateLocalAccount(trimmedEmail, password);
+          writeMockUser(savedLocalUser);
+          void savePersistentRecord("profiles", savedLocalUser.id, savedLocalUser);
+        }
       }
       router.push("/profile");
       router.refresh();
@@ -128,7 +139,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
             {isSignUp ? <UserRoundPlus className="h-6 w-6 text-orange-200" /> : <LockKeyhole className="h-6 w-6 text-orange-200" />}
             <div>
               <h2 className="text-2xl font-semibold">{isSignUp ? "Sign up" : "Sign in"}</h2>
-              <p className="text-sm text-orange-50/58">{isMockMode ? "Local account mode is active for this workspace." : "Secure account access is enabled."}</p>
+              <p className="text-sm text-orange-50/58">{isMockMode ? "Local account mode is active. Sign in only works for accounts created in this workspace." : "Secure account access is enabled."}</p>
             </div>
           </div>
 

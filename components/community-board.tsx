@@ -29,13 +29,14 @@ import {
   getCommunityAuthorFromAuth
 } from "@/lib/community-data";
 import { readMockUser } from "@/lib/auth";
-import { loadPersistentRecords, loadPersistentSet, savePersistentRecord, savePersistentSet } from "@/lib/cloud-persistence";
+import { loadPersistentRecords, loadPersistentSet, PUBLIC_COMMUNITY_OWNER_KEY, savePersistentRecord, savePersistentSet } from "@/lib/cloud-persistence";
 
 const LOCAL_POSTS_KEY = "rocketry-house-community-posts";
 const LIKED_POSTS_KEY = "rocketry-house-community-liked-posts";
 const BOOKMARKED_POSTS_KEY = "rocketry-house-community-bookmarked-posts";
 const REPORTED_POSTS_KEY = "rocketry-house-community-reported-posts";
 const memoryStore = new Map<string, string>();
+const COMMUNITY_ARCHIVE_OPTIONS = { ownerKey: PUBLIC_COMMUNITY_OWNER_KEY };
 
 function getStoredItem(key: string) {
   if (typeof window === "undefined" || !window.localStorage) return memoryStore.get(key) ?? null;
@@ -106,6 +107,7 @@ export function CommunityBoard() {
   const [reported, setReported] = useState<Set<string>>(new Set());
   const [author, setAuthor] = useState(currentCommunityUser);
   const [teamOnly, setTeamOnly] = useState(false);
+  const [archiveStatus, setArchiveStatus] = useState("");
   const [draft, setDraft] = useState({
     topic: "CAD review",
     title: "",
@@ -120,7 +122,7 @@ export function CommunityBoard() {
     setLiked(readStoredSet(LIKED_POSTS_KEY));
     setBookmarked(readStoredSet(BOOKMARKED_POSTS_KEY));
     setReported(readStoredSet(REPORTED_POSTS_KEY));
-    void loadPersistentRecords<CommunityPost>("community_posts").then((records) => {
+    void loadPersistentRecords<CommunityPost>("community_posts", COMMUNITY_ARCHIVE_OPTIONS).then((records) => {
       const cloudPosts = records.map((record) => record.payload);
       const local = readStoredPosts();
       const merged = [...cloudPosts, ...local.filter((post) => !cloudPosts.some((cloud) => cloud.slug === post.slug))];
@@ -164,10 +166,11 @@ export function CommunityBoard() {
     storeSet(key, next);
   }
 
-  function submitPost() {
+  async function submitPost() {
     const title = draft.title.trim();
     const body = draft.body.trim();
     if (!title || !body) return;
+    setArchiveStatus("Saving post to community archive...");
 
     const paragraphs = body.split(/\n{2,}/).map((paragraph) => paragraph.trim()).filter(Boolean);
     const post: CommunityPost = {
@@ -192,9 +195,10 @@ export function CommunityBoard() {
     const next = [post, ...localPosts];
     setLocalPosts(next);
     setStoredItem(LOCAL_POSTS_KEY, JSON.stringify(next));
-    void savePersistentRecord("community_posts", post.slug, post);
+    const result = await savePersistentRecord("community_posts", post.slug, post, COMMUNITY_ARCHIVE_OPTIONS);
     setDraft({ topic: "CAD review", title: "", body: "", linkedProject: "", evidenceLinks: "", images: [] });
     setComposerOpen(false);
+    setArchiveStatus(result.cloud ? "Post archived to Supabase and local cache." : "Post saved locally. Supabase archive is unavailable or the archive table is not installed.");
   }
 
   function attachImages(files: FileList | null) {
@@ -205,31 +209,33 @@ export function CommunityBoard() {
       reader.onload = () => {
         const value = typeof reader.result === "string" ? reader.result : "";
         if (!value) return;
-        setDraft((current) => ({ ...current, images: [...current.images, value].slice(0, 4) }));
+        void compressImageDataUrl(value).then((compressed) => {
+          setDraft((current) => ({ ...current, images: [...current.images, compressed].slice(0, 4) }));
+        });
       };
       reader.readAsDataURL(file);
     });
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f4f0] px-6 py-24 text-slate-950">
+    <main className="min-h-screen overflow-x-hidden bg-[#f5f4f0] px-4 pb-16 pt-20 text-slate-950 sm:px-6 sm:py-24">
       <div className="mx-auto max-w-[1440px]">
         <section className="grid gap-6 lg:grid-cols-[1fr_360px]">
           <div>
             <div className="flex flex-wrap items-center gap-3">
-              <p className="text-sm uppercase tracking-[0.22em] text-slate-500">Community</p>
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-500 sm:text-sm sm:tracking-[0.22em]">Community</p>
               <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-700">Real-name only</span>
               <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">No anonymous posting</span>
             </div>
-            <h1 className="mt-4 max-w-4xl text-4xl font-semibold tracking-tight md:text-5xl">
+            <h1 className="mt-4 max-w-4xl text-[2rem] font-semibold leading-tight tracking-tight sm:text-4xl md:text-5xl">
               Practical discussions for rocket builders, teams, and organizations.
             </h1>
-            <p className="mt-4 max-w-3xl text-base leading-7 text-slate-600">
+            <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-600 sm:text-base sm:leading-7">
               Ask for CAD review, compare flight data, publish build notes, and keep every reply tied to a visible engineering identity.
             </p>
           </div>
 
-          <Card className="border-slate-200 bg-white p-5 text-slate-950 shadow-sm">
+          <Card className="border-slate-200 bg-white p-4 text-slate-950 shadow-sm sm:p-5">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">My community</h2>
               <div className="flex gap-2 text-slate-500">
@@ -246,11 +252,11 @@ export function CommunityBoard() {
               </div>
             </div>
             <div className="mt-5 grid gap-3">
-              <Button className="bg-orange-500 text-white hover:bg-orange-400" onClick={() => setComposerOpen(true)}>
+              <Button className="h-12 bg-orange-500 text-white hover:bg-orange-400" onClick={() => setComposerOpen(true)}>
                 <PenLine className="h-4 w-4" />
                 Write post
               </Button>
-              <Button variant="outline" onClick={() => setTeamOnly((value) => !value)} className="border-slate-200 bg-white text-slate-800 hover:bg-slate-50">
+              <Button variant="outline" onClick={() => setTeamOnly((value) => !value)} className="h-12 border-slate-200 bg-white text-slate-800 hover:bg-slate-50">
                 <UsersRound className="h-4 w-4" />
                 {teamOnly ? "Showing my team" : "My team discussions"}
               </Button>
@@ -262,13 +268,13 @@ export function CommunityBoard() {
         </section>
 
         {composerOpen ? (
-          <section className="mt-6 rounded-2xl border border-orange-200 bg-white p-5 shadow-lg">
-            <div className="flex items-start justify-between gap-4">
+          <section className="mt-6 rounded-2xl border border-orange-200 bg-white p-4 shadow-lg sm:p-5">
+            <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold">Write with verified profile</h2>
+                <h2 className="text-lg font-semibold sm:text-xl">Write with verified profile</h2>
                 <p className="mt-1 text-sm text-slate-500">Visible author: {author.name}, {author.team}</p>
               </div>
-              <button className="text-sm font-semibold text-slate-500 hover:text-slate-900" onClick={() => setComposerOpen(false)}>Close</button>
+              <button className="shrink-0 text-sm font-semibold text-slate-500 hover:text-slate-900" onClick={() => setComposerOpen(false)}>Close</button>
             </div>
             <div className="mt-4 grid gap-3 lg:grid-cols-[220px_1fr]">
               <label className="text-sm font-medium text-slate-600">
@@ -293,10 +299,10 @@ export function CommunityBoard() {
                 Evidence links
                 <input value={draft.evidenceLinks} onChange={(event) => setDraft({ ...draft, evidenceLinks: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-slate-900 outline-none focus:border-orange-300" placeholder="CSV, CAD version, photo set" />
               </label>
-              <div className="lg:col-span-2">
+              <div className="min-w-0 lg:col-span-2">
                 <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-600 transition hover:border-orange-300 hover:bg-orange-50">
                   <ImagePlus className="h-5 w-5" />
-                  Attach photos for evidence or build context
+                  <span className="text-center">Attach photos for evidence or build context</span>
                   <input type="file" accept="image/*" multiple className="hidden" onChange={(event) => attachImages(event.target.files)} />
                 </label>
                 {draft.images.length ? (
@@ -317,27 +323,32 @@ export function CommunityBoard() {
                 ) : null}
               </div>
             </div>
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <p className="text-sm text-slate-500">Safety note: do not post harmful payloads, targeting workflows, or propellant manufacturing instructions.</p>
-              <Button className="bg-orange-500 text-white hover:bg-orange-400" onClick={submitPost}>Publish post</Button>
+              <Button className="h-12 bg-orange-500 text-white hover:bg-orange-400 sm:h-10" onClick={submitPost}>Publish post</Button>
             </div>
           </section>
         ) : null}
+        {archiveStatus ? (
+          <p className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600 shadow-sm">
+            {archiveStatus}
+          </p>
+        ) : null}
 
-        <section className="mt-8 grid gap-5 lg:grid-cols-[260px_1fr_330px]">
-          <aside className="space-y-5">
-            <Card className="border-slate-200 bg-white p-5 text-slate-950 shadow-sm">
+        <section className="mt-6 grid gap-5 lg:mt-8 lg:grid-cols-[260px_1fr_330px]">
+          <aside className="space-y-5 lg:order-none">
+            <Card className="border-slate-200 bg-white p-4 text-slate-950 shadow-sm sm:p-5">
               <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
                 <Search className="h-4 w-4" />
                 <input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent outline-none" placeholder="Search posts" />
               </label>
               <h2 className="mt-5 font-semibold">Topics</h2>
-              <div className="mt-3 flex flex-wrap gap-2 lg:block lg:space-y-2">
+              <div className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1 lg:mx-0 lg:block lg:space-y-2 lg:overflow-visible lg:px-0 lg:pb-0">
                 {communityTopics.map((topic) => (
                   <button
                     key={topic}
                     onClick={() => setActiveTopic(topic)}
-                    className={`rounded-full border px-3 py-2 text-sm transition lg:flex lg:w-full lg:items-center lg:justify-between lg:rounded-lg ${
+                    className={`shrink-0 rounded-full border px-3 py-2 text-sm transition lg:flex lg:w-full lg:items-center lg:justify-between lg:rounded-lg ${
                       topic === activeTopic
                         ? "border-orange-200 bg-orange-50 font-semibold text-orange-700"
                         : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -350,7 +361,7 @@ export function CommunityBoard() {
               </div>
             </Card>
 
-            <Card className="border-slate-200 bg-white p-5 text-slate-950 shadow-sm">
+            <Card className="hidden border-slate-200 bg-white p-5 text-slate-950 shadow-sm sm:block">
               <h2 className="flex items-center gap-2 font-semibold">
                 <ShieldCheck className="h-5 w-5 text-emerald-600" />
                 Trust model
@@ -364,9 +375,9 @@ export function CommunityBoard() {
           </aside>
 
           <div className="space-y-5">
-            <section className="rounded-2xl bg-slate-100 p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-2xl font-semibold">Best posts</h2>
+            <section className="rounded-2xl bg-slate-100 p-4 sm:p-5">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="text-xl font-semibold sm:text-2xl">Best posts</h2>
                 <button onClick={() => setSortMode("Best")} className="flex items-center gap-1 text-sm text-slate-500">
                   View ranked
                   <ChevronRight className="h-4 w-4" />
@@ -394,8 +405,8 @@ export function CommunityBoard() {
             </section>
 
             <section className="rounded-2xl bg-white shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
-                <h2 className="text-2xl font-semibold">Feed</h2>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4 sm:p-5">
+                <h2 className="text-xl font-semibold sm:text-2xl">Feed</h2>
                 <label className="flex items-center gap-2 text-sm text-slate-500">
                   <SlidersHorizontal className="h-4 w-4" />
                   <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="rounded-md border border-slate-200 bg-white px-2 py-2 text-slate-700">
@@ -418,7 +429,7 @@ export function CommunityBoard() {
                     toggleReport={() => toggleSet(post.slug, REPORTED_POSTS_KEY, setReported, reported)}
                   />
                 )) : (
-                  <div className="p-8 text-center text-slate-500">
+                  <div className="p-6 text-center text-slate-500 sm:p-8">
                     <p className="font-semibold text-slate-800">No community posts yet.</p>
                     <p className="mt-1 text-sm">Real posts will appear here after signed-in users publish them.</p>
                   </div>
@@ -428,7 +439,7 @@ export function CommunityBoard() {
           </div>
 
           <aside className="space-y-5">
-            <Card className="border-slate-200 bg-white p-5 text-slate-950 shadow-sm">
+            <Card className="border-slate-200 bg-white p-4 text-slate-950 shadow-sm sm:p-5">
               <h2 className="font-semibold">Profile activity</h2>
               <div className="mt-4 grid grid-cols-3 gap-2 text-center text-sm">
                 <ProfileStat label="Posts" value={String(localPosts.length)} />
@@ -437,7 +448,7 @@ export function CommunityBoard() {
               </div>
             </Card>
 
-            <Card className="border-slate-200 bg-white p-5 text-slate-950 shadow-sm">
+            <Card className="border-slate-200 bg-white p-4 text-slate-950 shadow-sm sm:p-5">
               <h2 className="flex items-center gap-2 font-semibold">
                 <Star className="h-5 w-5 text-orange-500" />
                 Recommended posts
@@ -453,7 +464,7 @@ export function CommunityBoard() {
               </div>
             </Card>
 
-            <Card className="border-slate-200 bg-white p-5 text-slate-950 shadow-sm">
+            <Card className="border-slate-200 bg-white p-4 text-slate-950 shadow-sm sm:p-5">
               <h2 className="flex items-center gap-2 font-semibold">
                 <Flag className="h-5 w-5 text-slate-500" />
                 Moderation
@@ -468,6 +479,28 @@ export function CommunityBoard() {
       </div>
     </main>
   );
+}
+
+function compressImageDataUrl(dataUrl: string) {
+  return new Promise<string>((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      const maxSide = 1600;
+      const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      const context = canvas.getContext("2d");
+      if (!context) {
+        resolve(dataUrl);
+        return;
+      }
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", 0.86));
+    };
+    image.onerror = () => resolve(dataUrl);
+    image.src = dataUrl;
+  });
 }
 
 function PostCard({
@@ -490,31 +523,31 @@ function PostCard({
   compact?: boolean;
 }) {
   return (
-    <article className={`${compact ? "rounded-xl border border-slate-200 bg-white p-4" : "border-b border-slate-200 p-5 last:border-b-0"} transition hover:bg-slate-50`}>
+    <article className={`${compact ? "rounded-xl border border-slate-200 bg-white p-4" : "border-b border-slate-200 p-4 last:border-b-0 sm:p-5"} transition hover:bg-slate-50`}>
       <div className="flex items-start justify-between gap-4">
         <Link href={`/community/${post.slug}`} className="min-w-0 flex-1">
           <p className="text-sm font-medium text-slate-500">{post.topic}</p>
-          <h3 className={`${compact ? "mt-2 text-lg" : "mt-2 text-2xl"} font-semibold leading-tight text-slate-950`}>
+          <h3 className={`${compact ? "mt-2 text-base sm:text-lg" : "mt-2 text-xl sm:text-2xl"} break-words font-semibold leading-tight text-slate-950`}>
             <span className="mr-2 text-orange-500">&bull;</span>
             {post.title}
           </h3>
-          {!compact ? <p className="mt-3 line-clamp-2 text-lg leading-8 text-slate-500">{post.preview}</p> : null}
+          {!compact ? <p className="mt-3 line-clamp-3 text-base leading-7 text-slate-500 sm:line-clamp-2 sm:text-lg sm:leading-8">{post.preview}</p> : null}
         </Link>
-        <div className="flex gap-1 text-slate-400">
+        <div className="flex shrink-0 gap-1 text-slate-400">
           <IconButton active={bookmarked} label="Save post" onClick={toggleBookmark}><Bookmark className="h-4 w-4" /></IconButton>
           <IconButton active={reported} label="Report post" onClick={toggleReport}><Flag className="h-4 w-4" /></IconButton>
         </div>
       </div>
       {!compact ? <AuthorBlock post={post} /> : null}
       {post.images?.length ? <ImageStrip images={post.images} compact={compact} /> : null}
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <PostStats views={post.views} likes={post.likes + Number(liked)} comments={post.comments} compact={compact} />
-        <div className="flex gap-2">
-          <button onClick={toggleLike} className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-semibold ${liked ? "border-orange-200 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+        <div className="grid grid-cols-2 gap-2 sm:flex">
+          <button onClick={toggleLike} className={`inline-flex items-center justify-center gap-1 rounded-full border px-3 py-2 text-sm font-semibold sm:py-1.5 ${liked ? "border-orange-200 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
             <ThumbsUp className="h-4 w-4" />
             Like
           </button>
-          <Link href={`/community/${post.slug}`} className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50">
+          <Link href={`/community/${post.slug}`} className="inline-flex items-center justify-center gap-1 rounded-full border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-50 sm:py-1.5">
             <MessageSquare className="h-4 w-4" />
             Reply
           </Link>
@@ -536,15 +569,15 @@ function ImageStrip({ images, compact }: { images: string[]; compact?: boolean }
 
 function AuthorBlock({ post }: { post: CommunityPost }) {
   return (
-    <div className="mt-4 flex items-center gap-3">
+    <div className="mt-4 flex items-start gap-3">
       <Avatar name={post.author.name} avatarUrl={post.author.avatarUrl} />
-      <div>
+      <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-semibold">{post.author.name}</p>
           <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">{post.author.badge}</span>
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{post.author.profileType}</span>
         </div>
-        <p className="text-sm text-slate-500">{post.author.role} / {post.author.team} / {post.time}</p>
+        <p className="break-words text-sm text-slate-500">{post.author.role} / {post.author.team} / {post.time}</p>
       </div>
     </div>
   );

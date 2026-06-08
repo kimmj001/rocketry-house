@@ -13,6 +13,12 @@ export type CloudRecord<T> = {
   updated_at?: string;
 };
 
+type PersistenceOptions = {
+  ownerKey?: string;
+};
+
+export const PUBLIC_COMMUNITY_OWNER_KEY = "public:community";
+
 function memoryId() {
   return `device-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
@@ -42,40 +48,49 @@ export function localCollectionKey(collection: string) {
   return `rocketry-house.cloud-cache:${getPersistenceOwnerKey()}:${collection}`;
 }
 
-export function readLocalCollection<T>(collection: string) {
+function resolveOwnerKey(options?: PersistenceOptions) {
+  return options?.ownerKey ?? getPersistenceOwnerKey();
+}
+
+export function localCollectionKeyForOwner(collection: string, ownerKey: string) {
+  return `rocketry-house.cloud-cache:${ownerKey}:${collection}`;
+}
+
+export function readLocalCollection<T>(collection: string, options?: PersistenceOptions) {
   if (typeof window === "undefined") return [] as CloudRecord<T>[];
   try {
-    return JSON.parse(window.localStorage.getItem(localCollectionKey(collection)) ?? "[]") as CloudRecord<T>[];
+    return JSON.parse(window.localStorage.getItem(localCollectionKeyForOwner(collection, resolveOwnerKey(options))) ?? "[]") as CloudRecord<T>[];
   } catch {
     return [];
   }
 }
 
-function writeLocalCollection<T>(collection: string, records: CloudRecord<T>[]) {
+function writeLocalCollection<T>(collection: string, records: CloudRecord<T>[], options?: PersistenceOptions) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(localCollectionKey(collection), JSON.stringify(records));
+  window.localStorage.setItem(localCollectionKeyForOwner(collection, resolveOwnerKey(options)), JSON.stringify(records));
 }
 
-export function cachePersistentRecord<T>(collection: string, recordKey: string, payload: T) {
-  const current = readLocalCollection<T>(collection);
+export function cachePersistentRecord<T>(collection: string, recordKey: string, payload: T, options?: PersistenceOptions) {
+  const current = readLocalCollection<T>(collection, options);
   const record: CloudRecord<T> = {
     collection,
     record_key: recordKey,
     payload,
     updated_at: new Date().toISOString()
   };
-  writeLocalCollection(collection, [record, ...current.filter((item) => item.record_key !== recordKey)]);
+  writeLocalCollection(collection, [record, ...current.filter((item) => item.record_key !== recordKey)], options);
 }
 
-export async function savePersistentRecord<T>(collection: string, recordKey: string, payload: T) {
-  cachePersistentRecord(collection, recordKey, payload);
+export async function savePersistentRecord<T>(collection: string, recordKey: string, payload: T, options?: PersistenceOptions) {
+  cachePersistentRecord(collection, recordKey, payload, options);
 
   const supabase = getSupabaseClient();
   if (!supabase || isMockMode) return { cloud: false, error: null };
+  const ownerKey = resolveOwnerKey(options);
 
   const { error } = await supabase.from("user_data_records").upsert(
     {
-      owner_key: getPersistenceOwnerKey(),
+      owner_key: ownerKey,
       collection,
       record_key: recordKey,
       payload,
@@ -87,15 +102,16 @@ export async function savePersistentRecord<T>(collection: string, recordKey: str
   return { cloud: !error, error };
 }
 
-export async function loadPersistentRecords<T>(collection: string) {
-  const localRecords = readLocalCollection<T>(collection);
+export async function loadPersistentRecords<T>(collection: string, options?: PersistenceOptions) {
+  const localRecords = readLocalCollection<T>(collection, options);
   const supabase = getSupabaseClient();
   if (!supabase || isMockMode) return localRecords;
+  const ownerKey = resolveOwnerKey(options);
 
   const { data, error } = await supabase
     .from("user_data_records")
     .select("id, collection, record_key, payload, updated_at")
-    .eq("owner_key", getPersistenceOwnerKey())
+    .eq("owner_key", ownerKey)
     .eq("collection", collection)
     .order("updated_at", { ascending: false });
 
@@ -106,16 +122,16 @@ export async function loadPersistentRecords<T>(collection: string) {
     ...cloudRecords,
     ...localRecords.filter((local) => !cloudRecords.some((cloud) => cloud.record_key === local.record_key))
   ];
-  writeLocalCollection(collection, merged);
+  writeLocalCollection(collection, merged, options);
   return merged;
 }
 
-export async function savePersistentSet(collection: string, recordKey: string, values: Set<string>) {
-  return savePersistentRecord(collection, recordKey, Array.from(values));
+export async function savePersistentSet(collection: string, recordKey: string, values: Set<string>, options?: PersistenceOptions) {
+  return savePersistentRecord(collection, recordKey, Array.from(values), options);
 }
 
-export async function loadPersistentSet(collection: string, recordKey: string) {
-  const records = await loadPersistentRecords<string[]>(collection);
+export async function loadPersistentSet(collection: string, recordKey: string, options?: PersistenceOptions) {
+  const records = await loadPersistentRecords<string[]>(collection, options);
   const record = records.find((item) => item.record_key === recordKey);
   return new Set(record?.payload ?? []);
 }

@@ -13,7 +13,7 @@ import {
   getCommunityAuthorFromAuth
 } from "@/lib/community-data";
 import { readMockUser } from "@/lib/auth";
-import { loadPersistentRecords, loadPersistentSet, savePersistentRecord, savePersistentSet } from "@/lib/cloud-persistence";
+import { loadPersistentRecords, loadPersistentSet, PUBLIC_COMMUNITY_OWNER_KEY, savePersistentRecord, savePersistentSet } from "@/lib/cloud-persistence";
 
 const LOCAL_POSTS_KEY = "rocketry-house-community-posts";
 const LIKED_POSTS_KEY = "rocketry-house-community-liked-posts";
@@ -21,6 +21,7 @@ const BOOKMARKED_POSTS_KEY = "rocketry-house-community-bookmarked-posts";
 const REPORTED_POSTS_KEY = "rocketry-house-community-reported-posts";
 const COMMENT_KEY_PREFIX = "rocketry-house-community-comments:";
 const memoryStore = new Map<string, string>();
+const COMMUNITY_ARCHIVE_OPTIONS = { ownerKey: PUBLIC_COMMUNITY_OWNER_KEY };
 
 function getStoredItem(key: string) {
   if (typeof window === "undefined" || !window.localStorage) return memoryStore.get(key) ?? null;
@@ -66,7 +67,7 @@ function readStoredComments(slug: string) {
 
 function storeComments(slug: string, comments: CommunityComment[]) {
   setStoredItem(`${COMMENT_KEY_PREFIX}${slug}`, JSON.stringify(comments));
-  void savePersistentRecord("community_comments", slug, comments);
+  void savePersistentRecord("community_comments", slug, comments, COMMUNITY_ARCHIVE_OPTIONS);
 }
 
 export function CommunityPostDetail({ slug, initialPost, related }: { slug: string; initialPost?: CommunityPost; related: CommunityPost[] }) {
@@ -89,11 +90,11 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
     setLiked(readStoredSet(LIKED_POSTS_KEY).has(slug));
     setBookmarked(readStoredSet(BOOKMARKED_POSTS_KEY).has(slug));
     setReported(readStoredSet(REPORTED_POSTS_KEY).has(slug));
-    void loadPersistentRecords<CommunityPost>("community_posts").then((records) => {
+    void loadPersistentRecords<CommunityPost>("community_posts", COMMUNITY_ARCHIVE_OPTIONS).then((records) => {
       const cloudPost = records.find((record) => record.record_key === slug)?.payload;
       if (cloudPost) setPost(cloudPost);
     });
-    void loadPersistentRecords<CommunityComment[]>("community_comments").then((records) => {
+    void loadPersistentRecords<CommunityComment[]>("community_comments", COMMUNITY_ARCHIVE_OPTIONS).then((records) => {
       const cloudComments = records.find((record) => record.record_key === slug)?.payload;
       if (cloudComments?.length) setComments(cloudComments);
     });
@@ -143,8 +144,8 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
 
   if (!post) {
     return (
-      <main className="min-h-screen bg-[#f5f4f0] px-6 py-24 text-slate-950">
-        <div className="mx-auto max-w-3xl rounded-2xl bg-white p-8 shadow-sm">
+      <main className="min-h-screen overflow-x-hidden bg-[#f5f4f0] px-4 pb-16 pt-20 text-slate-950 sm:px-6 sm:py-24">
+        <div className="mx-auto max-w-3xl rounded-2xl bg-white p-5 shadow-sm sm:p-8">
           <Link href="/community" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-orange-600">
             <ArrowLeft className="h-4 w-4" />
             Back to community
@@ -160,35 +161,35 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
   const displayedComments = comments.length;
 
   return (
-    <main className="min-h-screen bg-[#f5f4f0] px-6 py-24 text-slate-950">
-      <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[1fr_320px]">
+    <main className="min-h-screen overflow-x-hidden bg-[#f5f4f0] px-4 pb-16 pt-20 text-slate-950 sm:px-6 sm:py-24">
+      <div className="mx-auto grid max-w-6xl gap-5 lg:grid-cols-[1fr_320px] lg:gap-6">
         <section className="rounded-2xl bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-200 p-5">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-200 p-4 sm:p-5">
             <Link href="/community" className="flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-orange-600">
               <ArrowLeft className="h-4 w-4" />
               Back to community
             </Link>
-            <div className="flex items-center gap-2 text-slate-500">
+            <div className="flex shrink-0 items-center gap-1 text-slate-500 sm:gap-2">
               <button onClick={sharePost} className="rounded-full p-2 hover:bg-slate-100" aria-label="Share post"><Share2 className="h-5 w-5" /></button>
               <button onClick={() => toggleStored(BOOKMARKED_POSTS_KEY, bookmarked, setBookmarked)} className={`rounded-full p-2 hover:bg-slate-100 ${bookmarked ? "text-orange-600" : ""}`} aria-label="Save post"><Bookmark className="h-5 w-5" /></button>
               <MoreVertical className="h-5 w-5" />
             </div>
           </div>
 
-          <article className="p-7">
+          <article className="p-4 sm:p-7">
             <div className="flex flex-wrap items-center gap-2">
               <p className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-500">{post.topic}</p>
               {post.createdLocally ? <span className="rounded-full bg-orange-50 px-3 py-1 text-sm font-semibold text-orange-700">Drafted locally</span> : null}
               {copied ? <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">Link copied</span> : null}
             </div>
-            <h1 className="mt-5 text-4xl font-semibold leading-tight">{post.title}</h1>
+            <h1 className="mt-5 break-words text-3xl font-semibold leading-tight sm:text-4xl">{post.title}</h1>
             <p className="mt-3 text-sm text-slate-500">{post.time} / views {post.views}</p>
 
             <AuthorBlock post={post} />
 
-            <div className="mt-8 space-y-6 text-xl leading-10 text-slate-800">
+            <div className="mt-7 space-y-5 text-base leading-8 text-slate-800 sm:mt-8 sm:space-y-6 sm:text-xl sm:leading-10">
               {post.body.map((paragraph) => (
-                <p key={paragraph}>{paragraph}</p>
+                <p key={paragraph} className="break-words">{paragraph}</p>
               ))}
             </div>
 
@@ -206,16 +207,16 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
               <EvidencePill label="Visible identity" value={`${post.author.name}, ${post.author.team}`} />
             </div>
 
-            <div className="mt-8 flex flex-wrap items-center justify-around gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-700">
-              <button onClick={() => toggleStored(LIKED_POSTS_KEY, liked, setLiked)} className={`flex items-center gap-2 font-semibold ${liked ? "text-orange-700" : ""}`}><ThumbsUp className="h-5 w-5" /> Like {displayedLikes}</button>
-              <a href="#comments" className="flex items-center gap-2 font-semibold"><MessageSquare className="h-5 w-5" /> Comments {displayedComments}</a>
-              <button onClick={() => toggleStored(REPORTED_POSTS_KEY, reported, setReported)} className={`flex items-center gap-2 font-semibold ${reported ? "text-red-600" : ""}`}><Flag className="h-5 w-5" /> {reported ? "Reported" : "Report"}</button>
+            <div className="mt-8 grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-slate-700 sm:flex sm:flex-wrap sm:items-center sm:justify-around sm:gap-3 sm:p-4">
+              <button onClick={() => toggleStored(LIKED_POSTS_KEY, liked, setLiked)} className={`flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-3 font-semibold sm:bg-transparent sm:py-0 ${liked ? "text-orange-700" : ""}`}><ThumbsUp className="h-5 w-5" /> Like {displayedLikes}</button>
+              <a href="#comments" className="flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-3 font-semibold sm:bg-transparent sm:py-0"><MessageSquare className="h-5 w-5" /> Comments {displayedComments}</a>
+              <button onClick={() => toggleStored(REPORTED_POSTS_KEY, reported, setReported)} className={`flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-3 font-semibold sm:bg-transparent sm:py-0 ${reported ? "text-red-600" : ""}`}><Flag className="h-5 w-5" /> {reported ? "Reported" : "Report"}</button>
             </div>
           </article>
 
-          <section id="comments" className="border-t border-slate-200 p-7">
+          <section id="comments" className="border-t border-slate-200 p-4 sm:p-7">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-2xl font-semibold">Comments {displayedComments}</h2>
+              <h2 className="text-xl font-semibold sm:text-2xl">Comments {displayedComments}</h2>
               <div className="flex gap-3 text-sm">
                 <button onClick={() => setSortMode("Most helpful")} className={sortMode === "Most helpful" ? "font-semibold text-slate-900" : "text-slate-400"}>Most helpful</button>
                 <button onClick={() => setSortMode("Newest")} className={sortMode === "Newest" ? "font-semibold text-slate-900" : "text-slate-400"}>Newest</button>
@@ -224,7 +225,7 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
 
             <div className="mt-5 space-y-6">
               {sortedComments.map((comment) => (
-                <div key={comment.id} className="flex gap-4 border-b border-slate-100 pb-6 last:border-b-0">
+                <div key={comment.id} className="flex gap-3 border-b border-slate-100 pb-6 last:border-b-0 sm:gap-4">
                   <Avatar name={comment.author.name} avatarUrl={comment.author.avatarUrl} />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -232,7 +233,7 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
                       <p className="text-sm text-slate-500">{comment.author.role}</p>
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{comment.author.profileType}</span>
                     </div>
-                    <p className="mt-2 leading-7 text-slate-700">{comment.body}</p>
+                    <p className="mt-2 break-words leading-7 text-slate-700">{comment.body}</p>
                     <div className="mt-3 flex items-center gap-4 text-sm text-slate-500">
                       <span>{comment.time}</span>
                       <button className="flex items-center gap-1"><ThumbsUp className="h-4 w-4" />{comment.likes}</button>
@@ -242,7 +243,7 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
               ))}
             </div>
 
-            <div className="sticky bottom-0 mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-lg">
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-3 shadow-lg sm:sticky sm:bottom-0 sm:p-4">
               <div className="flex gap-3">
                 <Avatar name={author.name} avatarUrl={author.avatarUrl} />
                 <div className="flex-1">
@@ -252,9 +253,9 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
                     className="min-h-24 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none placeholder:text-slate-400 focus:border-orange-300"
                     placeholder={`Write as ${author.name}`}
                   />
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                     <p className="text-sm text-slate-500">Real-name reply. Keep it technical, lawful, and evidence-oriented.</p>
-                    <button onClick={submitReply} className="rounded-md bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-400">Post reply</button>
+                    <button onClick={submitReply} className="rounded-md bg-orange-500 px-4 py-3 text-sm font-semibold text-white hover:bg-orange-400 sm:py-2">Post reply</button>
                   </div>
                 </div>
               </div>
@@ -263,7 +264,7 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
         </section>
 
         <aside className="space-y-5">
-          <Card className="border-slate-200 bg-white p-5 text-slate-950 shadow-sm">
+          <Card className="border-slate-200 bg-white p-4 text-slate-950 shadow-sm sm:p-5">
             <h2 className="font-semibold">Post metrics</h2>
             <div className="mt-4 grid grid-cols-3 gap-2 text-center text-sm">
               <Metric label="Views" value={post.views} />
@@ -272,7 +273,7 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
             </div>
           </Card>
 
-          <Card className="border-slate-200 bg-white p-5 text-slate-950 shadow-sm">
+          <Card className="border-slate-200 bg-white p-4 text-slate-950 shadow-sm sm:p-5">
             <h2 className="font-semibold">Recommended posts</h2>
             <div className="mt-4 space-y-4">
               {related.map((item) => (
@@ -292,15 +293,15 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
 
 function AuthorBlock({ post }: { post: CommunityPost }) {
   return (
-    <div className="mt-5 flex items-center gap-3">
+    <div className="mt-5 flex items-start gap-3">
       <Avatar name={post.author.name} avatarUrl={post.author.avatarUrl} />
-      <div>
+      <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-semibold">{post.author.name}</p>
           <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">{post.author.badge}</span>
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{post.author.profileType}</span>
         </div>
-        <p className="text-sm text-slate-500">{post.author.role} / {post.author.team}</p>
+        <p className="break-words text-sm text-slate-500">{post.author.role} / {post.author.team}</p>
       </div>
     </div>
   );
@@ -320,9 +321,9 @@ function Avatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
 
 function EvidencePill({ label, value }: { label: string; value: string }) {
   return (
-    <div>
+    <div className="min-w-0">
       <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{label}</p>
-      <p className="mt-1 font-medium text-slate-700">{value}</p>
+      <p className="mt-1 break-words font-medium text-slate-700">{value}</p>
     </div>
   );
 }
