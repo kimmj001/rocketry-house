@@ -13,7 +13,8 @@ import {
   getCommunityAuthorFromAuth
 } from "@/lib/community-data";
 import { readMockUser } from "@/lib/auth";
-import { loadPersistentRecords, loadPersistentSet, PUBLIC_COMMUNITY_OWNER_KEY, savePersistentRecord, savePersistentSet } from "@/lib/cloud-persistence";
+import { loadPersistentSet, savePersistentSet } from "@/lib/cloud-persistence";
+import { loadCommunityCommentsArchive, loadCommunityPostsArchive, saveCommunityCommentsArchive } from "@/lib/community-archive";
 
 const LOCAL_POSTS_KEY = "rocketry-house-community-posts";
 const LIKED_POSTS_KEY = "rocketry-house-community-liked-posts";
@@ -21,7 +22,6 @@ const BOOKMARKED_POSTS_KEY = "rocketry-house-community-bookmarked-posts";
 const REPORTED_POSTS_KEY = "rocketry-house-community-reported-posts";
 const COMMENT_KEY_PREFIX = "rocketry-house-community-comments:";
 const memoryStore = new Map<string, string>();
-const COMMUNITY_ARCHIVE_OPTIONS = { ownerKey: PUBLIC_COMMUNITY_OWNER_KEY };
 
 function getStoredItem(key: string) {
   if (typeof window === "undefined" || !window.localStorage) return memoryStore.get(key) ?? null;
@@ -30,7 +30,13 @@ function getStoredItem(key: string) {
 
 function setStoredItem(key: string, value: string) {
   memoryStore.set(key, value);
-  if (typeof window !== "undefined" && window.localStorage) window.localStorage.setItem(key, value);
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      // IndexedDB archive remains available when localStorage cannot accept more data.
+    }
+  }
 }
 
 function readStoredPosts() {
@@ -67,7 +73,7 @@ function readStoredComments(slug: string) {
 
 function storeComments(slug: string, comments: CommunityComment[]) {
   setStoredItem(`${COMMENT_KEY_PREFIX}${slug}`, JSON.stringify(comments));
-  void savePersistentRecord("community_comments", slug, comments, COMMUNITY_ARCHIVE_OPTIONS);
+  void saveCommunityCommentsArchive(slug, comments);
 }
 
 export function CommunityPostDetail({ slug, initialPost, related }: { slug: string; initialPost?: CommunityPost; related: CommunityPost[] }) {
@@ -90,13 +96,12 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
     setLiked(readStoredSet(LIKED_POSTS_KEY).has(slug));
     setBookmarked(readStoredSet(BOOKMARKED_POSTS_KEY).has(slug));
     setReported(readStoredSet(REPORTED_POSTS_KEY).has(slug));
-    void loadPersistentRecords<CommunityPost>("community_posts", COMMUNITY_ARCHIVE_OPTIONS).then((records) => {
-      const cloudPost = records.find((record) => record.record_key === slug)?.payload;
-      if (cloudPost) setPost(cloudPost);
+    void loadCommunityPostsArchive().then((posts) => {
+      const archivedPost = posts.find((item) => item.slug === slug);
+      if (archivedPost) setPost(archivedPost);
     });
-    void loadPersistentRecords<CommunityComment[]>("community_comments", COMMUNITY_ARCHIVE_OPTIONS).then((records) => {
-      const cloudComments = records.find((record) => record.record_key === slug)?.payload;
-      if (cloudComments?.length) setComments(cloudComments);
+    void loadCommunityCommentsArchive(slug).then((archivedComments) => {
+      if (archivedComments.length) setComments(archivedComments);
     });
     void loadPersistentSet("community_state", LIKED_POSTS_KEY).then((value) => setLiked(value.has(slug)));
     void loadPersistentSet("community_state", BOOKMARKED_POSTS_KEY).then((value) => setBookmarked(value.has(slug)));

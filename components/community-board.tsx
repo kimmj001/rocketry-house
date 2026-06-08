@@ -29,14 +29,14 @@ import {
   getCommunityAuthorFromAuth
 } from "@/lib/community-data";
 import { readMockUser } from "@/lib/auth";
-import { loadPersistentRecords, loadPersistentSet, PUBLIC_COMMUNITY_OWNER_KEY, savePersistentRecord, savePersistentSet } from "@/lib/cloud-persistence";
+import { loadPersistentSet, savePersistentSet } from "@/lib/cloud-persistence";
+import { loadCommunityPostsArchive, saveCommunityPostArchive } from "@/lib/community-archive";
 
 const LOCAL_POSTS_KEY = "rocketry-house-community-posts";
 const LIKED_POSTS_KEY = "rocketry-house-community-liked-posts";
 const BOOKMARKED_POSTS_KEY = "rocketry-house-community-bookmarked-posts";
 const REPORTED_POSTS_KEY = "rocketry-house-community-reported-posts";
 const memoryStore = new Map<string, string>();
-const COMMUNITY_ARCHIVE_OPTIONS = { ownerKey: PUBLIC_COMMUNITY_OWNER_KEY };
 
 function getStoredItem(key: string) {
   if (typeof window === "undefined" || !window.localStorage) return memoryStore.get(key) ?? null;
@@ -45,7 +45,13 @@ function getStoredItem(key: string) {
 
 function setStoredItem(key: string, value: string) {
   memoryStore.set(key, value);
-  if (typeof window !== "undefined" && window.localStorage) window.localStorage.setItem(key, value);
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      // IndexedDB archive still stores community posts when localStorage is full.
+    }
+  }
 }
 
 type SortMode = "Newest" | "Best" | "Most viewed";
@@ -122,13 +128,7 @@ export function CommunityBoard() {
     setLiked(readStoredSet(LIKED_POSTS_KEY));
     setBookmarked(readStoredSet(BOOKMARKED_POSTS_KEY));
     setReported(readStoredSet(REPORTED_POSTS_KEY));
-    void loadPersistentRecords<CommunityPost>("community_posts", COMMUNITY_ARCHIVE_OPTIONS).then((records) => {
-      const cloudPosts = records.map((record) => record.payload);
-      const local = readStoredPosts();
-      const merged = [...cloudPosts, ...local.filter((post) => !cloudPosts.some((cloud) => cloud.slug === post.slug))];
-      setLocalPosts(merged);
-      setStoredItem(LOCAL_POSTS_KEY, JSON.stringify(merged));
-    });
+    void loadCommunityPostsArchive().then((posts) => setLocalPosts(posts));
     void loadPersistentSet("community_state", LIKED_POSTS_KEY).then((value) => value.size && setLiked(value));
     void loadPersistentSet("community_state", BOOKMARKED_POSTS_KEY).then((value) => value.size && setBookmarked(value));
     void loadPersistentSet("community_state", REPORTED_POSTS_KEY).then((value) => value.size && setReported(value));
@@ -195,10 +195,11 @@ export function CommunityBoard() {
     const next = [post, ...localPosts];
     setLocalPosts(next);
     setStoredItem(LOCAL_POSTS_KEY, JSON.stringify(next));
-    const result = await savePersistentRecord("community_posts", post.slug, post, COMMUNITY_ARCHIVE_OPTIONS);
+    const result = await saveCommunityPostArchive(post, localPosts);
+    setLocalPosts(result.posts);
     setDraft({ topic: "CAD review", title: "", body: "", linkedProject: "", evidenceLinks: "", images: [] });
     setComposerOpen(false);
-    setArchiveStatus(result.cloud ? "Post archived to Supabase and local cache." : "Post saved locally. Supabase archive is unavailable or the archive table is not installed.");
+    setArchiveStatus(result.cloudOk ? "Post archived to Supabase and local cache." : result.idbOk ? "Post saved to browser archive. Supabase table is not installed yet." : "Post is visible for this session, but browser storage could not archive it.");
   }
 
   function attachImages(files: FileList | null) {
