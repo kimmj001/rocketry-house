@@ -4,9 +4,7 @@ import { useEffect, useState } from "react";
 import { Download, PackageOpen } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { PURCHASE_STORAGE_KEY, type StoredPurchase } from "@/components/checkout-button";
-import { isDemoAccount, readMockUser } from "@/lib/auth";
 import { loadPersistentRecords } from "@/lib/cloud-persistence";
-import { mockProjects } from "@/lib/mock-data";
 
 export default function PurchasesPage() {
   const [purchases, setPurchases] = useState<StoredPurchase[]>([]);
@@ -26,16 +24,6 @@ export default function PurchasesPage() {
           setPurchases(merged);
         return;
       }
-      if (isDemoAccount(readMockUser())) {
-        setPurchases(mockProjects.slice(1, 3).map((project) => ({
-          id: `demo-${project.id}`,
-          projectSlug: project.slug,
-          title: project.title,
-          priceCents: project.priceCents,
-          files: project.files,
-          purchasedAt: "2026-05-24T00:00:00.000Z"
-        })));
-      }
       } catch {
       setPurchases([]);
     }
@@ -47,14 +35,14 @@ export default function PurchasesPage() {
     <main className="min-h-screen bg-space-radial px-6 py-24">
       <div className="mx-auto max-w-5xl">
         <h1 className="text-4xl font-semibold">Purchases and downloads</h1>
-        <p className="mt-3 text-orange-50/62">Completed mock checkout records appear here for the signed-in browser session.</p>
+        <p className="mt-3 text-orange-50/62">Completed checkout records appear here for the signed-in browser session.</p>
         {purchases.length ? (
           <div className="mt-8 space-y-3">
             {purchases.map((purchase) => (
               <Card key={purchase.id} className="flex items-center justify-between gap-4 p-4">
                 <div>
                   <p className="font-medium">{purchase.title}</p>
-                  <p className="text-sm text-orange-50/58">{purchase.files.length} files available · forking unlocked · {new Date(purchase.purchasedAt).toLocaleDateString()}</p>
+                  <p className="text-sm text-orange-50/58">{purchase.files.length} files available / forking unlocked / {new Date(purchase.purchasedAt).toLocaleDateString()}</p>
                 </div>
                 <Download className="h-5 w-5 shrink-0 text-orange-200" />
               </Card>

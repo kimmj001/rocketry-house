@@ -2,10 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { Filter, Search, SlidersHorizontal } from "lucide-react";
-import { ProjectCard } from "@/components/project-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { mockProjects } from "@/lib/mock-data";
 
 const categories = ["All", "Rockets", "Motors", "Telemetry", "Writeups"];
 const filterGroups = [
@@ -21,38 +19,10 @@ export default function MarketplacePage() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const projects = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    return mockProjects.filter((project) => {
-      const text = [
-        project.title,
-        project.creator,
-        project.difficulty,
-        project.motorClass,
-        project.verificationStatus,
-        project.publicReference?.name,
-        ...project.tags,
-        ...project.files
-      ].join(" ").toLowerCase();
-      const categoryMatch =
-        category === "All" ||
-        (category === "Rockets" && !project.tags.some((tag) => tag.includes("static-fire") || tag.includes("motor"))) ||
-        (category === "Motors" && project.tags.some((tag) => tag.includes("motor") || tag.includes("static-fire") || tag.includes("thrust"))) ||
-        (category === "Telemetry" && (project.tags.some((tag) => tag.includes("telemetry") || tag.includes("flight")) || Boolean(project.actualAltitudeM))) ||
-        (category === "Writeups" && project.tags.some((tag) => tag.includes("analysis") || tag.includes("archive") || tag.includes("study")));
-
-      const filterMatch = activeFilters.every((filter) => {
-        if (filter === "Free") return project.priceCents === 0;
-        if (filter === "Paid") return project.priceCents > 0;
-        if (filter === "Verified") return project.verificationStatus.toLowerCase().includes("verified") || project.verificationStatus.toLowerCase().includes("proof");
-        if (filter === "Has CAD") return project.files.some((file) => /cad|step|stl|json|ork/i.test(file));
-        if (filter === "Telemetry") return project.files.some((file) => /telemetry|csv|flight/i.test(file));
-        if (filter === "Motor data") return project.files.some((file) => /thrust|motor|eng|rse/i.test(file)) || project.motorClass.toLowerCase().includes("motor");
-        if (filter === "High Power") return project.difficulty === "High Power";
-        return true;
-      });
-
-      return categoryMatch && filterMatch && (!normalizedQuery || text.includes(normalizedQuery));
-    });
+    void query;
+    void category;
+    void activeFilters;
+    return [];
   }, [activeFilters, category, query]);
 
   function toggleFilter(filter: string) {
@@ -108,12 +78,12 @@ export default function MarketplacePage() {
         </div>
         </div>
 
-        <p className="mt-5 text-sm text-slate-600">{projects.length} projects match the current view.</p>
+        <p className="mt-5 text-sm text-slate-600">{projects.length} real projects match the current view.</p>
 
         <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-          {projects.map((project) => <ProjectCard key={project.id} project={project} />)}
+          {projects.map(() => null)}
         </div>
-        {!projects.length ? <Card className="mt-8 border-slate-200 bg-white p-8 text-center text-slate-600">No projects match this search. Clear filters or publish a new project package.</Card> : null}
+        {!projects.length ? <Card className="mt-8 border-slate-200 bg-white p-8 text-center text-slate-600">No public projects yet. Marketplace listings will appear only after real users publish project packages.</Card> : null}
       </div>
     </main>
   );

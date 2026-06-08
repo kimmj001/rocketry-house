@@ -24,7 +24,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   CommunityPost,
-  communityPosts,
   communityTopics,
   currentCommunityUser,
   getCommunityAuthorFromAuth
@@ -93,8 +92,7 @@ function postFreshness(post: CommunityPost) {
     const parsed = Number.parseInt(slugTime, 36);
     if (Number.isFinite(parsed) && parsed > 1_000_000_000_000) return parsed;
   }
-  const staticIndex = communityPosts.findIndex((item) => item.slug === post.slug);
-  return staticIndex === -1 ? 0 : communityPosts.length - staticIndex;
+  return 0;
 }
 
 export function CommunityBoard() {
@@ -138,7 +136,7 @@ export function CommunityBoard() {
     return () => window.removeEventListener("rocketry-auth-change", syncAuthor);
   }, []);
 
-  const posts = useMemo(() => [...localPosts, ...communityPosts], [localPosts]);
+  const posts = useMemo(() => localPosts, [localPosts]);
   const visiblePosts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     const filtered = posts.filter((post) => {
@@ -375,7 +373,7 @@ export function CommunityBoard() {
                 </button>
               </div>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {bestPosts.map((post) => (
+                {bestPosts.length ? bestPosts.map((post) => (
                   <PostCard
                     key={post.slug}
                     post={post}
@@ -387,7 +385,11 @@ export function CommunityBoard() {
                     toggleReport={() => toggleSet(post.slug, REPORTED_POSTS_KEY, setReported, reported)}
                     compact
                   />
-                ))}
+                )) : (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500 md:col-span-2 xl:col-span-3">
+                    No best posts yet. Rankings here will be based only on real community activity.
+                  </div>
+                )}
               </div>
             </section>
 
@@ -417,8 +419,8 @@ export function CommunityBoard() {
                   />
                 )) : (
                   <div className="p-8 text-center text-slate-500">
-                    <p className="font-semibold text-slate-800">No posts match this filter.</p>
-                    <p className="mt-1 text-sm">Try another topic or write the first post for this category.</p>
+                    <p className="font-semibold text-slate-800">No community posts yet.</p>
+                    <p className="mt-1 text-sm">Real posts will appear here after signed-in users publish them.</p>
                   </div>
                 )}
               </div>
@@ -429,8 +431,8 @@ export function CommunityBoard() {
             <Card className="border-slate-200 bg-white p-5 text-slate-950 shadow-sm">
               <h2 className="font-semibold">Profile activity</h2>
               <div className="mt-4 grid grid-cols-3 gap-2 text-center text-sm">
-                <ProfileStat label="Posts" value={String(12 + localPosts.length)} />
-                <ProfileStat label="Likes" value={String(438 + liked.size)} />
+                <ProfileStat label="Posts" value={String(localPosts.length)} />
+                <ProfileStat label="Likes" value={String(liked.size)} />
                 <ProfileStat label="Saved" value={String(bookmarked.size)} />
               </div>
             </Card>
@@ -441,13 +443,13 @@ export function CommunityBoard() {
                 Recommended posts
               </h2>
               <div className="mt-4 space-y-4">
-                {recommendedPosts.map((post) => (
+                {recommendedPosts.length ? recommendedPosts.map((post) => (
                   <Link key={post.slug} href={`/community/${post.slug}`} className="block border-b border-slate-100 pb-4 last:border-b-0">
                     <p className="text-sm text-slate-500">{post.topic}</p>
                     <p className="mt-1 text-base font-semibold leading-snug text-slate-900">{post.title}</p>
                     <PostStats views={post.views} likes={post.likes + Number(liked.has(post.slug))} comments={post.comments} compact />
                   </Link>
-                ))}
+                )) : <p className="text-sm leading-6 text-slate-500">Recommendations will appear after real posts are saved or gain activity.</p>}
               </div>
             </Card>
 
@@ -457,7 +459,7 @@ export function CommunityBoard() {
                 Moderation
               </h2>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                Reports mark posts for admin review. Rocketry House removes unsafe, unlawful, or weaponization-oriented content.
+                Reports mark posts for platform review. Rocketry House removes unsafe, unlawful, or weaponization-oriented content.
               </p>
               <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Reported this session: {reported.size}</p>
             </Card>
@@ -493,7 +495,7 @@ function PostCard({
         <Link href={`/community/${post.slug}`} className="min-w-0 flex-1">
           <p className="text-sm font-medium text-slate-500">{post.topic}</p>
           <h3 className={`${compact ? "mt-2 text-lg" : "mt-2 text-2xl"} font-semibold leading-tight text-slate-950`}>
-            <span className="mr-2 text-orange-500">•</span>
+            <span className="mr-2 text-orange-500">&bull;</span>
             {post.title}
           </h3>
           {!compact ? <p className="mt-3 line-clamp-2 text-lg leading-8 text-slate-500">{post.preview}</p> : null}
@@ -586,3 +588,4 @@ function ProfileStat({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+

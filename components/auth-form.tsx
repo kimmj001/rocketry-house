@@ -19,7 +19,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [accountType, setAccountType] = useState<"personal" | "team" | "organization">("personal");
-  const [organizationName, setOrganizationName] = useState<string>(sampleOrganizations[0].name);
+  const [organizationName, setOrganizationName] = useState<string>(sampleOrganizations[0]?.name ?? "");
   const [approvalRequested, setApprovalRequested] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -42,6 +42,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
     const supabase = getSupabaseClient();
     const trimmedName = name.trim();
     const trimmedEmail = email.trim();
+    const selectedOrganization = accountType === "team" && organizationName ? organizationName : undefined;
 
     try {
       if (!trimmedEmail || !password) {
@@ -61,8 +62,8 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
                 data: {
                   name: trimmedName,
                   account_type: accountType,
-                  organization_name: accountType === "team" ? organizationName : accountType === "organization" ? trimmedName : undefined,
-                  organization_approval_status: accountType === "team" ? "requested" : accountType === "organization" ? "approved" : "none"
+                  organization_name: accountType === "team" ? selectedOrganization : accountType === "organization" ? trimmedName : undefined,
+                  organization_approval_status: accountType === "team" && selectedOrganization ? "requested" : accountType === "organization" ? "approved" : "none"
                 }
               }
             })
@@ -76,10 +77,10 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
           accountType: (metadata.account_type === "team" || metadata.account_type === "organization" || metadata.account_type === "personal")
             ? metadata.account_type
             : accountType,
-          organizationName: typeof metadata.organization_name === "string" ? metadata.organization_name : accountType === "team" ? organizationName : accountType === "organization" ? trimmedName : undefined,
+          organizationName: typeof metadata.organization_name === "string" ? metadata.organization_name : accountType === "team" ? selectedOrganization : accountType === "organization" ? trimmedName : undefined,
           organizationApprovalStatus: (metadata.organization_approval_status === "requested" || metadata.organization_approval_status === "approved" || metadata.organization_approval_status === "none")
             ? metadata.organization_approval_status
-            : accountType === "team" ? "requested" : accountType === "organization" ? "approved" : "none",
+            : accountType === "team" && selectedOrganization ? "requested" : accountType === "organization" ? "approved" : "none",
           createdAt: new Date().toISOString(),
           isDemo: false
         };
@@ -91,8 +92,8 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
           name: isSignUp ? trimmedName : trimmedEmail.split("@")[0],
           email: trimmedEmail,
           accountType,
-          organizationName: accountType === "team" ? organizationName : accountType === "organization" ? trimmedName : undefined,
-          organizationApprovalStatus: accountType === "team" ? "requested" : accountType === "organization" ? "approved" : "none",
+          organizationName: accountType === "team" ? selectedOrganization : accountType === "organization" ? trimmedName : undefined,
+          organizationApprovalStatus: accountType === "team" && selectedOrganization ? "requested" : accountType === "organization" ? "approved" : "none",
           createdAt: new Date().toISOString(),
           isDemo: false
         };
@@ -158,20 +159,20 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
                   Parent organization
                   <span className="mt-1 flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2">
                     <Building2 className="h-4 w-4 text-cyan-100/60" />
-                    <select value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} className="w-full bg-transparent text-orange-50 outline-none">
-                      {sampleOrganizations.map((organization) => (
+                    <select value={organizationName} disabled={!sampleOrganizations.length} onChange={(event) => setOrganizationName(event.target.value)} className="w-full bg-transparent text-orange-50 outline-none disabled:opacity-60">
+                      {sampleOrganizations.length ? sampleOrganizations.map((organization) => (
                         <option key={organization.name} value={organization.name} className="bg-[#121421] text-orange-50">
                           {organization.name}
                         </option>
-                      ))}
+                      )) : <option value="" className="bg-[#121421] text-orange-50">No registered organizations yet</option>}
                     </select>
                   </span>
                 </label>
-                <button type="button" onClick={() => setApprovalRequested(true)} className="mt-3 inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-orange-50/75 hover:bg-white/10">
+                <button type="button" disabled={!organizationName} onClick={() => setApprovalRequested(true)} className="mt-3 inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-orange-50/75 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50">
                   <Send className="h-4 w-4" />
                   {approvalRequested ? "Approval request sent" : "Request organization approval"}
                 </button>
-                {!approvalRequested ? <p className="mt-2 text-xs text-cyan-50/55">A request will also be attached automatically when this team account is created.</p> : null}
+                {!approvalRequested ? <p className="mt-2 text-xs text-cyan-50/55">{organizationName ? "A request will also be attached automatically when this team account is created." : "Organization approval becomes available after a real organization account is registered."}</p> : null}
               </div>
             ) : null}
             {isSignUp && accountType === "organization" ? (
