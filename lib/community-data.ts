@@ -72,7 +72,8 @@ export const communityTopics = [
   "University teams",
   "Admissions / portfolio",
   "Safety notes",
-  "Marketplace"
+  "Marketplace",
+  "Other"
 ] as const;
 
 export const communityPosts: CommunityPost[] = [];

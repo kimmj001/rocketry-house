@@ -251,6 +251,46 @@ create table moderation_reports (
   created_at timestamptz default now()
 );
 
+create table ranking_events (
+  id uuid primary key default uuid_generate_v4(),
+  event_type text not null,
+  actor_profile_id uuid references profiles(id),
+  project_id uuid references projects(id),
+  motor_id uuid references motors(id),
+  metadata_json jsonb default '{}',
+  weight numeric default 1,
+  created_at timestamptz default now()
+);
+
+create table project_ranking_snapshots (
+  id uuid primary key default uuid_generate_v4(),
+  project_id uuid references projects(id) on delete cascade,
+  evidence_quality numeric not null default 0,
+  engineering_performance numeric not null default 0,
+  simulation_accuracy numeric not null default 0,
+  community_quality numeric not null default 0,
+  reuse_impact numeric not null default 0,
+  safety_reliability numeric not null default 0,
+  penalties numeric not null default 0,
+  score numeric not null default 0,
+  computed_from_json jsonb default '{}',
+  computed_at timestamptz default now()
+);
+
+create table account_ranking_snapshots (
+  id uuid primary key default uuid_generate_v4(),
+  profile_id uuid references profiles(id) on delete cascade,
+  account_type text not null default 'personal',
+  portfolio_score numeric not null default 0,
+  verified_launch_count integer not null default 0,
+  helpful_answer_count integer not null default 0,
+  published_motor_count integer not null default 0,
+  verified_motor_dataset_count integer not null default 0,
+  score numeric not null default 0,
+  computed_from_json jsonb default '{}',
+  computed_at timestamptz default now()
+);
+
 alter table profiles enable row level security;
 alter table projects enable row level security;
 alter table project_files enable row level security;
@@ -261,3 +301,6 @@ alter table motor_parameters enable row level security;
 alter table motor_simulation_results enable row level security;
 alter table motor_files enable row level security;
 alter table motor_marketplace_listings enable row level security;
+alter table ranking_events enable row level security;
+alter table project_ranking_snapshots enable row level security;
+alter table account_ranking_snapshots enable row level security;
