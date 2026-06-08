@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Building2, LockKeyhole, Mail, Rocket, Send, UserRoundPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { AuthUser, authenticateLocalAccount, createLocalAccount, isValidEmail, mapSupabaseUserToAuthUser, normalizeEmail, saveAuthUserProfileToCloud, validatePassword, writeMockUser } from "@/lib/auth";
+import { isValidEmail, mapSupabaseUserToAuthUser, normalizeEmail, saveAuthUserProfileToCloud, validatePassword, writeMockUser } from "@/lib/auth";
 import { savePersistentRecord } from "@/lib/cloud-persistence";
 import { sampleOrganizations } from "@/lib/team-data";
 import { getSupabaseClient, isMockMode } from "@/lib/supabase";
@@ -57,56 +57,42 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         throw new Error("Display name is required.");
       }
 
-      if (supabase && !isMockMode) {
-        const response = isSignUp
-          ? await supabase.auth.signUp({
-              email: trimmedEmail,
-              password,
-              options: {
-                data: {
-                  name: trimmedName,
-                  account_type: accountType,
-                  organization_name: accountType === "team" ? selectedOrganization : accountType === "organization" ? trimmedName : undefined,
-                  organization_approval_status: accountType === "team" && selectedOrganization ? "requested" : accountType === "organization" ? "approved" : "none"
-                }
-              }
-            })
-          : await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
-        if (response.error) throw response.error;
-        if (!response.data.user) {
-          throw new Error("Supabase did not return a user. Check email confirmation settings and try signing in.");
-        }
-        const savedUser = mapSupabaseUserToAuthUser(response.data.user, {
-          name: trimmedName || trimmedEmail.split("@")[0],
-          email: trimmedEmail,
-          accountType,
-          organizationName: accountType === "team" ? selectedOrganization : accountType === "organization" ? trimmedName : undefined,
-          organizationApprovalStatus: accountType === "team" && selectedOrganization ? "requested" : accountType === "organization" ? "approved" : "none",
-          createdAt: new Date().toISOString()
-        });
-        writeMockUser(savedUser);
-        void saveAuthUserProfileToCloud(savedUser);
-        void savePersistentRecord("profiles", savedUser.id, savedUser);
-      } else {
-        if (isSignUp) {
-          const localUser: AuthUser = {
-            id: "",
-            name: trimmedName,
+      if (!supabase || isMockMode) {
+        throw new Error("Cloud account service is not configured. Add Supabase environment variables before accepting real users.");
+      }
+
+      const response = isSignUp
+        ? await supabase.auth.signUp({
             email: trimmedEmail,
-            accountType,
-            organizationName: accountType === "team" ? selectedOrganization : accountType === "organization" ? trimmedName : undefined,
-            organizationApprovalStatus: accountType === "team" && selectedOrganization ? "requested" : accountType === "organization" ? "approved" : "none",
-            createdAt: new Date().toISOString(),
-            isDemo: false
-          };
-          const savedLocalUser = await createLocalAccount(localUser, password);
-          writeMockUser(savedLocalUser);
-          void savePersistentRecord("profiles", savedLocalUser.id, savedLocalUser);
-        } else {
-          const savedLocalUser = await authenticateLocalAccount(trimmedEmail, password);
-          writeMockUser(savedLocalUser);
-          void savePersistentRecord("profiles", savedLocalUser.id, savedLocalUser);
-        }
+            password,
+            options: {
+              data: {
+                name: trimmedName,
+                account_type: accountType,
+                organization_name: accountType === "team" ? selectedOrganization : accountType === "organization" ? trimmedName : undefined,
+                organization_approval_status: accountType === "team" && selectedOrganization ? "requested" : accountType === "organization" ? "approved" : "none"
+              }
+            }
+          })
+        : await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
+      if (response.error) throw response.error;
+      if (!response.data.user) {
+        throw new Error("Supabase did not return a user. Check email confirmation settings and try signing in.");
+      }
+      const savedUser = mapSupabaseUserToAuthUser(response.data.user, {
+        name: trimmedName || trimmedEmail.split("@")[0],
+        email: trimmedEmail,
+        accountType,
+        organizationName: accountType === "team" ? selectedOrganization : accountType === "organization" ? trimmedName : undefined,
+        organizationApprovalStatus: accountType === "team" && selectedOrganization ? "requested" : accountType === "organization" ? "approved" : "none",
+        createdAt: new Date().toISOString()
+      });
+      writeMockUser(savedUser);
+
+      const profileResult = await saveAuthUserProfileToCloud(savedUser);
+      const archiveResult = await savePersistentRecord("profiles", savedUser.id, savedUser);
+      if (profileResult.error || archiveResult.error) {
+        throw new Error("Account was created, but profile archiving failed. Please try signing in again.");
       }
       router.push("/profile");
       router.refresh();
@@ -136,7 +122,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
             {isSignUp ? <UserRoundPlus className="h-6 w-6 text-orange-200" /> : <LockKeyhole className="h-6 w-6 text-orange-200" />}
             <div>
               <h2 className="text-2xl font-semibold">{isSignUp ? "Sign up" : "Sign in"}</h2>
-              <p className="text-sm text-orange-50/58">{isMockMode ? "Local account mode is active. Sign in only works for accounts created in this workspace." : "Secure account access is enabled."}</p>
+              <p className="text-sm text-orange-50/58">{isMockMode ? "Cloud account service is not configured yet." : "Secure cloud account access is enabled."}</p>
             </div>
           </div>
 

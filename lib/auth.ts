@@ -124,16 +124,16 @@ export function mapSupabaseUserToAuthUser(user: User, fallback?: Partial<AuthUse
 }
 
 export async function restoreAuthUserFromCloud() {
+  const cachedUser = readMockUser();
   const supabase = getSupabaseClient();
-  if (!supabase || isMockMode) return readMockUser();
+  if (!supabase || isMockMode) return cachedUser;
 
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) {
-    clearMockUser();
-    return null;
+    return cachedUser;
   }
 
-  const user = mapSupabaseUserToAuthUser(data.user, readMockUser() ?? undefined);
+  const user = mapSupabaseUserToAuthUser(data.user, cachedUser ?? undefined);
   writeMockUser(user);
   return user;
 }
