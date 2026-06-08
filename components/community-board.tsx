@@ -25,10 +25,10 @@ import { Card } from "@/components/ui/card";
 import {
   CommunityPost,
   communityTopics,
-  currentCommunityUser,
+  guestCommunityUser,
   getCommunityAuthorFromAuth
 } from "@/lib/community-data";
-import { readMockUser } from "@/lib/auth";
+import { readMockUser, restoreAuthUserFromCloud, type AuthUser } from "@/lib/auth";
 import { loadPersistentSet, savePersistentSet } from "@/lib/cloud-persistence";
 import { loadCommunityPostsArchive, saveCommunityPostArchive } from "@/lib/community-archive";
 
@@ -111,7 +111,8 @@ export function CommunityBoard() {
   const [liked, setLiked] = useState<Set<string>>(new Set());
   const [bookmarked, setBookmarked] = useState<Set<string>>(new Set());
   const [reported, setReported] = useState<Set<string>>(new Set());
-  const [author, setAuthor] = useState(currentCommunityUser);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [author, setAuthor] = useState(guestCommunityUser);
   const [teamOnly, setTeamOnly] = useState(false);
   const [archiveStatus, setArchiveStatus] = useState("");
   const [draft, setDraft] = useState({
@@ -132,18 +133,35 @@ export function CommunityBoard() {
     void loadPersistentSet("community_state", LIKED_POSTS_KEY).then((value) => value.size && setLiked(value));
     void loadPersistentSet("community_state", BOOKMARKED_POSTS_KEY).then((value) => value.size && setBookmarked(value));
     void loadPersistentSet("community_state", REPORTED_POSTS_KEY).then((value) => value.size && setReported(value));
-    const syncAuthor = () => setAuthor(getCommunityAuthorFromAuth(readMockUser()));
+    const syncAuthor = () => {
+      const nextUser = readMockUser();
+      setUser(nextUser);
+      setAuthor(getCommunityAuthorFromAuth(nextUser));
+      if (!nextUser) {
+        setComposerOpen(false);
+        setTeamOnly(false);
+      }
+    };
     syncAuthor();
+    void restoreAuthUserFromCloud().then((cloudUser) => {
+      setUser(cloudUser);
+      setAuthor(getCommunityAuthorFromAuth(cloudUser));
+      if (!cloudUser) {
+        setComposerOpen(false);
+        setTeamOnly(false);
+      }
+    });
     window.addEventListener("rocketry-auth-change", syncAuthor);
     return () => window.removeEventListener("rocketry-auth-change", syncAuthor);
   }, []);
 
+  const isSignedIn = Boolean(user);
   const posts = useMemo(() => localPosts, [localPosts]);
   const visiblePosts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     const filtered = posts.filter((post) => {
       const matchesTopic = activeTopic === "All topics" || post.topic === activeTopic;
-      const matchesTeam = !teamOnly || post.author.team === author.team;
+      const matchesTeam = !teamOnly || (isSignedIn && post.author.team === author.team);
       const haystack = [post.title, post.preview, post.topic, post.author.name, post.author.team, post.linkedProject, ...post.evidenceLinks].join(" ").toLowerCase();
       return matchesTopic && matchesTeam && (!normalizedQuery || haystack.includes(normalizedQuery));
     });
@@ -153,12 +171,16 @@ export function CommunityBoard() {
       if (sortMode === "Most viewed") return viewNumber(b.views) - viewNumber(a.views);
       return postScore(b) - postScore(a);
     });
-  }, [activeTopic, author.team, posts, query, sortMode, teamOnly]);
+  }, [activeTopic, author.team, isSignedIn, posts, query, sortMode, teamOnly]);
 
   const bestPosts = visiblePosts.filter((post) => post.best || post.likes > 150).sort((a, b) => postScore(b) - postScore(a)).slice(0, 3);
   const recommendedPosts = visiblePosts.filter((post) => post.recommended || bookmarked.has(post.slug)).slice(0, 5);
 
   function toggleSet(slug: string, key: string, setter: (value: Set<string>) => void, current: Set<string>) {
+    if (!isSignedIn) {
+      setArchiveStatus("Sign in or create an account to interact with community posts.");
+      return;
+    }
     const next = new Set(current);
     if (next.has(slug)) next.delete(slug);
     else next.add(slug);
@@ -167,6 +189,11 @@ export function CommunityBoard() {
   }
 
   async function submitPost() {
+    if (!user) {
+      setArchiveStatus("Sign in or create an account to write a community post.");
+      setComposerOpen(false);
+      return;
+    }
     const title = draft.title.trim();
     const body = draft.body.trim();
     if (!title || !body) return;
@@ -252,23 +279,41 @@ export function CommunityBoard() {
                 <p className="text-sm text-slate-500">{author.role}</p>
               </div>
             </div>
-            <div className="mt-5 grid gap-3">
-              <Button className="h-12 bg-orange-500 text-white hover:bg-orange-400" onClick={() => setComposerOpen(true)}>
-                <PenLine className="h-4 w-4" />
-                Write post
-              </Button>
-              <Button variant="outline" onClick={() => setTeamOnly((value) => !value)} className="h-12 border-slate-200 bg-white text-slate-800 hover:bg-slate-50">
-                <UsersRound className="h-4 w-4" />
-                {teamOnly ? "Showing my team" : "My team discussions"}
-              </Button>
-            </div>
-            <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
-              Posts and replies display real name, role, profile type, and team or organization.
-            </p>
+            {isSignedIn ? (
+              <>
+                <div className="mt-5 grid gap-3">
+                  <Button className="h-12 bg-orange-500 text-white hover:bg-orange-400" onClick={() => setComposerOpen(true)}>
+                    <PenLine className="h-4 w-4" />
+                    Write post
+                  </Button>
+                  <Button variant="outline" onClick={() => setTeamOnly((value) => !value)} className="h-12 border-slate-200 bg-white text-slate-800 hover:bg-slate-50">
+                    <UsersRound className="h-4 w-4" />
+                    {teamOnly ? "Showing my team" : "My team discussions"}
+                  </Button>
+                </div>
+                <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                  Posts and replies display real name, role, profile type, and team or organization.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  <Button asChild className="h-12 bg-orange-500 text-white hover:bg-orange-400">
+                    <Link href="/auth/sign-in">Sign in</Link>
+                  </Button>
+                  <Button asChild variant="outline" className="h-12 border-slate-200 bg-white text-slate-800 hover:bg-slate-50">
+                    <Link href="/auth/sign-up">Sign up</Link>
+                  </Button>
+                </div>
+                <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                  Community is readable to everyone. Writing, replies, likes, saves, and reports require a real account.
+                </p>
+              </>
+            )}
           </Card>
         </section>
 
-        {composerOpen ? (
+        {composerOpen && isSignedIn ? (
           <section className="mt-6 rounded-2xl border border-orange-200 bg-white p-4 shadow-lg sm:p-5">
             <div className="flex items-start justify-between gap-3">
               <div>

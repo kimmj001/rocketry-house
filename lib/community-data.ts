@@ -36,11 +36,11 @@ export type CommunityPost = {
   commentList?: CommunityComment[];
 };
 
-export const currentCommunityUser: CommunityAuthor = {
-  name: "Signed-in builder",
-  role: "Rocketry House member",
-  team: "Independent builder",
-  badge: "Profile",
+export const guestCommunityUser: CommunityAuthor = {
+  name: "Guest reader",
+  role: "Sign in to write, reply, save, or report",
+  team: "Public community",
+  badge: "Guest",
   profileType: "Personal"
 };
 
@@ -51,7 +51,7 @@ export function getCommunityAuthorFromAuth(user: {
   avatarUrl?: string;
   headline?: string;
 } | null): CommunityAuthor {
-  if (!user) return currentCommunityUser;
+  if (!user) return guestCommunityUser;
   const profileType = user.accountType === "organization" ? "Organization" : user.accountType === "team" ? "Team" : "Personal";
   return {
     name: user.name,

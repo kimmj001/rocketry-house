@@ -1,3 +1,6 @@
+import type { User } from "@supabase/supabase-js";
+import { getSupabaseClient, isMockMode } from "@/lib/supabase";
+
 export type AuthUser = {
   id: string;
   name: string;
@@ -80,9 +83,92 @@ export function writeMockUser(user: AuthUser) {
   window.dispatchEvent(new Event("rocketry-auth-change"));
 }
 
+export async function signOutAuthUser() {
+  const supabase = getSupabaseClient();
+  if (supabase && !isMockMode) {
+    await supabase.auth.signOut();
+  }
+  clearMockUser();
+}
+
 export function clearMockUser() {
   localStorage.removeItem(AUTH_STORAGE_KEY);
   window.dispatchEvent(new Event("rocketry-auth-change"));
+}
+
+export function mapSupabaseUserToAuthUser(user: User, fallback?: Partial<AuthUser>): AuthUser {
+  const metadata = user.user_metadata ?? {};
+  const accountType = metadata.account_type === "team" || metadata.account_type === "organization" || metadata.account_type === "personal"
+    ? metadata.account_type
+    : fallback?.accountType ?? "personal";
+  const approvalStatus = metadata.organization_approval_status === "requested" || metadata.organization_approval_status === "approved" || metadata.organization_approval_status === "none"
+    ? metadata.organization_approval_status
+    : fallback?.organizationApprovalStatus ?? (accountType === "organization" ? "approved" : accountType === "team" ? "requested" : "none");
+
+  return {
+    id: user.id,
+    name: String(metadata.name ?? metadata.display_name ?? fallback?.name ?? user.email?.split("@")[0] ?? "Rocketry House member"),
+    email: normalizeEmail(user.email ?? fallback?.email ?? ""),
+    accountType,
+    organizationName: typeof metadata.organization_name === "string" ? metadata.organization_name : fallback?.organizationName,
+    organizationApprovalStatus: approvalStatus,
+    avatarUrl: typeof metadata.avatar_url === "string" ? metadata.avatar_url : fallback?.avatarUrl,
+    headline: typeof metadata.headline === "string" ? metadata.headline : fallback?.headline,
+    bio: typeof metadata.bio === "string" ? metadata.bio : fallback?.bio,
+    location: typeof metadata.location === "string" ? metadata.location : fallback?.location,
+    website: typeof metadata.website === "string" ? metadata.website : fallback?.website,
+    specialties: typeof metadata.specialties === "string" ? metadata.specialties : fallback?.specialties,
+    createdAt: user.created_at ?? fallback?.createdAt ?? new Date().toISOString(),
+    isDemo: false
+  };
+}
+
+export async function restoreAuthUserFromCloud() {
+  const supabase = getSupabaseClient();
+  if (!supabase || isMockMode) return readMockUser();
+
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) {
+    clearMockUser();
+    return null;
+  }
+
+  const user = mapSupabaseUserToAuthUser(data.user, readMockUser() ?? undefined);
+  writeMockUser(user);
+  return user;
+}
+
+export async function saveAuthUserProfileToCloud(user: AuthUser) {
+  const supabase = getSupabaseClient();
+  if (!supabase || isMockMode) return { cloud: false, error: null };
+
+  const metadata = {
+    name: user.name,
+    display_name: user.name,
+    account_type: user.accountType,
+    organization_name: user.organizationName,
+    organization_approval_status: user.organizationApprovalStatus,
+    avatar_url: user.avatarUrl,
+    headline: user.headline,
+    bio: user.bio,
+    location: user.location,
+    website: user.website,
+    specialties: user.specialties
+  };
+
+  const { error: authError } = await supabase.auth.updateUser({ data: metadata });
+  const { error: recordError } = await supabase.from("user_data_records").upsert(
+    {
+      owner_key: `user:${user.id}`,
+      collection: "profiles",
+      record_key: user.id,
+      payload: user,
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: "owner_key,collection,record_key" }
+  );
+
+  return { cloud: !authError, error: authError ?? recordError };
 }
 
 export async function createLocalAccount(user: AuthUser, password: string) {

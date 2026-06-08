@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Building2, LockKeyhole, Mail, Rocket, Send, UserRoundPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { AuthUser, authenticateLocalAccount, createLocalAccount, isValidEmail, normalizeEmail, validatePassword, writeMockUser } from "@/lib/auth";
+import { AuthUser, authenticateLocalAccount, createLocalAccount, isValidEmail, mapSupabaseUserToAuthUser, normalizeEmail, saveAuthUserProfileToCloud, validatePassword, writeMockUser } from "@/lib/auth";
 import { savePersistentRecord } from "@/lib/cloud-persistence";
 import { sampleOrganizations } from "@/lib/team-data";
 import { getSupabaseClient, isMockMode } from "@/lib/supabase";
@@ -73,22 +73,19 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
             })
           : await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
         if (response.error) throw response.error;
-        const metadata = response.data.user?.user_metadata ?? {};
-        const savedUser: AuthUser = {
-          id: response.data.user?.id ?? `local-${Date.now()}`,
-          name: String(metadata.name ?? trimmedName ?? trimmedEmail.split("@")[0]),
-          email: response.data.user?.email ?? trimmedEmail,
-          accountType: (metadata.account_type === "team" || metadata.account_type === "organization" || metadata.account_type === "personal")
-            ? metadata.account_type
-            : accountType,
-          organizationName: typeof metadata.organization_name === "string" ? metadata.organization_name : accountType === "team" ? selectedOrganization : accountType === "organization" ? trimmedName : undefined,
-          organizationApprovalStatus: (metadata.organization_approval_status === "requested" || metadata.organization_approval_status === "approved" || metadata.organization_approval_status === "none")
-            ? metadata.organization_approval_status
-            : accountType === "team" && selectedOrganization ? "requested" : accountType === "organization" ? "approved" : "none",
-          createdAt: new Date().toISOString(),
-          isDemo: false
-        };
+        if (!response.data.user) {
+          throw new Error("Supabase did not return a user. Check email confirmation settings and try signing in.");
+        }
+        const savedUser = mapSupabaseUserToAuthUser(response.data.user, {
+          name: trimmedName || trimmedEmail.split("@")[0],
+          email: trimmedEmail,
+          accountType,
+          organizationName: accountType === "team" ? selectedOrganization : accountType === "organization" ? trimmedName : undefined,
+          organizationApprovalStatus: accountType === "team" && selectedOrganization ? "requested" : accountType === "organization" ? "approved" : "none",
+          createdAt: new Date().toISOString()
+        });
         writeMockUser(savedUser);
+        void saveAuthUserProfileToCloud(savedUser);
         void savePersistentRecord("profiles", savedUser.id, savedUser);
       } else {
         if (isSignUp) {

@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { ProjectCard } from "@/components/project-card";
 import { mockSavedMotors } from "@/lib/motor-library";
 import { mockProjects } from "@/lib/mock-data";
-import { isDemoAccount, readMockUser, type AuthUser, updateLocalAccountUser, writeMockUser } from "@/lib/auth";
+import { isDemoAccount, readMockUser, restoreAuthUserFromCloud, saveAuthUserProfileToCloud, type AuthUser, updateLocalAccountUser, writeMockUser } from "@/lib/auth";
 import { prestigeBadges } from "@/lib/platform-content";
 import { sampleOrganizations } from "@/lib/team-data";
 import { savePersistentRecord, uploadPersistentFiles } from "@/lib/cloud-persistence";
@@ -36,6 +36,10 @@ export function ProfileAccount() {
       if (nextUser) setDraftFromUser(nextUser);
     };
     sync();
+    void restoreAuthUserFromCloud().then((cloudUser) => {
+      setUser(cloudUser);
+      if (cloudUser) setDraftFromUser(cloudUser);
+    });
     setChecked(true);
     window.addEventListener("rocketry-auth-change", sync);
     window.addEventListener("storage", sync);
@@ -108,8 +112,9 @@ export function ProfileAccount() {
       writeMockUser(nextUser);
       updateLocalAccountUser(nextUser);
       setUser(nextUser);
+      const cloudResult = await saveAuthUserProfileToCloud(nextUser);
       await savePersistentRecord("profiles", nextUser.id, nextUser);
-      setPhotoStatus(publicUrl ? "Profile photo synced to cloud storage." : "Profile photo saved locally. Cloud file storage will sync when Supabase Storage accepts uploads.");
+      setPhotoStatus(publicUrl || cloudResult.cloud ? "Profile photo synced to account." : "Profile photo saved locally. Cloud file storage will sync when Supabase Storage accepts uploads.");
     } catch {
       const fallback = readMockUser() ?? user;
       await savePersistentRecord("profiles", fallback.id, fallback);
@@ -151,6 +156,7 @@ export function ProfileAccount() {
     setProfileStatus("Profile updated across Rocketry House.");
 
     try {
+      await saveAuthUserProfileToCloud(nextUser);
       await savePersistentRecord("profiles", nextUser.id, nextUser);
     } catch {
       setProfileStatus("Profile updated locally. Cloud sync could not complete.");

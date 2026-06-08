@@ -9,10 +9,10 @@ import {
   CommunityPost,
   communityComments,
   communityPosts,
-  currentCommunityUser,
+  guestCommunityUser,
   getCommunityAuthorFromAuth
 } from "@/lib/community-data";
-import { readMockUser } from "@/lib/auth";
+import { readMockUser, restoreAuthUserFromCloud, type AuthUser } from "@/lib/auth";
 import { loadPersistentSet, savePersistentSet } from "@/lib/cloud-persistence";
 import { loadCommunityCommentsArchive, loadCommunityPostsArchive, saveCommunityCommentsArchive } from "@/lib/community-archive";
 
@@ -84,7 +84,9 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
   const [reported, setReported] = useState(false);
   const [copied, setCopied] = useState(false);
   const [reply, setReply] = useState("");
-  const [author, setAuthor] = useState(currentCommunityUser);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [author, setAuthor] = useState(guestCommunityUser);
+  const [authNotice, setAuthNotice] = useState("");
   const [sortMode, setSortMode] = useState<"Most helpful" | "Newest">("Most helpful");
 
   useEffect(() => {
@@ -106,8 +108,18 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
     void loadPersistentSet("community_state", LIKED_POSTS_KEY).then((value) => setLiked(value.has(slug)));
     void loadPersistentSet("community_state", BOOKMARKED_POSTS_KEY).then((value) => setBookmarked(value.has(slug)));
     void loadPersistentSet("community_state", REPORTED_POSTS_KEY).then((value) => setReported(value.has(slug)));
-    const syncAuthor = () => setAuthor(getCommunityAuthorFromAuth(readMockUser()));
+    const syncAuthor = () => {
+      const nextUser = readMockUser();
+      setUser(nextUser);
+      setAuthor(getCommunityAuthorFromAuth(nextUser));
+      if (!nextUser) setReply("");
+    };
     syncAuthor();
+    void restoreAuthUserFromCloud().then((cloudUser) => {
+      setUser(cloudUser);
+      setAuthor(getCommunityAuthorFromAuth(cloudUser));
+      if (!cloudUser) setReply("");
+    });
     window.addEventListener("rocketry-auth-change", syncAuthor);
     return () => window.removeEventListener("rocketry-auth-change", syncAuthor);
   }, [initialPost, slug]);
@@ -115,8 +127,13 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
   const sortedComments = useMemo(() => {
     return [...comments].sort((a, b) => sortMode === "Newest" ? b.id.localeCompare(a.id) : b.likes - a.likes);
   }, [comments, sortMode]);
+  const isSignedIn = Boolean(user);
 
   function toggleStored(key: string, active: boolean, setter: (value: boolean) => void) {
+    if (!isSignedIn) {
+      setAuthNotice("Sign in or create an account to interact with community posts.");
+      return;
+    }
     const next = readStoredSet(key);
     if (active) next.delete(slug);
     else next.add(slug);
@@ -125,6 +142,10 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
   }
 
   function submitReply() {
+    if (!user) {
+      setAuthNotice("Sign in or create an account to reply.");
+      return;
+    }
     const body = reply.trim();
     if (!body) return;
     const comment: CommunityComment = {
@@ -217,6 +238,11 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
               <a href="#comments" className="flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-3 font-semibold sm:bg-transparent sm:py-0"><MessageSquare className="h-5 w-5" /> Comments {displayedComments}</a>
               <button onClick={() => toggleStored(REPORTED_POSTS_KEY, reported, setReported)} className={`flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-3 font-semibold sm:bg-transparent sm:py-0 ${reported ? "text-red-600" : ""}`}><Flag className="h-5 w-5" /> {reported ? "Reported" : "Report"}</button>
             </div>
+            {authNotice ? (
+              <p className="mt-4 rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-sm font-semibold text-orange-700">
+                {authNotice}
+              </p>
+            ) : null}
           </article>
 
           <section id="comments" className="border-t border-slate-200 p-4 sm:p-7">
@@ -249,21 +275,34 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
             </div>
 
             <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-3 shadow-lg sm:sticky sm:bottom-0 sm:p-4">
-              <div className="flex gap-3">
-                <Avatar name={author.name} avatarUrl={author.avatarUrl} />
-                <div className="flex-1">
-                  <textarea
-                    value={reply}
-                    onChange={(event) => setReply(event.target.value)}
-                    className="min-h-24 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none placeholder:text-slate-400 focus:border-orange-300"
-                    placeholder={`Write as ${author.name}`}
-                  />
-                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                    <p className="text-sm text-slate-500">Real-name reply. Keep it technical, lawful, and evidence-oriented.</p>
-                    <button onClick={submitReply} className="rounded-md bg-orange-500 px-4 py-3 text-sm font-semibold text-white hover:bg-orange-400 sm:py-2">Post reply</button>
+              {isSignedIn ? (
+                <div className="flex gap-3">
+                  <Avatar name={author.name} avatarUrl={author.avatarUrl} />
+                  <div className="flex-1">
+                    <textarea
+                      value={reply}
+                      onChange={(event) => setReply(event.target.value)}
+                      className="min-h-24 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none placeholder:text-slate-400 focus:border-orange-300"
+                      placeholder={`Write as ${author.name}`}
+                    />
+                    <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                      <p className="text-sm text-slate-500">Real-name reply. Keep it technical, lawful, and evidence-oriented.</p>
+                      <button onClick={submitReply} className="rounded-md bg-orange-500 px-4 py-3 text-sm font-semibold text-white hover:bg-orange-400 sm:py-2">Post reply</button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900">Sign in to reply</p>
+                    <p className="mt-1 text-sm text-slate-500">Community replies use real account identity and team or organization context.</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:flex">
+                    <Link href="/auth/sign-in" className="inline-flex h-11 items-center justify-center rounded-md bg-orange-500 px-4 text-sm font-semibold text-white hover:bg-orange-400">Sign in</Link>
+                    <Link href="/auth/sign-up" className="inline-flex h-11 items-center justify-center rounded-md border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50">Sign up</Link>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         </section>

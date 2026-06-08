@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { clearMockUser, readMockUser, type AuthUser } from "@/lib/auth";
+import { readMockUser, restoreAuthUserFromCloud, signOutAuthUser, type AuthUser } from "@/lib/auth";
 
 export function AccountNav() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -11,6 +11,7 @@ export function AccountNav() {
   useEffect(() => {
     const sync = () => setUser(readMockUser());
     sync();
+    void restoreAuthUserFromCloud().then(setUser);
     window.addEventListener("storage", sync);
     window.addEventListener("rocketry-auth-change", sync);
     return () => {
@@ -42,7 +43,7 @@ export function AccountNav() {
         )}
         <span className="hidden sm:inline">Account</span>
       </Button>
-      <button aria-label="Sign out" onClick={clearMockUser} className="rounded-md p-2 text-orange-50/70 hover:bg-white/10 hover:text-white">
+      <button aria-label="Sign out" onClick={() => void signOutAuthUser()} className="rounded-md p-2 text-orange-50/70 hover:bg-white/10 hover:text-white">
         <LogOut className="h-4 w-4" />
       </button>
     </div>
