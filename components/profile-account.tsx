@@ -10,7 +10,24 @@ import { mockProjects } from "@/lib/mock-data";
 import { isDemoAccount, readMockUser, restoreAuthUserFromCloud, saveAuthUserProfileToCloud, type AuthUser, updateLocalAccountUser, writeMockUser } from "@/lib/auth";
 import { prestigeBadges } from "@/lib/platform-content";
 import { sampleOrganizations } from "@/lib/team-data";
-import { savePersistentRecord, uploadPersistentFiles } from "@/lib/cloud-persistence";
+import { loadPersistentRecords, savePersistentRecord, uploadPersistentFiles } from "@/lib/cloud-persistence";
+import type { SavedMotor } from "@/types/motor";
+
+type StoredRocketProject = {
+  id?: string;
+  slug?: string;
+  name?: string;
+  status?: string;
+  source?: string;
+  summary?: {
+    predictedAltitudeM?: number;
+    motorClass?: string;
+    propellantFamily?: string;
+    evidenceFileCount?: number;
+  };
+  updatedAt?: string;
+  publishedAt?: string;
+};
 
 export function ProfileAccount() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -18,6 +35,8 @@ export function ProfileAccount() {
   const [photoStatus, setPhotoStatus] = useState("");
   const [editing, setEditing] = useState(false);
   const [profileStatus, setProfileStatus] = useState("");
+  const [savedMotors, setSavedMotors] = useState<SavedMotor[]>([]);
+  const [rocketProjects, setRocketProjects] = useState<StoredRocketProject[]>([]);
   const [draft, setDraft] = useState({
     name: "",
     headline: "",
@@ -48,6 +67,28 @@ export function ProfileAccount() {
       window.removeEventListener("storage", sync);
     };
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setSavedMotors([]);
+      setRocketProjects([]);
+      return;
+    }
+
+    if (isDemoAccount(user)) {
+      setSavedMotors(mockSavedMotors);
+      setRocketProjects([]);
+      return;
+    }
+
+    void Promise.all([
+      loadPersistentRecords<SavedMotor>("saved_motors"),
+      loadPersistentRecords<StoredRocketProject>("rocket_projects")
+    ]).then(([motorRecords, projectRecords]) => {
+      setSavedMotors(motorRecords.map((record) => record.payload));
+      setRocketProjects(projectRecords.map((record) => record.payload));
+    });
+  }, [user]);
 
   function setDraftFromUser(nextUser: AuthUser) {
     setDraft({
@@ -85,8 +126,7 @@ export function ProfileAccount() {
   const demoProfile = isDemoAccount(user);
   const stats = demoProfile
     ? ["14 projects", "4.8 rating", "212 forks", "Flight verified"]
-    : ["0 projects", "No rating yet", "0 forks", "Not verified"];
-  const savedMotors = demoProfile ? mockSavedMotors : [];
+    : [`${rocketProjects.length} projects`, "No rating yet", "0 forks", rocketProjects.some((project) => project.status === "published") ? "Published" : "Not verified"];
   const visibleProjects = demoProfile ? mockProjects.slice(0, 3) : [];
   const badges = demoProfile ? prestigeBadges : ["New builder profile"];
 
@@ -287,10 +327,23 @@ export function ProfileAccount() {
             <h2 className="flex items-center gap-2 font-semibold"><Rocket className="h-5 w-5 text-cyan-200" />My rocket builds</h2>
             <p className="mt-2 text-sm text-orange-50/62">Rocket projects stay project-first: CAD, simulation, files, forks, discussions, and marketplace data remain attached to the rocket repository.</p>
             <div className="mt-4 grid gap-2 text-sm text-orange-50/68">
-              <p>Draft rocket CAD: {demoProfile ? "2" : "0"}</p>
-              <p>Published rocket repositories: {demoProfile ? "14" : "0"}</p>
-              <p>Motors imported into rocket designs: {demoProfile ? "5" : "0"}</p>
+              <p>Draft rocket CAD: {demoProfile ? "2" : rocketProjects.filter((project) => project.status !== "published").length}</p>
+              <p>Published rocket repositories: {demoProfile ? "14" : rocketProjects.filter((project) => project.status === "published").length}</p>
+              <p>Motors imported into rocket designs: {demoProfile ? "5" : rocketProjects.filter((project) => project.summary?.motorClass || project.summary?.propellantFamily).length}</p>
             </div>
+            {!demoProfile && rocketProjects.length ? (
+              <div className="mt-4 space-y-3">
+                {rocketProjects.slice(0, 4).map((project, index) => (
+                  <div key={project.id ?? project.slug ?? index} className="rounded-md border border-white/10 bg-white/[0.04] p-3 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-semibold">{project.name || "Untitled rocket project"}</span>
+                      <span className="text-orange-100">{project.status ?? "draft"}</span>
+                    </div>
+                    <p className="mt-1 text-orange-50/55">{project.source ?? "builder"} / updated {project.updatedAt ? new Date(project.updatedAt).toLocaleDateString() : "recently"}</p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <Button href="/build/rocket" asChild variant="outline" className="mt-4 w-full">Open rocket builder</Button>
           </Card>
         </div>

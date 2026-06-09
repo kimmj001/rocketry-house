@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BadgeCheck, Boxes, Calculator, CheckCircle2, ChevronRight, CircleDollarSign, FileArchive, FileText, Image, Lock, Rocket, ShieldCheck, UploadCloud } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { FileUploadBox } from "@/components/file-upload-box";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { savePersistentRecord } from "@/lib/cloud-persistence";
+import { loadPersistentRecords, savePersistentRecord } from "@/lib/cloud-persistence";
 import { uploadEvidenceChecklist } from "@/lib/engineering-insights";
 
 const publishSteps = [
@@ -216,6 +216,14 @@ type UploadCadComponent = {
   count?: number;
 };
 
+type UploadProjectDraft = {
+  schema: string;
+  id: string;
+  updatedAt: string;
+  formValues: Record<string, string>;
+  fileBuckets: Record<string, string[]>;
+};
+
 const initialUploadCadComponents: UploadCadComponent[] = [
   { id: "nose", type: "nose", name: "Ogive nose cone", length: 210, diameter: 70, mass: 180, position: 0 },
   { id: "payload", type: "payload", name: "Avionics payload bay", length: 180, diameter: 70, mass: 320, position: 210 },
@@ -226,27 +234,87 @@ const initialUploadCadComponents: UploadCadComponent[] = [
   { id: "rail", type: "rail", name: "Rail buttons", length: 28, diameter: 8, mass: 24, position: 560 }
 ];
 
+function slugify(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "rocket-project";
+}
+
+function collectUploadFormValues() {
+  if (typeof document === "undefined") return {};
+  const values: Record<string, string> = {};
+
+  document.querySelectorAll("label").forEach((label) => {
+    const control = label.querySelector("input, select, textarea") as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
+    if (!control) return;
+    const labelText = Array.from(label.childNodes)
+      .filter((node) => node.nodeType === Node.TEXT_NODE)
+      .map((node) => node.textContent?.trim() ?? "")
+      .join(" ")
+      .trim();
+    const key = labelText || control.getAttribute("placeholder") || control.id || control.name;
+    if (!key) return;
+    if (control instanceof HTMLInputElement && control.type === "checkbox") {
+      values[key] = control.checked ? "checked" : "";
+      return;
+    }
+    values[key] = control.value;
+  });
+
+  document.querySelectorAll("textarea").forEach((textarea, index) => {
+    if (!textarea.closest("label")) values[`Notes ${index + 1}`] = textarea.value;
+  });
+
+  return values;
+}
+
 export default function UploadPage() {
   const [filesByBucket, setFilesByBucket] = useState<Record<string, string[]>>({});
   const [status, setStatus] = useState("Draft not saved yet.");
   const [activeStep, setActiveStep] = useState("Project");
   const uploadedCount = Object.values(filesByBucket).reduce((total, files) => total + files.length, 0);
 
+  useEffect(() => {
+    void loadPersistentRecords<UploadProjectDraft>("upload_drafts").then((records) => {
+      const latest = records[0]?.payload;
+      if (!latest) return;
+      setFilesByBucket(latest.fileBuckets ?? {});
+      setStatus(`Loaded saved upload draft from ${new Date(latest.updatedAt).toLocaleString()}.`);
+    });
+  }, []);
+
   function rememberFiles(title: string, files: File[]) {
     setFilesByBucket((current) => ({ ...current, [title]: files.map((file) => file.name) }));
     setStatus(`${title}: ${files.length} file${files.length === 1 ? "" : "s"} attached.`);
   }
 
-  function saveDraft() {
+  async function saveDraft() {
+    const formValues = collectUploadFormValues();
     const draft = {
+      schema: "rocketry-house-upload-draft-v1",
+      id: "current-project",
       updatedAt: new Date().toISOString(),
+      formValues,
       fileBuckets: filesByBucket
     };
     localStorage.setItem("rocketry-house.upload-draft", JSON.stringify(draft));
-    void savePersistentRecord("upload_drafts", "current-project", draft).then(({ cloud }) => {
-      setStatus(cloud ? "Project draft saved to Supabase and local backup." : "Project draft saved locally. Add Supabase env vars to sync it to cloud.");
-    });
     setStatus("Saving project draft...");
+    const [draftResult, projectResult] = await Promise.all([
+      savePersistentRecord("upload_drafts", "current-project", draft),
+      savePersistentRecord("rocket_projects", "upload-current-project", {
+        ...draft,
+        source: "upload",
+        name: formValues["Project title"] || "Untitled upload project",
+        summary: {
+          category: formValues["Solid rocket category"],
+          motorClass: formValues["Motor class"],
+          propellantFamily: formValues["Propellant / fuel family"],
+          grainGeometry: formValues["Grain geometry"],
+          listingType: formValues["Listing type"],
+          evidenceBucketCount: Object.keys(filesByBucket).length,
+          evidenceFileCount: uploadedCount
+        }
+      })
+    ]);
+    setStatus(draftResult.cloud && projectResult.cloud ? "Project draft saved to Supabase and account project archive." : "Project draft saved locally. Cloud sync needs Supabase availability.");
   }
 
   function runSafetyReview() {
@@ -258,8 +326,35 @@ export default function UploadPage() {
     setStatus(`Preview ready with ${uploadedCount} attached file${uploadedCount === 1 ? "" : "s"} across ${Object.keys(filesByBucket).length} evidence bucket${Object.keys(filesByBucket).length === 1 ? "" : "s"}.`);
   }
 
-  function publishProject() {
-    setStatus("Project repository published in mock mode. Supabase storage and Stripe checkout can attach to this same flow.");
+  async function publishProject() {
+    const formValues = collectUploadFormValues();
+    const title = formValues["Project title"] || "Untitled rocket project";
+    const slug = `${slugify(title)}-${Date.now().toString(36)}`;
+    const project = {
+      schema: "rocketry-house-published-project-v1",
+      id: slug,
+      slug,
+      source: "upload",
+      name: title,
+      status: "published",
+      publishedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      formValues,
+      fileBuckets: filesByBucket,
+      summary: {
+        category: formValues["Solid rocket category"],
+        motorClass: formValues["Motor class"],
+        propellantFamily: formValues["Propellant / fuel family"],
+        grainGeometry: formValues["Grain geometry"],
+        listingType: formValues["Listing type"],
+        price: formValues["Price"],
+        evidenceBucketCount: Object.keys(filesByBucket).length,
+        evidenceFileCount: uploadedCount
+      }
+    };
+    setStatus("Publishing project repository to account archive...");
+    const result = await savePersistentRecord("rocket_projects", slug, project);
+    setStatus(result.cloud ? "Project repository published to Supabase account archive." : "Project repository saved locally. Cloud sync needs Supabase availability.");
   }
 
   function jumpToStep(label: string, target: string) {
@@ -624,15 +719,23 @@ function EmbeddedUploadCadBuilder() {
     setSelectedId(id);
   }
 
-  function exportCadJson() {
+  async function exportCadJson() {
     const payload = {
       schema: "rocketry-house-upload-cad-v1",
+      id: "upload-inline-cad",
       updatedAt: new Date().toISOString(),
       summary: { totalLength, maxDiameter, dryMass, cg, cp, stability },
       components
     };
     localStorage.setItem("rocketry-house.upload-inline-cad", JSON.stringify(payload, null, 2));
-    void savePersistentRecord("upload_inline_cad", "current-project", payload);
+    await Promise.all([
+      savePersistentRecord("upload_inline_cad", "current-project", payload),
+      savePersistentRecord("rocket_projects", "upload-inline-cad", {
+        ...payload,
+        source: "upload-inline-cad",
+        name: "Inline Web CAD upload project"
+      })
+    ]);
   }
 
   return (

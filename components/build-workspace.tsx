@@ -379,6 +379,7 @@ export function MotorBuilder() {
   const [price, setPrice] = useState(0);
   const [nozzleOpen, setNozzleOpen] = useState(false);
   const [compareMotors, setCompareMotors] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("Motor not saved yet.");
 
   function update<K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) {
     setParameters((current) => ({ ...current, [key]: value }));
@@ -388,7 +389,7 @@ export function MotorBuilder() {
     setResult(simulateMotor(parameters));
   }
 
-  function saveMotor() {
+  async function saveMotor() {
     const motor: SavedMotor = {
       id: `motor-${Date.now()}`,
       name: savedName,
@@ -412,7 +413,9 @@ export function MotorBuilder() {
     };
     const existing = readStoredMotors().filter((item) => !mockSavedMotors.some((mockMotor) => mockMotor.id === item.id));
     localStorage.setItem(getMotorStorageKey(), JSON.stringify([motor, ...existing]));
-    void savePersistentRecord("saved_motors", motor.id, motor);
+    setSaveStatus("Saving motor to account library...");
+    const saveResult = await savePersistentRecord("saved_motors", motor.id, motor);
+    setSaveStatus(saveResult.cloud ? "Motor saved to Supabase and local backup." : "Motor saved locally. Cloud sync needs Supabase availability.");
     window.dispatchEvent(new Event("rocketry-motors-change"));
     setModalOpen(false);
   }
@@ -439,6 +442,7 @@ export function MotorBuilder() {
         <Card className="mt-5 p-5">
           <h2 className="flex items-center gap-2 font-semibold"><FileUp className="h-5 w-5 text-orange-200" />Measured data and files</h2>
           <p className="mt-2 text-sm text-orange-50/62">Attach static-fire data, measured thrust CSV, photos, PDFs, or notes. These files support verification; they do not certify motor safety.</p>
+          <p className="mt-3 rounded-md bg-white/[0.04] p-3 text-xs text-orange-50/60">{saveStatus}</p>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <FileUploadBox />
             <RawMeasuredPreview />
@@ -504,6 +508,7 @@ export function RocketBuilder() {
   const [components, setComponents] = useState<RocketComponent[]>(project.components);
   const [motors, setMotors] = useState<SavedMotor[]>([]);
   const [selectedMotorId, setSelectedMotorId] = useState<string>("");
+  const [saveStatus, setSaveStatus] = useState("Rocket project not saved yet.");
   const [windSpeedMps, setWindSpeedMps] = useState(1.7);
   const [result, setResult] = useState<SimulationResult>(() => runRocketEstimateWithMotor(project.components, undefined, { windSpeedMps: 1.7 }));
   const [launchRun, setLaunchRun] = useState(0);
@@ -564,6 +569,44 @@ export function RocketBuilder() {
   function moveSelected(delta: number) {
     if (!selectedComponent) return;
     updateComponent(selectedComponent.id, { position: Math.max(0, selectedComponent.position + delta) });
+  }
+
+  async function saveRocketProject() {
+    const now = new Date().toISOString();
+    const slug = `rocket-build-${now.slice(0, 10)}-${Date.now().toString(36)}`;
+    const payload = {
+      schema: "rocketry-house-rocket-project-v1",
+      id: slug,
+      slug,
+      name: "Saved Rocket Builder Design",
+      source: "build/rocket",
+      updatedAt: now,
+      components,
+      renderedComponents: componentsWithMotor,
+      selectedMotorId: selectedMotor?.id ?? null,
+      selectedMotor: selectedMotor ?? null,
+      motorMountPositionMm: selectedMotor ? Math.max(0, totalLength(components) - selectedMotor.parameters.casingLengthMm - 80) : null,
+      windSpeedMps,
+      simulation: result,
+      summary: {
+        lengthMm: totalLength(components),
+        dryMassG: components.reduce((sum, component) => sum + component.mass, 0),
+        loadedMassG: componentsWithMotor.reduce((sum, component) => sum + component.mass, 0),
+        cgMm: result.cgMm,
+        cpMm: result.cpMm,
+        stabilityMargin: result.stabilityMargin,
+        predictedAltitudeM: result.predictedAltitudeM,
+        maxDriftM: result.maxDriftM ?? 0
+      }
+    };
+
+    setSaveStatus("Saving rocket project to account archive...");
+    localStorage.setItem("rocketry-house.last-rocket-project", JSON.stringify(payload));
+    const [projectSave, builderSave] = await Promise.all([
+      savePersistentRecord("rocket_projects", slug, payload),
+      savePersistentRecord("rocket_builder_current", "current", payload)
+    ]);
+    setSaveStatus(projectSave.cloud && builderSave.cloud ? "Rocket project saved to Supabase and local backup." : "Rocket project saved locally. Cloud sync needs Supabase availability.");
   }
 
   function addPayloadBay() {
@@ -638,8 +681,9 @@ export function RocketBuilder() {
             </Card>
             <Card className="p-5">
               <h2 className="font-semibold">Project actions</h2>
+              <p className="mt-3 rounded-md bg-white/[0.04] p-3 text-xs leading-5 text-orange-50/62">{saveStatus}</p>
               <div className="mt-4 grid gap-2">
-                <Button variant="outline"><Save className="h-4 w-4" />Save rocket project</Button>
+                <Button variant="outline" onClick={saveRocketProject}><Save className="h-4 w-4" />Save rocket project</Button>
                 <Button variant="outline"><Archive className="h-4 w-4" />Create fork-ready package</Button>
                 <Button><ChevronRight className="h-4 w-4" />Publish / Fork / Sell</Button>
               </div>
