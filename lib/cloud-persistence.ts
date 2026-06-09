@@ -52,6 +52,34 @@ function resolveOwnerKey(options?: PersistenceOptions) {
   return options?.ownerKey ?? getPersistenceOwnerKey();
 }
 
+async function resolveCloudOwnerKey(options?: PersistenceOptions, mode: "read" | "write" = "read") {
+  const requestedOwner = resolveOwnerKey(options);
+  const supabase = getSupabaseClient();
+  if (!supabase || isMockMode) return { ownerKey: requestedOwner, authenticated: false, publicCommunity: requestedOwner === PUBLIC_COMMUNITY_OWNER_KEY };
+
+  const { data } = await supabase.auth.getUser();
+  const userId = data.user?.id;
+  const publicCommunity = requestedOwner === PUBLIC_COMMUNITY_OWNER_KEY;
+
+  if (publicCommunity) {
+    return {
+      ownerKey: PUBLIC_COMMUNITY_OWNER_KEY,
+      authenticated: Boolean(userId),
+      publicCommunity
+    };
+  }
+
+  if (!userId) {
+    return { ownerKey: requestedOwner, authenticated: false, publicCommunity: false };
+  }
+
+  return {
+    ownerKey: `user:${userId}`,
+    authenticated: true,
+    publicCommunity: false
+  };
+}
+
 export function localCollectionKeyForOwner(collection: string, ownerKey: string) {
   return `rocketry-house.cloud-cache:${ownerKey}:${collection}`;
 }
@@ -86,11 +114,14 @@ export async function savePersistentRecord<T>(collection: string, recordKey: str
 
   const supabase = getSupabaseClient();
   if (!supabase || isMockMode) return { cloud: false, error: null };
-  const ownerKey = resolveOwnerKey(options);
+  const owner = await resolveCloudOwnerKey(options, "write");
+  if (!owner.authenticated) {
+    return { cloud: false, error: new Error("Sign in is required to archive data to Supabase.") };
+  }
 
   const { error } = await supabase.from("user_data_records").upsert(
     {
-      owner_key: ownerKey,
+      owner_key: owner.ownerKey,
       collection,
       record_key: recordKey,
       payload,
@@ -106,12 +137,13 @@ export async function loadPersistentRecords<T>(collection: string, options?: Per
   const localRecords = readLocalCollection<T>(collection, options);
   const supabase = getSupabaseClient();
   if (!supabase || isMockMode) return localRecords;
-  const ownerKey = resolveOwnerKey(options);
+  const owner = await resolveCloudOwnerKey(options, "read");
+  if (!owner.authenticated && !owner.publicCommunity) return localRecords;
 
   const { data, error } = await supabase
     .from("user_data_records")
     .select("id, collection, record_key, payload, updated_at")
-    .eq("owner_key", ownerKey)
+    .eq("owner_key", owner.ownerKey)
     .eq("collection", collection)
     .order("updated_at", { ascending: false });
 
@@ -153,8 +185,9 @@ function safeStorageSegment(value: string) {
 
 export async function uploadPersistentFiles(title: string, files: File[]) {
   const uploadedAt = new Date().toISOString();
-  const owner = safeStorageSegment(getPersistenceOwnerKey());
   const supabase = getSupabaseClient();
+  const { data } = supabase && !isMockMode ? await supabase.auth.getUser() : { data: { user: null } };
+  const owner = data.user?.id ? safeStorageSegment(data.user.id) : safeStorageSegment(getPersistenceOwnerKey());
   const records: PersistentFileRecord[] = [];
 
   for (const file of files) {
@@ -162,14 +195,14 @@ export async function uploadPersistentFiles(title: string, files: File[]) {
     const storagePath = `${owner}/${id}-${safeStorageSegment(file.name)}`;
     let publicUrl: string | undefined;
 
-    if (supabase && !isMockMode) {
+    if (supabase && !isMockMode && data.user?.id) {
       const { error } = await supabase.storage.from("rocketry-house-files").upload(storagePath, file, {
         cacheControl: "3600",
         upsert: false
       });
       if (!error) {
-        const { data } = supabase.storage.from("rocketry-house-files").getPublicUrl(storagePath);
-        publicUrl = data.publicUrl;
+        const { data: signedData } = await supabase.storage.from("rocketry-house-files").createSignedUrl(storagePath, 60 * 60 * 24 * 7);
+        publicUrl = signedData?.signedUrl;
       }
     }
 

@@ -56,7 +56,7 @@ psql "$DATABASE_URL" -f supabase/cloud-persistence.sql
 psql "$DATABASE_URL" -f supabase/seed.sql
 ```
 
-For a public production launch, tighten the permissive MVP RLS policies in `supabase/cloud-persistence.sql` so rows are scoped to authenticated users instead of browser/device owner keys.
+For a public production launch, run `supabase/cloud-persistence.sql` in Supabase before opening the app to users. The policy file enables RLS, scopes personal records to `auth.uid()`, keeps community posts publicly readable, requires sign-in for writes, and makes uploaded files private to the authenticated owner path.
 
 ## Deploy
 
