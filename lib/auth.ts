@@ -29,25 +29,6 @@ type LocalAccountRecord = {
   updatedAt: string;
 };
 
-export const demoUser: AuthUser = {
-  id: "mock-user-mira",
-  name: "Mira Park",
-  email: "mira@rocketry.house",
-  accountType: "personal",
-  avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=160&q=80",
-  headline: "Flight systems and propulsion data builder",
-  bio: "Building public rocket dossiers with CAD, motor analysis, telemetry, and repeatable launch evidence.",
-  location: "Seoul / Daejeon",
-  website: "https://rocketry.house",
-  specialties: "Propulsion analysis, flight systems, recovery design, telemetry review",
-  createdAt: "2026-05-01T00:00:00.000Z",
-  isDemo: true
-};
-
-export function isDemoAccount(user: AuthUser | null) {
-  return Boolean(user?.isDemo || user?.id === demoUser.id || user?.email === demoUser.email);
-}
-
 export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }

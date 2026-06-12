@@ -4,12 +4,7 @@ import { useEffect, useState } from "react";
 import { Award, BadgeCheck, Flame, Globe, MapPin, Pencil, RadioTower, Rocket, Save, UserRoundCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ProjectCard } from "@/components/project-card";
-import { mockSavedMotors } from "@/lib/motor-library";
-import { mockProjects } from "@/lib/mock-data";
-import { isDemoAccount, readMockUser, restoreAuthUserFromCloud, saveAuthUserProfileToCloud, type AuthUser, updateLocalAccountUser, writeMockUser } from "@/lib/auth";
-import { prestigeBadges } from "@/lib/platform-content";
-import { sampleOrganizations } from "@/lib/team-data";
+import { readMockUser, restoreAuthUserFromCloud, saveAuthUserProfileToCloud, type AuthUser, updateLocalAccountUser, writeMockUser } from "@/lib/auth";
 import { loadPersistentRecords, savePersistentRecord, uploadPersistentFiles } from "@/lib/cloud-persistence";
 import type { SavedMotor } from "@/types/motor";
 
@@ -75,12 +70,6 @@ export function ProfileAccount() {
       return;
     }
 
-    if (isDemoAccount(user)) {
-      setSavedMotors(mockSavedMotors);
-      setRocketProjects([]);
-      return;
-    }
-
     void Promise.all([
       loadPersistentRecords<SavedMotor>("saved_motors"),
       loadPersistentRecords<StoredRocketProject>("rocket_projects")
@@ -123,12 +112,19 @@ export function ProfileAccount() {
     );
   }
 
-  const demoProfile = isDemoAccount(user);
-  const stats = demoProfile
-    ? ["14 projects", "4.8 rating", "212 forks", "Flight verified"]
-    : [`${rocketProjects.length} projects`, "No rating yet", "0 forks", rocketProjects.some((project) => project.status === "published") ? "Published" : "Not verified"];
-  const visibleProjects = demoProfile ? mockProjects.slice(0, 3) : [];
-  const badges = demoProfile ? prestigeBadges : ["New builder profile"];
+  const publishedProjects = rocketProjects.filter((project) => project.status === "published");
+  const draftProjects = rocketProjects.filter((project) => project.status !== "published");
+  const importedMotorProjects = rocketProjects.filter((project) => project.summary?.motorClass || project.summary?.propellantFamily);
+  const aerospaceScore = publishedProjects.length * 120 + savedMotors.length * 35 + importedMotorProjects.length * 45;
+  const badges = user.specialties
+    ? user.specialties.split(",").map((badge) => badge.trim()).filter(Boolean).slice(0, 7)
+    : ["New builder profile"];
+  const stats = [
+    `${rocketProjects.length} projects`,
+    `${savedMotors.length} motors`,
+    "No rating yet",
+    publishedProjects.length ? "Published" : "Not verified"
+  ];
 
   async function updateProfilePhoto(file: File | undefined) {
     if (!file || !user) return;
@@ -281,23 +277,23 @@ export function ProfileAccount() {
           ) : null}
           <div className="mt-6 grid gap-3 sm:grid-cols-4">{stats.map((item) => <div key={item} className="rounded-lg bg-white/[0.05] p-3 text-sm">{item}</div>)}</div>
         </Card>
-        <RoleWorkspace user={user} demoProfile={demoProfile} />
+        <RoleWorkspace user={user} />
         <div className="mt-8 grid gap-5 lg:grid-cols-3">
           <Card className="p-5">
             <Award className="h-6 w-6 text-orange-200" />
             <h2 className="mt-4 font-semibold">Engineer level</h2>
-            <p className="mt-2 text-2xl font-semibold">{demoProfile ? "Level 18" : "Level 1"}</p>
-            <p className="mt-1 text-sm text-orange-50/55">{demoProfile ? "Aerospace score 42,880" : "Aerospace score 0. Publish verified work to start ranking."}</p>
+            <p className="mt-2 text-2xl font-semibold">Level {Math.max(1, Math.floor(aerospaceScore / 500) + 1)}</p>
+            <p className="mt-1 text-sm text-orange-50/55">Aerospace score {aerospaceScore}. Publish verified work to climb rankings.</p>
           </Card>
           <Card className="p-5">
             <RadioTower className="h-6 w-6 text-cyan-200" />
             <h2 className="mt-4 font-semibold">Telemetry achievements</h2>
-            <p className="mt-2 text-sm text-orange-50/58">{demoProfile ? "18 mapped datasets, 7 verified altitude traces, 4 public launch dossiers." : "No telemetry has been attached yet. Upload flight data from a project or launch log."}</p>
+            <p className="mt-2 text-sm text-orange-50/58">No telemetry has been attached yet. Upload flight data from a project or launch log.</p>
           </Card>
           <Card className="p-5">
             <BadgeCheck className="h-6 w-6 text-cyan-200" />
             <h2 className="mt-4 font-semibold">Specialties</h2>
-            <p className="mt-2 text-sm text-orange-50/58">{user.specialties || (demoProfile ? "Propulsion analysis, flight systems, recovery design, telemetry review." : "Specialties appear after your saved motors, rocket projects, and verified evidence accumulate.")}</p>
+            <p className="mt-2 text-sm text-orange-50/58">{user.specialties || "Specialties appear after your saved motors, rocket projects, and verified evidence accumulate."}</p>
           </Card>
         </div>
         <Card className="mt-8 p-5">
@@ -327,11 +323,11 @@ export function ProfileAccount() {
             <h2 className="flex items-center gap-2 font-semibold"><Rocket className="h-5 w-5 text-cyan-200" />My rocket builds</h2>
             <p className="mt-2 text-sm text-orange-50/62">Rocket projects stay project-first: CAD, simulation, files, forks, discussions, and marketplace data remain attached to the rocket repository.</p>
             <div className="mt-4 grid gap-2 text-sm text-orange-50/68">
-              <p>Draft rocket CAD: {demoProfile ? "2" : rocketProjects.filter((project) => project.status !== "published").length}</p>
-              <p>Published rocket repositories: {demoProfile ? "14" : rocketProjects.filter((project) => project.status === "published").length}</p>
-              <p>Motors imported into rocket designs: {demoProfile ? "5" : rocketProjects.filter((project) => project.summary?.motorClass || project.summary?.propellantFamily).length}</p>
+              <p>Draft rocket CAD: {draftProjects.length}</p>
+              <p>Published rocket repositories: {publishedProjects.length}</p>
+              <p>Motors imported into rocket designs: {importedMotorProjects.length}</p>
             </div>
-            {!demoProfile && rocketProjects.length ? (
+            {rocketProjects.length ? (
               <div className="mt-4 space-y-3">
                 {rocketProjects.slice(0, 4).map((project, index) => (
                   <div key={project.id ?? project.slug ?? index} className="rounded-md border border-white/10 bg-white/[0.04] p-3 text-sm">
@@ -347,8 +343,18 @@ export function ProfileAccount() {
             <Button href="/build/rocket" asChild variant="outline" className="mt-4 w-full">Open rocket builder</Button>
           </Card>
         </div>
-        {visibleProjects.length ? (
-          <div className="mt-8 grid gap-5 md:grid-cols-3">{visibleProjects.map((project) => <ProjectCard key={project.id} project={project} />)}</div>
+        {publishedProjects.length ? (
+          <div className="mt-8 grid gap-5 md:grid-cols-3">
+            {publishedProjects.slice(0, 3).map((project, index) => (
+              <Card key={project.id ?? project.slug ?? index} className="p-5">
+                <p className="text-sm uppercase tracking-[0.18em] text-orange-100/50">Published project</p>
+                <h2 className="mt-3 text-xl font-semibold">{project.name || "Untitled rocket project"}</h2>
+                <p className="mt-2 text-sm text-orange-50/58">
+                  {project.summary?.predictedAltitudeM ? `${project.summary.predictedAltitudeM} m predicted apogee` : "No flight summary attached yet."}
+                </p>
+              </Card>
+            ))}
+          </div>
         ) : (
           <Card className="mt-8 p-6">
             <h2 className="font-semibold">No public projects yet</h2>
@@ -361,21 +367,18 @@ export function ProfileAccount() {
   );
 }
 
-function RoleWorkspace({ user, demoProfile }: { user: AuthUser; demoProfile: boolean }) {
+function RoleWorkspace({ user }: { user: AuthUser }) {
   if (user.accountType === "organization") {
-    const organization = sampleOrganizations.find((item) => item.name === user.organizationName);
     return (
       <Card className="mt-8 p-5">
         <h2 className="font-semibold">Organization command center</h2>
         <p className="mt-2 text-sm text-orange-50/62">Approve team membership requests, monitor organization score, and manage team-level project portfolios.</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <Metric label="Approved teams" value={demoProfile && organization ? String(organization.teams.length) : "0"} />
-          <Metric label="Organization score" value={demoProfile && organization ? organization.score : "0"} />
-          <Metric label="Ranking" value={demoProfile && organization ? organization.ranking : "Unranked"} />
+          <Metric label="Approved teams" value="0" />
+          <Metric label="Organization score" value="0" />
+          <Metric label="Ranking" value="Unranked" />
         </div>
-        {demoProfile && organization ? <div className="mt-4 flex flex-wrap gap-2">
-          {organization.teams.map((team) => <span key={team} className="rounded-md bg-white/[0.04] px-3 py-2 text-sm text-orange-50/64">{team}</span>)}
-        </div> : <EmptyState title="No teams approved yet" body="Team approval requests will appear here after teams request membership in this organization." />}
+        <EmptyState title="No teams approved yet" body="Team approval requests will appear here after teams request membership in this organization." />
         <Button href="/ranking" asChild variant="outline" className="mt-5">Open organization ranking</Button>
       </Card>
     );
@@ -389,7 +392,7 @@ function RoleWorkspace({ user, demoProfile }: { user: AuthUser; demoProfile: boo
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <Metric label="Parent organization" value={user.organizationName ?? "Independent"} />
           <Metric label="Approval status" value={user.organizationApprovalStatus ?? "none"} />
-          <Metric label="Team ranking" value={demoProfile ? "#12" : "Unranked"} />
+          <Metric label="Team ranking" value="Unranked" />
         </div>
         <div className="mt-5 flex flex-wrap gap-3">
           <Button href="/upload" asChild>Publish team project</Button>

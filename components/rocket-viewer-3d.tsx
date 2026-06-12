@@ -424,9 +424,17 @@ function ComponentMesh({ component, total, selected = false, onSelect }: { compo
 export function RocketViewer3D({ components, selectedComponentId, onSelectComponent }: { components: RocketComponent[]; selectedComponentId?: string; onSelectComponent?: (id: string) => void }) {
   const sorted = sortComponents(components);
   const length = totalLength(sorted);
+  const selectedComponent = sorted.find((component) => component.id === selectedComponentId);
   const halfLength = length / UNIT / 2;
   const fin = sorted.find((component) => component.type === "fins");
   const motor = sorted.find((component) => component.type === "motor_mount");
+  if (!sorted.length || !Number.isFinite(length) || length <= 0) {
+    return (
+      <div className="flex h-[420px] items-center justify-center rounded-lg border border-white/10 bg-[#080b14] text-sm text-orange-50/60">
+        Add at least one rocket component to render the live CAD view.
+      </div>
+    );
+  }
   return (
     <div className="h-[420px] overflow-hidden rounded-lg border border-white/10 bg-[#080b14]">
       <Canvas>
@@ -437,8 +445,8 @@ export function RocketViewer3D({ components, selectedComponentId, onSelectCompon
         <group position={[0, SCENE_Y_OFFSET, 0]}>
           <group position={[0, halfLength, 0]} rotation={[Math.PI / 2, 0, 0]}>
             {sorted.map((component) => <ComponentMesh key={component.id} component={component} total={length} selected={component.id === selectedComponentId} onSelect={onSelectComponent} />)}
-            {selectedComponentId ? (
-              <Html position={[1.05, 1.08, axialCenter(sorted.find((component) => component.id === selectedComponentId) ?? sorted[0], length)]} className="pointer-events-none">
+            {selectedComponent ? (
+              <Html position={[1.05, 1.08, axialCenter(selectedComponent, length)]} className="pointer-events-none">
                 <span className="whitespace-nowrap rounded border border-orange-200/45 bg-black/65 px-2 py-1 text-[10px] font-semibold text-orange-100 shadow-lg">selected component</span>
               </Html>
             ) : null}

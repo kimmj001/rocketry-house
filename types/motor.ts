@@ -16,7 +16,7 @@ export type MotorParameters = {
   nozzleExitMm: number;
   expansionRatio: number;
   propellantProfileName: string;
-  grainConfiguration?: "BATES" | "Finocyl" | "Moon burner" | "C-slot" | "End burner" | "Rod and tube" | "Custom";
+  grainConfiguration?: "BATES" | "Hollow cylinder" | "Finocyl" | "Moon burner" | "C-slot" | "End burner" | "Rod and tube" | "Star" | "Custom";
   coreSurface?: "Exposed" | "Inhibited";
   outerSurface?: "Exposed" | "Inhibited";
   endsSurface?: "Exposed" | "Inhibited";
@@ -42,6 +42,10 @@ export type MotorCurvePoint = {
 };
 
 export type MotorSimulationResult = {
+  engineId?: string;
+  engineName?: string;
+  engineSource?: string;
+  modelNotes?: string[];
   totalImpulseNs: number;
   averageThrustN: number;
   peakThrustN: number;
@@ -49,6 +53,14 @@ export type MotorSimulationResult = {
   motorClass: string;
   propellantMassG: number;
   estimatedLoadedMassG: number;
+  averagePressureMPa?: number;
+  maxPressureMPa?: number;
+  averageSpecificImpulseS?: number;
+  combustionEfficiency?: number;
+  nozzleEfficiency?: number;
+  deliveredCharacteristicVelocityMS?: number;
+  optimumExpansionRatio?: number;
+  portToThroatRatio?: number;
   curve: MotorCurvePoint[];
   warnings: string[];
 };

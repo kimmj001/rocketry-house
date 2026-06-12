@@ -1,23 +1,23 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Archive, Boxes, Calculator, Check, ChevronRight, Cpu, Crosshair, Download, Eye, FileUp, Flame, Gauge, Layers, Library, PackagePlus, Play, Rocket, Ruler, Save, ShieldCheck, UploadCloud } from "lucide-react";
+import { Archive, Boxes, Calculator, Check, ChevronRight, Cpu, Crosshair, Download, Eye, FileUp, Flame, Gauge, Layers, Library, PackagePlus, Play, Rocket, Ruler, Save, ShieldCheck, UploadCloud, Wind } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { RocketViewer3D } from "@/components/rocket-viewer-3d";
 import { FileUploadBox } from "@/components/file-upload-box";
 import { TelemetryChart } from "@/components/charts";
 import { mockProjects } from "@/lib/mock-data";
-import { mockSavedMotors } from "@/lib/motor-library";
-import { isDemoAccount, readMockUser } from "@/lib/auth";
+import { readMockUser } from "@/lib/auth";
 import { loadPersistentRecords, savePersistentRecord } from "@/lib/cloud-persistence";
-import { defaultMotorParameters, propellantProfiles, simulateMotor } from "@/lib/motor-simulation";
+import { analyzeNozzleFlow, defaultMotorParameters, propellantProfiles, simulateMotor } from "@/lib/motor-simulation";
 import { runRocketEstimateWithMotor } from "@/lib/rocket-simulation";
 import { sortComponents, totalLength } from "@/lib/cad/geometry";
 import { buildModules, flightEquations, flightGraphOutputs, motorEquations, motorGraphOutputs } from "@/lib/platform-content";
 import type { MotorParameters, MotorSimulationResult, SavedMotor } from "@/types/motor";
+import type { NozzleCfdField, NozzleCfdInputs, NozzleCfdResult } from "@/types/cfd";
 import type { RocketComponent, RocketComponentType, SimulationResult } from "@/lib/types";
 
 const MOTOR_STORAGE_KEY = "rocketry-house.saved-motors";
@@ -102,12 +102,14 @@ const motorGeometryPresets = [
 ] satisfies Array<{ name: string; note: string; values: Partial<MotorParameters> }>;
 
 const grainGeometryModes = [
-  ["BATES", "Neutral-burn baseline with segmented grains and an axial port."],
+  ["BATES", "Segmented hollow-cylinder stack with axial core, commonly used for neutral-burn SRM studies."],
+  ["Hollow cylinder", "Single or segmented circular port grain; equivalent baseline used in Meteor/JSRM style workflows."],
   ["Finocyl", "High initial burn-area concept for comparison and future solver support."],
   ["Moon burner", "Offset-core educational preview for progressive burn studies."],
   ["C-slot", "Slot-based visualization mode for non-axisymmetric profile research."],
   ["End burner", "Low-area reference case for long-burn comparison."],
   ["Rod and tube", "Coaxial reference geometry used for comparison datasets."],
+  ["Star", "Star-port geometry factor for high initial burn-area comparisons."],
   ["Custom", "Reserved for imported profiles and future sketch-based grain geometry."]
 ] as const;
 
@@ -185,7 +187,7 @@ const rocketComponentPalette = [
     items: [
       ["payload_section", "Stage", "Create a stage-like section"],
       ["coupler", "Booster/Coupler", "Stage adapter or coupler"],
-      ["payload_section", "Pods", "External pod placeholder"]
+      ["payload_section", "Pods", "External pod study"]
     ]
   },
   {
@@ -264,11 +266,18 @@ function summarizeMotor(result: MotorSimulationResult, parameters: MotorParamete
   const expansionRatio = ((parameters.nozzleExitMm / Math.max(parameters.nozzleThroatMm, 1)) ** 2);
   return {
     classLoad: classPercent(result.totalImpulseNs, result.motorClass),
-    maxPressure: Number(maxPressure.toFixed(2)),
-    averagePressure: Number(averagePressure.toFixed(2)),
-    averageIsp: Number(averageIsp.toFixed(1)),
+    maxPressure: Number((result.maxPressureMPa ?? maxPressure).toFixed(2)),
+    averagePressure: Number((result.averagePressureMPa ?? averagePressure).toFixed(2)),
+    maxPressureBar: Number(((result.maxPressureMPa ?? maxPressure) * 10).toFixed(1)),
+    averagePressureBar: Number(((result.averagePressureMPa ?? averagePressure) * 10).toFixed(1)),
+    averageIsp: Number((result.averageSpecificImpulseS ?? averageIsp).toFixed(1)),
     exitMach: Number(exitMach.toFixed(2)),
-    expansionRatio: Number(expansionRatio.toFixed(2))
+    expansionRatio: Number(expansionRatio.toFixed(2)),
+    optimumExpansionRatio: Number((result.optimumExpansionRatio ?? expansionRatio).toFixed(2)),
+    portToThroatRatio: Number((result.portToThroatRatio ?? 0).toFixed(2)),
+    combustionEfficiency: Math.round((result.combustionEfficiency ?? 1) * 100),
+    nozzleEfficiency: Math.round((result.nozzleEfficiency ?? 1) * 100),
+    deliveredCStar: result.deliveredCharacteristicVelocityMS ?? 0
   };
 }
 
@@ -411,7 +420,7 @@ export function MotorBuilder() {
       createdAt: new Date().toISOString().slice(0, 10),
       updatedAt: new Date().toISOString().slice(0, 10)
     };
-    const existing = readStoredMotors().filter((item) => !mockSavedMotors.some((mockMotor) => mockMotor.id === item.id));
+    const existing = readStoredMotors();
     localStorage.setItem(getMotorStorageKey(), JSON.stringify([motor, ...existing]));
     setSaveStatus("Saving motor to account library...");
     const saveResult = await savePersistentRecord("saved_motors", motor.id, motor);
@@ -422,21 +431,17 @@ export function MotorBuilder() {
 
   return (
     <main className={buildPageClass}>
-      <div className="mx-auto max-w-7xl">
+        <div className="mx-auto max-w-7xl">
         <BuilderHeader eyebrow="Build > Motor" title="Motor design and simulation workspace" copy="Generate a pre-flight performance analysis, attach measured static-fire data, and save the motor for rocket CAD integration." />
         <SafetyStrip />
-        <div className="mt-8 grid min-w-0 gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
+        <div className="mt-8 grid min-w-0 gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
           <div className="min-w-0 space-y-5 xl:sticky xl:top-24 xl:self-start">
             <MotorParameterPanel parameters={parameters} update={update} runSimulation={runSimulation} />
-            <MotorSimulationPanel result={result} parameters={parameters} onSave={() => setModalOpen(true)} onExportRasp={() => exportRaspMotor(parameters, result)} />
           </div>
           <div className="min-w-0 space-y-5">
-            <MotorPerformanceSummary result={result} parameters={parameters} compareMotors={compareMotors} setCompareMotors={setCompareMotors} onNozzle={() => setNozzleOpen(true)} onExportRasp={() => exportRaspMotor(parameters, result)} />
-            <MotorCurveChart result={result} measuredCurve={compareMotors ? mockSavedMotors[0]?.measuredCurve : undefined} />
+            <MotorPerformanceSummary result={result} parameters={parameters} compareMotors={compareMotors} setCompareMotors={setCompareMotors} onSave={() => setModalOpen(true)} onNozzle={() => setNozzleOpen(true)} onExportRasp={() => exportRaspMotor(parameters, result)} />
             <MotorCrossSectionView parameters={parameters} />
-            <Motor3DViewer parameters={parameters} />
-            <MotorDesignDetailPanel parameters={parameters} result={result} />
-            <EngineeringReferencePanel title="Motor physics model" equations={motorEquations} outputs={motorGraphOutputs} />
+            <MotorCurveChart result={result} measuredCurve={undefined} />
           </div>
         </div>
         <Card className="mt-5 p-5">
@@ -1690,80 +1695,78 @@ function MotorParameterPanel({ parameters, update, runSimulation }: { parameters
 }
 
 function MotorCrossSectionView({ parameters }: { parameters: MotorParameters }) {
-  const portRadius = Math.min(24, Math.max(6, (parameters.coreDiameterMm / Math.max(parameters.grainOuterDiameterMm, 1)) * 32));
-  const throatRadius = Math.min(12, Math.max(4, (parameters.nozzleThroatMm / Math.max(parameters.nozzleExitMm, 1)) * 15));
+  const grainMode = parameters.grainConfiguration ?? "Hollow cylinder";
+  const grainCount = Math.min(5, Math.max(1, Math.round(parameters.grainCount)));
+  const grainWidth = 330 / grainCount;
+  const throatRadius = Math.min(11, Math.max(4, (parameters.nozzleThroatMm / Math.max(parameters.nozzleExitMm, 1)) * 17));
+  const exitRadius = Math.min(34, Math.max(16, (parameters.nozzleExitMm / Math.max(parameters.casingInnerDiameterMm, 1)) * 42));
+  const portRadius = Math.min(31, Math.max(8, (parameters.coreDiameterMm / Math.max(parameters.grainOuterDiameterMm, 1)) * 48));
+  const isFinocyl = grainMode === "Finocyl" || grainMode === "Star";
+  const isCSlot = grainMode === "C-slot";
+  const finCount = isFinocyl ? 6 : 0;
+
   return (
     <Card className="p-5">
-      <h2 className="flex items-center gap-2 font-semibold"><Boxes className="h-5 w-5 text-cyan-200" />SRM hardware cutaway</h2>
-      <div className="mt-5 max-w-full rounded-lg border border-white/10 bg-[#070a12] p-3">
-        <svg viewBox="0 0 760 330" role="img" aria-label="Solid rocket motor cutaway showing motor case, thermal insulation, propellant, igniter, and converging-diverging nozzle" className="pointer-events-none h-auto w-full">
-          <defs>
-            <linearGradient id="steel" x1="0" x2="1">
-              <stop offset="0%" stopColor="#6f7478" />
-              <stop offset="28%" stopColor="#c8c4bb" />
-              <stop offset="50%" stopColor="#8a8881" />
-              <stop offset="74%" stopColor="#e0ddd3" />
-              <stop offset="100%" stopColor="#55585b" />
-            </linearGradient>
-            <linearGradient id="propellant" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="#edd5cc" />
-              <stop offset="54%" stopColor="#c99f9b" />
-              <stop offset="100%" stopColor="#9d7570" />
-            </linearGradient>
-            <linearGradient id="nozzle" x1="0" x2="1">
-              <stop offset="0%" stopColor="#d7d7d2" />
-              <stop offset="45%" stopColor="#58626b" />
-              <stop offset="100%" stopColor="#f1efe8" />
-            </linearGradient>
-            <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="10" stdDeviation="8" floodColor="#000000" floodOpacity="0.45" />
-            </filter>
-            <pattern id="caseHatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-              <rect width="8" height="8" fill="#c9c5ba" opacity="0.2" />
-              <path d="M0 0 V8" stroke="#f4efe7" strokeOpacity="0.35" strokeWidth="2" />
-            </pattern>
-          </defs>
-
-          <rect x="16" y="16" width="728" height="298" rx="18" fill="#090d17" />
-          <line x1="58" y1="166" x2="724" y2="166" stroke="#e5e7eb" strokeOpacity="0.42" strokeDasharray="7 6" />
-
-          <g filter="url(#softShadow)">
-            <rect x="60" y="102" width="520" height="128" fill="url(#caseHatch)" stroke="#e7e1d6" strokeWidth="2.5" />
-            <path d="M86 117 H565 V215 H86 C69 215 58 203 58 166 C58 129 69 117 86 117 Z" fill="#121823" stroke="#0f172a" strokeWidth="4" />
-            <path d="M96 124 H548 C562 124 572 136 572 166 C572 196 562 208 548 208 H96 C79 208 69 198 69 166 C69 134 79 124 96 124 Z" fill="#f0d7cf" stroke="#ffd7a8" strokeOpacity="0.8" strokeWidth="3" />
-            <path d="M120 134 H548 C558 134 565 144 565 166 C565 188 558 198 548 198 H120 C96 198 81 186 81 166 C81 146 96 134 120 134 Z" fill="url(#propellant)" stroke="#8f6b63" strokeWidth="1.5" />
-            <rect x="145" y={166 - portRadius} width="398" height={portRadius * 2} rx={portRadius} fill="#090d17" stroke="#f8fafc" strokeOpacity="0.55" strokeWidth="1.5" />
-
-            <rect x="47" y="145" width="28" height="42" rx="3" fill="url(#steel)" stroke="#f4efe7" strokeOpacity="0.5" />
-            <rect x="74" y="154" width="14" height="24" rx="2" fill="#d6b16f" stroke="#382817" strokeOpacity="0.6" />
-            <rect x="88" y="149" width="78" height="34" rx="2" fill="#d8bd86" stroke="#5a3f2d" strokeWidth="1.5" />
-            <line x1="97" y1="166" x2="156" y2="166" stroke="#5a3f2d" strokeOpacity="0.75" strokeDasharray="3 4" />
-
-            <rect x="548" y="116" width="22" height="100" fill="#242b33" stroke="#d7dce2" strokeOpacity="0.45" />
-            <path d={`M570 122 L610 ${166 - throatRadius} H626 L690 101 V231 L626 ${166 + throatRadius} H610 L570 210 Z`} fill="url(#nozzle)" stroke="#f4efe7" strokeOpacity="0.72" strokeWidth="2" />
-            <path d={`M589 134 C604 145 610 ${166 - throatRadius} 626 ${166 - throatRadius} H636 C648 ${166 - throatRadius} 670 137 690 125 V207 C670 195 648 ${166 + throatRadius} 636 ${166 + throatRadius} H626 C610 ${166 + throatRadius} 604 187 589 198 Z`} fill="#070a12" stroke="#111827" strokeWidth="2" />
-            <rect x="622" y={166 - throatRadius} width="14" height={throatRadius * 2} rx="3" fill="#04060b" stroke="#9fe7ff" strokeOpacity="0.5" />
-            <path d="M690 101 L724 92 V240 L690 231 Z" fill="none" stroke="#f4efe7" strokeOpacity="0.58" strokeWidth="2" />
-          </g>
-
-          <MotorCallout x={132} y={64} text={`${parameters.casingOuterDiameterMm} mm motor case`} />
-          <MotorCallout x={350} y={64} text="thermal insulation" />
-          <MotorCallout x={176} y={262} text="igniter" />
-          <MotorCallout x={346} y={262} text="propellant grain" />
-          <MotorCallout x={468} y={262} text={`${parameters.coreDiameterMm} mm axial port`} />
-          <MotorCallout x={588} y={64} text={`${parameters.nozzleThroatMm} mm throat`} />
-          <MotorCallout x={660} y={262} text="converging-diverging nozzle" />
-        </svg>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 font-semibold"><Boxes className="h-5 w-5 text-cyan-200" />Live geometry preview</h2>
+          <p className="mt-1 text-sm text-orange-50/58">Side section and cross section update directly from the motor input deck.</p>
+        </div>
+        <span className="rounded-md border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-orange-50/70">{grainMode}</span>
       </div>
-      <div className="mt-3 grid gap-2 text-xs text-orange-50/52 sm:grid-cols-3">
-        <p>Rendered as a longitudinal SRM cutaway: motor case, insulation, propellant, axial port, igniter, and nozzle are separated visually.</p>
-        <p>The axial port and throat dimensions drive burn area, Kn, chamber pressure, and thrust analysis.</p>
-        <p>This is a simulation-oriented schematic only, not a construction drawing or safety certification.</p>
+      <div className="mt-5 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.55fr)_280px]">
+        <div className="min-w-0 rounded-lg border border-white/10 bg-slate-50 p-4 text-slate-800">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Side section</p>
+          <svg viewBox="0 0 740 270" role="img" aria-label="Solid rocket motor live side section preview" className="mt-3 h-auto w-full">
+            <defs>
+              <linearGradient id="liveCase" x1="0" x2="1"><stop offset="0%" stopColor="#425669" /><stop offset="100%" stopColor="#607689" /></linearGradient>
+              <linearGradient id="liveGrain" x1="0" x2="1"><stop offset="0%" stopColor="#f8fafc" /><stop offset="48%" stopColor="#e2e8f0" /><stop offset="100%" stopColor="#f8fafc" /></linearGradient>
+              <linearGradient id="liveNozzle" x1="0" x2="1"><stop offset="0%" stopColor="#94a3b8" /><stop offset="50%" stopColor="#f8fafc" /><stop offset="100%" stopColor="#94a3b8" /></linearGradient>
+            </defs>
+            <rect x="24" y="64" width="492" height="118" rx="3" fill="url(#liveCase)" />
+            <rect x="43" y="80" width="452" height="86" rx="2" fill="#eef2f7" />
+            <rect x="58" y="92" width="418" height="62" rx="1" fill="url(#liveGrain)" stroke="#cbd5e1" />
+            {Array.from({ length: grainCount }, (_, index) => (
+              <line key={index} x1={58 + grainWidth * index} x2={58 + grainWidth * index} y1="92" y2="154" stroke="#94a3b8" strokeOpacity="0.75" />
+            ))}
+            <rect x="84" y={123 - portRadius / 2} width="374" height={portRadius} rx={portRadius / 2} fill="#334155" />
+            <rect x="4" y="86" width="48" height="76" rx="4" fill="#52677a" />
+            <rect x="30" y="106" width="36" height="36" fill="#eef2f7" />
+            <path d={`M492 89 L532 ${123 - throatRadius} H548 L618 ${123 - exitRadius} M492 157 L532 ${123 + throatRadius} H548 L618 ${123 + exitRadius}`} fill="none" stroke="#64748b" strokeWidth="5" strokeLinejoin="miter" />
+            <rect x="532" y={123 - throatRadius} width="18" height={throatRadius * 2} rx="2" fill="#334155" />
+            <line x1="618" x2="618" y1={123 - exitRadius} y2={123 + exitRadius} stroke="#64748b" strokeWidth="3" />
+            <line x1="24" y1="123" x2="708" y2="123" stroke="#64748b" strokeDasharray="7 7" strokeOpacity="0.4" />
+            <text x="24" y="214" fill="#475569" fontSize="15">exit dia {parameters.nozzleExitMm} mm</text>
+            <text x="236" y="214" fill="#475569" fontSize="15">{grainCount} grain segment{grainCount > 1 ? "s" : ""}</text>
+            <text x="462" y="214" fill="#475569" fontSize="15">{parameters.nozzleThroatMm} mm throat</text>
+          </svg>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-slate-50 p-4 text-slate-800">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Cross section</p>
+          <svg viewBox="0 0 230 230" role="img" aria-label="Motor grain cross section preview" className="mx-auto mt-4 h-52 w-52">
+            <circle cx="115" cy="115" r="92" fill="#52677a" />
+            <circle cx="115" cy="115" r="76" fill="#f8fafc" />
+            <circle cx="115" cy="115" r="68" fill="#52677a" />
+            {isFinocyl ? Array.from({ length: finCount }, (_, index) => {
+              const angle = (index / finCount) * 360;
+              return <rect key={index} x="109" y="34" width="12" height="84" rx="4" fill="#f8fafc" transform={`rotate(${angle} 115 115)`} />;
+            }) : null}
+            {isCSlot ? <path d="M115 62 A53 53 0 1 1 80 155" fill="none" stroke="#f8fafc" strokeWidth="18" strokeLinecap="round" /> : null}
+            <circle cx="115" cy="115" r={portRadius} fill="#f8fafc" />
+            <circle cx="115" cy="115" r={Math.max(3, portRadius - 8)} fill="#52677a" opacity={isFinocyl || isCSlot ? 0 : 1} />
+          </svg>
+          <div className="mt-2 rounded-md bg-slate-100 p-3 text-sm text-slate-600">
+            <p><span className="font-semibold text-slate-800">{grainMode}</span> - core {parameters.coreDiameterMm} mm</p>
+            <p className="mt-1">Grain OD {parameters.grainOuterDiameterMm} mm - propellant {parameters.propellantProfileName}</p>
+          </div>
+        </div>
       </div>
+      <p className="mt-3 rounded-md border border-amber-200/20 bg-amber-200/8 p-3 text-xs leading-5 text-amber-50/75">
+        Visual preview only. Geometry is for simulation and comparison, not fabrication instruction or motor safety certification.
+      </p>
     </Card>
   );
 }
-
 function Motor3DViewer({ parameters }: { parameters: MotorParameters }) {
   const lengthPx = Math.min(620, Math.max(260, parameters.casingLengthMm * 1.15));
   const diameterPx = Math.min(120, Math.max(58, parameters.casingOuterDiameterMm * 1.35));
@@ -1778,19 +1781,19 @@ function Motor3DViewer({ parameters }: { parameters: MotorParameters }) {
             <p className="mb-3 text-xs uppercase tracking-[0.16em] text-orange-100/45">External side view</p>
             <div className="flex h-40 items-center justify-center">
               <div className="relative max-w-full" style={{ width: `min(100%, ${lengthPx}px)`, height: diameterPx }}>
-                <div className="absolute inset-y-[16%] left-[7%] right-[21%] rounded-full border border-stone-100/25 bg-[linear-gradient(180deg,#d8d4c9_0%,#8d8e88_20%,#4f5558_52%,#9f9d93_80%,#ebe4d7_100%)] shadow-xl shadow-black/40" />
-                <div className="absolute inset-y-[12%] left-[5%] w-[10%] rounded-l-full border border-stone-100/35 bg-[linear-gradient(180deg,#c4beb1,#666b69,#d8d2c5)]" />
+                <div className="absolute inset-y-[22%] left-[11%] right-[24%] rounded-sm border border-stone-100/25 bg-[linear-gradient(180deg,#e0dacf_0%,#858884_19%,#41484b_49%,#8f928b_79%,#f0e7d8_100%)] shadow-xl shadow-black/40" />
+                <div className="absolute inset-y-[14%] left-[5%] w-[13%] rounded-l-md border border-stone-100/35 bg-[linear-gradient(180deg,#d6d0c4,#747978,#ebe3d7)]" />
                 {[17, 37, 63, 83].map((top) => (
-                  <span key={top} className="absolute left-[8.5%] h-[8px] w-[8px] rounded-full border border-black/40 bg-stone-200 shadow" style={{ top: `${top}%` }} />
+                  <span key={top} className="absolute left-[10%] h-[8px] w-[8px] rounded-full border border-black/40 bg-stone-200 shadow" style={{ top: `${top}%` }} />
                 ))}
-                <div className="absolute inset-y-[13%] right-[20%] w-[8%] rounded-r-md border border-stone-100/25 bg-[linear-gradient(180deg,#7d8387,#303840,#a4a5a0)]" />
-                <div className="absolute right-[4%] top-1/2 h-[70%] w-[23%] -translate-y-1/2">
-                  <div className="absolute inset-y-[19%] left-0 w-[30%] rounded-sm border border-stone-100/20 bg-[#30363d]" />
-                  <div className="absolute inset-y-[10%] left-[23%] right-[38%] bg-[linear-gradient(90deg,#d6d3ca,#5e666c,#ebe5d9)] ring-1 ring-stone-100/25" style={{ clipPath: "polygon(0 0, 100% 38%, 100% 62%, 0 100%)" }} />
-                  <div className="absolute left-[54%] top-1/2 h-[17%] w-[13%] -translate-y-1/2 rounded-sm bg-[#05070d] ring-1 ring-cyan-100/50" />
-                  <div className="absolute inset-y-0 left-[63%] right-0 bg-[linear-gradient(90deg,#444b51,#b8b4aa,#2a3037)] ring-1 ring-stone-100/25" style={{ clipPath: "polygon(0 28%, 100% 0, 100% 100%, 0 72%)" }} />
+                <div className="absolute inset-y-[12%] right-[22%] w-[9%] rounded-r-md border border-stone-100/25 bg-[linear-gradient(180deg,#90969a,#303840,#b8b7ad)]" />
+                <div className="absolute right-[7%] top-1/2 h-[52%] w-[22%] -translate-y-1/2">
+                  <div className="absolute inset-y-[16%] left-0 w-[30%] rounded-sm border border-stone-100/20 bg-[#30363d]" />
+                  <div className="absolute inset-y-[5%] left-[24%] right-[34%] bg-[linear-gradient(90deg,#1b2027,#05070d,#48515a)] ring-1 ring-stone-100/22" style={{ clipPath: "polygon(0 0, 100% 38%, 100% 62%, 0 100%)" }} />
+                  <div className="absolute left-[58%] top-1/2 h-[18%] w-[12%] -translate-y-1/2 rounded-sm bg-[#05070d] ring-1 ring-cyan-100/50" />
+                  <div className="absolute inset-y-[10%] left-[66%] right-0 bg-[linear-gradient(90deg,#333b43,#111820,#5d666d)] ring-1 ring-stone-100/24" style={{ clipPath: "polygon(0 26%, 100% 4%, 100% 96%, 0 74%)" }} />
                 </div>
-                <div className="absolute left-[13%] right-[31%] top-1/2 h-[2px] -translate-y-1/2 bg-cyan-100/18" />
+                <div className="absolute left-[16%] right-[38%] top-1/2 h-[2px] -translate-y-1/2 bg-cyan-100/18" />
                 <span className="absolute left-[7%] -bottom-6 text-[11px] text-orange-50/50">forward closure</span>
                 <span className="absolute right-[2%] -bottom-6 text-[11px] text-orange-50/50">aft nozzle</span>
               </div>
@@ -1897,17 +1900,32 @@ function MotorCallout({ x, y, text }: { x: number; y: number; text: string }) {
   );
 }
 
-function MotorPerformanceSummary({ result, parameters, compareMotors, setCompareMotors, onNozzle, onExportRasp }: { result: MotorSimulationResult; parameters: MotorParameters; compareMotors: boolean; setCompareMotors: (value: boolean) => void; onNozzle: () => void; onExportRasp: () => void }) {
+function MotorPerformanceSummary({ result, parameters, compareMotors, setCompareMotors, onSave, onNozzle, onExportRasp }: { result: MotorSimulationResult; parameters: MotorParameters; compareMotors: boolean; setCompareMotors: (value: boolean) => void; onSave: () => void; onNozzle: () => void; onExportRasp: () => void }) {
   const summary = summarizeMotor(result, parameters);
+  const copyCsv = () => {
+    const rows = [
+      "time_s,thrust_n,chamber_pressure_mpa,mass_flow_kg_s,kn,grain_mass_g,total_impulse_ns",
+      ...result.curve.map((point) => [
+        point.time,
+        point.thrust,
+        point.pressure,
+        point.massFlowKgS,
+        point.kn,
+        point.massRemainingG,
+        point.impulse
+      ].join(","))
+    ];
+    void navigator.clipboard?.writeText(rows.join("\n"));
+  };
   const metrics = [
     ["Class", `${result.motorClass}${result.averageThrustN}`, `${summary.classLoad}% of class band`],
     ["Thrust time", `${result.burnTimeS} s`, "computed burn duration"],
     ["Max thrust", `${result.peakThrustN} N`, "peak curve value"],
     ["Total impulse", `${result.totalImpulseNs} N-s`, "integrated thrust"],
-    ["Specific impulse", `${summary.averageIsp} s`, "curve average estimate"],
-    ["Max pressure", `${summary.maxPressure} MPa`, "simulation ceiling"],
-    ["Average pressure", `${summary.averagePressure} MPa`, "active-burn mean"],
-    ["Nozzle exit speed", `Mach ${summary.exitMach}`, "derived cue"],
+    ["Delivered Isp", `${summary.averageIsp} s`, "curve average estimate"],
+    ["Max CP", `${summary.maxPressureBar} bar`, `${summary.maxPressure} MPa`],
+    ["Average CP", `${summary.averagePressureBar} bar`, `${summary.averagePressure} MPa`],
+    ["Exit velocity", `Mach ${summary.exitMach}`, "derived cue"],
     ["Initial grain mass", `${result.propellantMassG} g`, "public metadata"]
   ];
 
@@ -1919,6 +1937,8 @@ function MotorPerformanceSummary({ result, parameters, compareMotors, setCompare
           <p className="mt-1 text-sm text-orange-50/58">Internal-ballistics summary generated from the current input deck.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button onClick={onSave}><Save className="h-4 w-4" />Save motor</Button>
+          <Button variant="outline" onClick={copyCsv}><Download className="h-4 w-4" />CSV</Button>
           <Button variant="outline" onClick={onExportRasp}><Download className="h-4 w-4" />RASP export</Button>
           <Button variant="outline" onClick={onNozzle}><Gauge className="h-4 w-4" />Nozzle design</Button>
         </div>
@@ -1933,7 +1953,10 @@ function MotorPerformanceSummary({ result, parameters, compareMotors, setCompare
         ))}
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-cyan-100">Nozzle expansion ratio estimate: {summary.expansionRatio}:1. Use this as a simulation annotation, not a fabrication instruction.</p>
+        <div className="text-sm text-cyan-100">
+          <p>Expansion ratio: {summary.expansionRatio}:1 · optimum estimate: {summary.optimumExpansionRatio}:1 · port/throat: {summary.portToThroatRatio}</p>
+          <p className="mt-1 text-xs text-orange-50/46">{result.engineName ?? "SRM internal ballistics"} · combustion eff {summary.combustionEfficiency}% · nozzle eff {summary.nozzleEfficiency}% · delivered c* {summary.deliveredCStar || "n/a"} m/s</p>
+        </div>
         <label className="flex items-center gap-2 text-sm text-orange-50/65">
           <input type="checkbox" checked={compareMotors} onChange={(event) => setCompareMotors(event.target.checked)} className="accent-orange-300" />
           Compare measured curve
@@ -1950,14 +1973,26 @@ function MotorSimulationPanel({ result, parameters, onSave, onExportRasp }: { re
       <h2 className="flex items-center gap-2 font-semibold"><Flame className="h-5 w-5 text-orange-200" />Motor simulation</h2>
       <p className="mt-2 text-xs uppercase tracking-[0.16em] text-orange-100/50">SRM analysis controls</p>
       <div className="mt-5 grid gap-3">
+        <Metric label="Calculation engine" value={result.engineName ?? "SRM internal ballistics"} />
         <Metric label="Estimated class" value={`${result.motorClass}${result.averageThrustN} / ${summary.classLoad}%`} />
         <Metric label="Total impulse" value={`${result.totalImpulseNs} N-s`} />
         <Metric label="Average thrust" value={`${result.averageThrustN} N`} />
         <Metric label="Peak thrust" value={`${result.peakThrustN} N`} />
         <Metric label="Burn time" value={`${result.burnTimeS} s`} />
+        <Metric label="Port / throat" value={summary.portToThroatRatio || "n/a"} />
+        <Metric label="Optimum expansion" value={`${summary.optimumExpansionRatio}:1`} />
+        <Metric label="Efficiency assumptions" value={`${summary.combustionEfficiency}% / ${summary.nozzleEfficiency}%`} />
         <Metric label="Loaded mass" value={`${result.estimatedLoadedMassG} g`} />
         <Metric label="Propellant mass" value={`${result.propellantMassG} g`} />
       </div>
+      {result.modelNotes?.length ? (
+        <div className="mt-5 rounded-lg border border-cyan-200/15 bg-cyan-200/[0.04] p-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-100/80">Model notes</p>
+          <div className="mt-2 space-y-1">
+            {result.modelNotes.map((note) => <p key={note} className="text-xs leading-5 text-orange-50/55">{note}</p>)}
+          </div>
+        </div>
+      ) : null}
       <div className="mt-5 space-y-2">
         {result.warnings.map((warning) => <p key={warning} className="rounded-md bg-amber-300/10 p-2 text-xs text-amber-100">{warning}</p>)}
       </div>
@@ -1972,15 +2007,42 @@ function MotorSimulationPanel({ result, parameters, onSave, onExportRasp }: { re
 }
 
 function MotorCurveChart({ result, measuredCurve }: { result: MotorSimulationResult; measuredCurve?: MotorSimulationResult["curve"] }) {
+  const [activeCurve, setActiveCurve] = useState<"thrust" | "pressure" | "massFlow">("thrust");
+  const tabs = [
+    { id: "thrust" as const, label: "Thrust" },
+    { id: "pressure" as const, label: "Chamber Pressure" },
+    { id: "massFlow" as const, label: "Mass Flow Rate" }
+  ];
   return (
     <Card className="p-5">
-      <h2 className="font-semibold">Performance curves</h2>
-      <p className="mt-1 text-sm text-orange-50/58">Curves come from a time-step internal-ballistics analysis: burn area, Kn, chamber pressure, mass flow, grain mass, thrust, and impulse are recalculated at each step.</p>
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Curve title="Thrust vs time" data={mergeMeasured(result.curve, measuredCurve)} lines={[["thrust", "#fb923c"], ["measuredThrust", "#5fb8ff"]]} />
-        <Curve title="Pressure / Kn" data={result.curve} lines={[["pressure", "#d7b56d"], ["kn", "#5fb8ff"]]} />
-        <Curve title="Mass flow / burn rate" data={result.curve} lines={[["massFlowKgS", "#c084fc"], ["burnRateMmS", "#9fd7bf"]]} />
-        <Curve title="Grain mass / impulse" data={result.curve.map((point) => ({ ...point, grainMassKg: Number(((point.massRemainingG ?? 0) / 1000).toFixed(3)) }))} lines={[["grainMassKg", "#f472b6"], ["impulse", "#f4d399"]]} />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold">Performance curves</h2>
+          <p className="mt-1 text-sm text-orange-50/58">One graph at a time from the same internal-ballistics time step: burn area, Kn, chamber pressure, mass flow, grain mass, and thrust.</p>
+        </div>
+        <div className="flex rounded-lg border border-white/10 bg-white/[0.04] p-1">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveCurve(tab.id)}
+              className={`rounded-md px-3 py-2 text-xs font-semibold transition ${activeCurve === tab.id ? "bg-orange-300 text-slate-950" : "text-orange-50/60 hover:bg-white/[0.06]"}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="mt-4">
+        {activeCurve === "thrust" ? (
+          <Curve title="Thrust vs time" units="N over s" data={mergeMeasured(result.curve, measuredCurve)} lines={[["thrust", "#fb923c"], ["measuredThrust", "#5fb8ff"]]} />
+        ) : null}
+        {activeCurve === "pressure" ? (
+          <Curve title="Chamber pressure / Kn" units="MPa and ratio over s" data={result.curve} lines={[["pressure", "#d7b56d"], ["kn", "#5fb8ff"]]} />
+        ) : null}
+        {activeCurve === "massFlow" ? (
+          <Curve title="Mass flow / burn rate" units="kg/s and mm/s over s" data={result.curve} lines={[["massFlowKgS", "#c084fc"], ["burnRateMmS", "#9fd7bf"]]} />
+        ) : null}
       </div>
     </Card>
   );
@@ -1995,7 +2057,7 @@ function RocketGraphSet({ result }: { result: SimulationResult }) {
         <TelemetryChart data={result.timeSeries} type="altitude" />
         <TelemetryChart data={result.timeSeries} type="velocity" />
         <TelemetryChart data={result.timeSeries} type="thrust" />
-        <Curve title="Acceleration / drag trend" data={result.timeSeries.map((point) => ({ ...point, drag: Math.round(Math.abs((point.velocity ?? 0) ** 2) * result.dragCoefficientEstimate * 0.01) }))} lines={[["acceleration", "#9fd7bf"], ["drag", "#d7b56d"]]} />
+        <Curve title="Acceleration / drag trend" units="m/s짼 and N trend over s" data={result.timeSeries.map((point) => ({ ...point, drag: Math.round(Math.abs((point.velocity ?? 0) ** 2) * result.dragCoefficientEstimate * 0.01) }))} lines={[["acceleration", "#9fd7bf"], ["drag", "#d7b56d"]]} />
       </div>
     </Card>
   );
@@ -2076,56 +2138,362 @@ function MotorSaveModal(props: {
 }
 
 function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorParameters; update: <K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) => void; onClose: () => void }) {
-  const convergenceAngle = parameters.convergenceAngleDeg ?? 60;
-  const divergenceAngle = parameters.divergenceAngleDeg ?? 24;
+  const [meshDensity, setMeshDensity] = useState<NozzleCfdInputs["meshDensity"]>("standard");
+  const [cfdResult, setCfdResult] = useState<NozzleCfdResult | null>(null);
+  const [cfdError, setCfdError] = useState<string | null>(null);
+  const [cfdRunning, setCfdRunning] = useState(false);
+  const convergenceAngle = Math.max(1, Math.min(89, parameters.convergenceAngleDeg ?? 60));
+  const divergenceAngle = Math.max(1, Math.min(89, parameters.divergenceAngleDeg ?? 24));
   const chamberRadius = parameters.casingInnerDiameterMm / 2;
   const throatRadius = parameters.nozzleThroatMm / 2;
   const exitRadius = parameters.nozzleExitMm / 2;
-  const convergenceLength = Math.max(0, (chamberRadius - throatRadius) / Math.tan((convergenceAngle * Math.PI) / 180));
-  const divergenceLength = Math.max(0, (exitRadius - throatRadius) / Math.tan((divergenceAngle * Math.PI) / 180));
+  const convergenceDelta = Math.max(chamberRadius - throatRadius, 0);
+  const divergenceDelta = Math.max(exitRadius - throatRadius, 0);
+  const convergenceLength = convergenceDelta / Math.tan((convergenceAngle * Math.PI) / 180);
+  const divergenceLength = divergenceDelta / Math.tan((divergenceAngle * Math.PI) / 180);
+  const throatAreaMm2 = Math.PI * throatRadius ** 2;
+  const exitAreaMm2 = Math.PI * exitRadius ** 2;
+  const expansionRatio = exitAreaMm2 / Math.max(throatAreaMm2, 1);
+  const modalSimulation = useMemo(() => simulateMotor(parameters), [parameters]);
+  const nozzleFlow = useMemo(
+    () => analyzeNozzleFlow(parameters, modalSimulation.averagePressureMPa || modalSimulation.maxPressureMPa || 2.5),
+    [parameters, modalSimulation.averagePressureMPa, modalSimulation.maxPressureMPa]
+  );
+  const expansionTone =
+    nozzleFlow.expansionState === "near-optimum" ? "text-emerald-200" :
+    nozzleFlow.expansionState === "underexpanded" ? "text-sky-200" :
+    "text-amber-200";
+  const expansionCopy =
+    nozzleFlow.expansionState === "near-optimum" ? "near ambient-matched expansion" :
+    nozzleFlow.expansionState === "underexpanded" ? "underexpanded plume" :
+    "overexpanded, separation-prone";
+  const visualCenterY = 150;
+  const inletX = 78;
+  const chamberEndX = 218;
+  const drawingScale = Math.max(2.4, Math.min(6.2, 420 / Math.max(convergenceLength + divergenceLength, 1), 98 / Math.max(chamberRadius, 1)));
+  const visualChamberRadius = Math.max(26, chamberRadius * drawingScale);
+  const visualThroatRadius = Math.max(5, throatRadius * drawingScale);
+  const visualExitRadius = Math.max(visualThroatRadius + 2, exitRadius * drawingScale);
+  const throatX = chamberEndX + convergenceLength * drawingScale;
+  const exitX = throatX + divergenceLength * drawingScale;
+  const convergingStartTop = visualCenterY - visualChamberRadius;
+  const convergingStartBottom = visualCenterY + visualChamberRadius;
+  const throatTop = visualCenterY - visualThroatRadius;
+  const throatBottom = visualCenterY + visualThroatRadius;
+  const exitTop = visualCenterY - visualExitRadius;
+  const exitBottom = visualCenterY + visualExitRadius;
+  const convergenceArcRadius = 42;
+  const divergenceArcRadius = 50;
+  const convergenceArcX = throatX - Math.cos((convergenceAngle * Math.PI) / 180) * convergenceArcRadius;
+  const convergenceArcY = visualCenterY - Math.sin((convergenceAngle * Math.PI) / 180) * convergenceArcRadius;
+  const divergenceArcX = throatX + Math.cos((divergenceAngle * Math.PI) / 180) * divergenceArcRadius;
+  const divergenceArcY = visualCenterY - Math.sin((divergenceAngle * Math.PI) / 180) * divergenceArcRadius;
+  const runCfd = async () => {
+    const payload: NozzleCfdInputs = {
+      chamberPressurePa: nozzleFlow.chamberPressureMPa * 1_000_000,
+      chamberTemperatureK: Math.max(300, nozzleFlow.exitTemperatureK * (1 + ((nozzleFlow.gamma - 1) / 2) * nozzleFlow.exitMach ** 2)),
+      gamma: nozzleFlow.gamma,
+      molecularWeightKgPerKmol: 40,
+      throatDiameterMm: parameters.nozzleThroatMm,
+      exitDiameterMm: parameters.nozzleExitMm,
+      chamberDiameterMm: parameters.casingInnerDiameterMm,
+      convergenceAngleDeg: convergenceAngle,
+      divergenceAngleDeg: divergenceAngle,
+      convergenceLengthMm: Number(convergenceLength.toFixed(3)),
+      divergenceLengthMm: Number(divergenceLength.toFixed(3)),
+      ambientPressurePa: 101_325,
+      meshDensity
+    };
+
+    setCfdRunning(true);
+    setCfdError(null);
+    setCfdResult(null);
+
+    try {
+      const response = await fetch("/api/cfd/nozzle/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        const message =
+          typeof data?.message === "string" ? data.message :
+          typeof data?.error === "string" ? data.error :
+          "CFD backend failed to start.";
+        setCfdError(message);
+        return;
+      }
+      setCfdResult(data as NozzleCfdResult);
+    } catch (error) {
+      setCfdError(error instanceof Error ? error.message : "CFD request failed.");
+    } finally {
+      setCfdRunning(false);
+    }
+  };
+  const updateThroat = (value: number) => {
+    const safeValue = Math.max(1, value || 1);
+    update("nozzleThroatMm", safeValue as never);
+    update("expansionRatio", Number(((parameters.nozzleExitMm / safeValue) ** 2).toFixed(2)) as never);
+  };
+  const updateExit = (value: number) => {
+    const safeValue = Math.max(1, value || 1);
+    update("nozzleExitMm", safeValue as never);
+    update("expansionRatio", Number(((safeValue / Math.max(parameters.nozzleThroatMm, 1)) ** 2).toFixed(2)) as never);
+  };
+  const updateConvergenceAngle = (value: number) => {
+    update("convergenceAngleDeg", Math.max(1, Math.min(89, value || 1)) as never);
+  };
+  const updateDivergenceAngle = (value: number) => {
+    update("divergenceAngleDeg", Math.max(1, Math.min(89, value || 1)) as never);
+  };
+  const updateConvergenceLength = (value: number) => {
+    const safeValue = Math.max(0, Number.isFinite(value) ? value : 0);
+    const nextChamberRadius = throatRadius + safeValue * Math.tan((convergenceAngle * Math.PI) / 180);
+    update("casingInnerDiameterMm", Number(Math.max(parameters.nozzleThroatMm, nextChamberRadius * 2).toFixed(1)) as never);
+  };
+  const updateDivergenceLength = (value: number) => {
+    const safeValue = Math.max(0, Number.isFinite(value) ? value : 0);
+    const nextExitRadius = throatRadius + safeValue * Math.tan((divergenceAngle * Math.PI) / 180);
+    updateExit(Number(Math.max(parameters.nozzleThroatMm, nextExitRadius * 2).toFixed(1)));
+  };
 
   return (
-    <div className="fixed inset-0 z-[90] grid place-items-center bg-black/70 px-4">
-      <Card className="w-full max-w-2xl overflow-hidden p-0">
-        <div className="border-b border-white/10 bg-white/[0.04] px-5 py-4">
+    <div className="fixed inset-0 z-[90] grid place-items-center bg-black/70 px-4 py-4">
+      <Card className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden p-0">
+        <div className="shrink-0 border-b border-white/10 bg-white/[0.04] px-5 py-4">
           <h2 className="text-xl font-semibold">Nozzle analysis tool</h2>
-          <p className="mt-1 text-sm text-orange-50/55">Converging-diverging geometry summary for simulation review only.</p>
+          <p className="mt-1 text-sm text-orange-50/55">Converging throat and diverging exit geometry for simulation review only.</p>
         </div>
-        <div className="p-5">
-          <div className="grid gap-3 sm:grid-cols-2">
+        <div className="min-h-0 overflow-y-auto p-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="text-sm text-orange-50/65">Throat diameter
+              <input type="number" min="1" value={parameters.nozzleThroatMm} onChange={(event) => updateThroat(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
+            </label>
+            <label className="text-sm text-orange-50/65">Exit diameter
+              <input type="number" min="1" value={parameters.nozzleExitMm} onChange={(event) => updateExit(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
+            </label>
             <label className="text-sm text-orange-50/65">Convergence angle
-              <input type="number" value={convergenceAngle} onChange={(event) => update("convergenceAngleDeg", Number(event.target.value) as never)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
+              <input type="number" min="1" max="89" step="0.5" value={convergenceAngle} onChange={(event) => updateConvergenceAngle(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
             </label>
             <label className="text-sm text-orange-50/65">Divergence angle
-              <input type="number" value={divergenceAngle} onChange={(event) => update("divergenceAngleDeg", Number(event.target.value) as never)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
+              <input type="number" min="1" max="89" step="0.5" value={divergenceAngle} onChange={(event) => updateDivergenceAngle(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
+            </label>
+            <label className="text-sm text-orange-50/65">Convergence length
+              <input type="number" step="0.1" value={Number(convergenceLength.toFixed(1))} onChange={(event) => updateConvergenceLength(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
+            </label>
+            <label className="text-sm text-orange-50/65">Divergence length
+              <input type="number" step="0.1" value={Number(divergenceLength.toFixed(1))} onChange={(event) => updateDivergenceLength(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
             </label>
           </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <Metric label="Convergence length" value={`${convergenceLength.toFixed(1)} mm`} />
-            <Metric label="Divergence length" value={`${divergenceLength.toFixed(1)} mm`} />
-            <Metric label="Exit diameter" value={`${parameters.nozzleExitMm} mm`} />
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Metric label="Throat area" value={`${throatAreaMm2.toFixed(1)} mm2`} />
+            <Metric label="Exit Mach" value={`M ${nozzleFlow.exitMach.toFixed(2)}`} />
+            <Metric label="Exit pressure" value={`${nozzleFlow.exitPressureMPa.toFixed(3)} MPa`} />
+            <Metric label="Exit velocity" value={`${nozzleFlow.exitVelocityMS} m/s`} />
           </div>
-          <svg viewBox="0 0 640 290" className="mt-5 h-auto w-full rounded-lg border border-white/10 bg-[#070a12]" role="img" aria-label="Nozzle convergence throat and divergence analysis diagram">
-            <line x1="58" x2="590" y1="145" y2="145" stroke="#f8fafc" strokeOpacity="0.32" strokeDasharray="6 6" />
-            <path d="M92 82 H210 V116 L330 145 L460 86 V116 H540" fill="none" stroke="#f8fafc" strokeWidth="4" />
-            <path d="M92 208 H210 V174 L330 145 L460 204 V174 H540" fill="none" stroke="#f8fafc" strokeWidth="4" />
-            <line x1="330" x2="330" y1="118" y2="172" stroke="#fb923c" strokeWidth="2" markerEnd="url(#arrow)" markerStart="url(#arrow)" />
-            <line x1="460" x2="460" y1="86" y2="204" stroke="#c084fc" strokeWidth="2" />
-            <line x1="210" x2="330" y1="235" y2="235" stroke="#93c5fd" strokeWidth="2" />
-            <line x1="330" x2="460" y1="252" y2="252" stroke="#93c5fd" strokeWidth="2" />
-            <text x="296" y="110" fill="#fb923c" fontSize="14">throat</text>
-            <text x="472" y="78" fill="#c084fc" fontSize="14">exit</text>
-            <text x="238" y="266" fill="#bfdbfe" fontSize="13">convergence</text>
-            <text x="370" y="283" fill="#bfdbfe" fontSize="13">divergence</text>
-            <text x="242" y="129" fill="#bbf7d0" fontSize="13">{convergenceAngle} deg</text>
-            <text x="390" y="129" fill="#fecdd3" fontSize="13">{divergenceAngle} deg</text>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <Metric label="Expansion ratio" value={`${nozzleFlow.areaRatio.toFixed(2)}:1`} />
+            <Metric label="Optimum ratio" value={`${nozzleFlow.optimumExpansionRatio.toFixed(2)}:1`} />
+            <Metric label="Nozzle efficiency" value={`${Math.round(nozzleFlow.nozzleEfficiency * 100)}%`} />
+          </div>
+          <p className="mt-3 text-xs leading-5 text-orange-50/55">
+            The solver uses quasi-1D compressible nozzle relations: the throat is the sonic minimum area, exit Mach is solved from A/A*, and exit pressure determines whether the plume is underexpanded, near matched, or overexpanded. It is a simulation review model, not a certification-grade RANS/LES solver.
+          </p>
+          <p className={`mt-2 text-xs font-semibold ${expansionTone}`}>{expansionCopy} · Pe/Pa {nozzleFlow.pressureRatio.toFixed(2)} · Cf {nozzleFlow.thrustCoefficient.toFixed(2)}</p>
+          <svg viewBox="0 0 680 330" className="mt-5 h-auto w-full rounded-lg border border-white/10 bg-[#070a12]" role="img" aria-label="Nozzle convergence throat divergence and flow analysis diagram">
+            <defs>
+              <linearGradient id="nozzleCfdFlowGradient" x1="0" x2="1">
+                <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.2" />
+                <stop offset="45%" stopColor="#f97316" stopOpacity="0.9" />
+                <stop offset="100%" stopColor="#fef3c7" stopOpacity="0.78" />
+              </linearGradient>
+              <radialGradient id="nozzleCfdPlumeGradient" cx="0.08" cy="0.5" r="0.92">
+                <stop offset="0%" stopColor="#f97316" stopOpacity="0.58" />
+                <stop offset="45%" stopColor="#38bdf8" stopOpacity="0.18" />
+                <stop offset="100%" stopColor="#38bdf8" stopOpacity="0" />
+              </radialGradient>
+              <linearGradient id="nozzlePressureField" x1="0" x2="1">
+                <stop offset="0%" stopColor="#ef4444" stopOpacity="0.38" />
+                <stop offset="42%" stopColor="#f97316" stopOpacity="0.28" />
+                <stop offset="58%" stopColor="#fef3c7" stopOpacity="0.2" />
+                <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.18" />
+              </linearGradient>
+              <linearGradient id="nozzleVelocityField" x1="0" x2="1">
+                <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.18" />
+                <stop offset="52%" stopColor="#f97316" stopOpacity="0.62" />
+                <stop offset="100%" stopColor="#fde68a" stopOpacity="0.5" />
+              </linearGradient>
+            </defs>
+            <line x1="48" x2="632" y1={visualCenterY} y2={visualCenterY} stroke="#f8fafc" strokeOpacity="0.32" strokeDasharray="7 8" />
+            <path
+              d={`M${inletX} ${convergingStartTop} H${chamberEndX} L${throatX} ${throatTop} L${exitX} ${exitTop}`}
+              fill="none"
+              stroke="#f8fafc"
+              strokeWidth="5"
+              strokeLinecap="square"
+              strokeLinejoin="miter"
+            />
+            <path
+              d={`M${inletX} ${convergingStartBottom} H${chamberEndX} L${throatX} ${throatBottom} L${exitX} ${exitBottom}`}
+              fill="none"
+              stroke="#f8fafc"
+              strokeWidth="5"
+              strokeLinecap="square"
+              strokeLinejoin="miter"
+            />
+            <line x1={inletX} x2={inletX} y1={convergingStartTop} y2={convergingStartBottom} stroke="#f8fafc" strokeOpacity="0.7" strokeWidth="3" />
+            <line x1={exitX} x2={exitX} y1={exitTop} y2={exitBottom} stroke="#c084fc" strokeWidth="3" />
+            <path d={`M${throatX - convergenceArcRadius} ${visualCenterY} A${convergenceArcRadius} ${convergenceArcRadius} 0 0 0 ${convergenceArcX} ${convergenceArcY}`} fill="none" stroke="#86efac" strokeWidth="2" strokeOpacity="0.85" />
+            <path d={`M${throatX + divergenceArcRadius} ${visualCenterY} A${divergenceArcRadius} ${divergenceArcRadius} 0 0 0 ${divergenceArcX} ${divergenceArcY}`} fill="none" stroke="#fecdd3" strokeWidth="2" strokeOpacity="0.85" />
+            <line x1={throatX - convergenceArcRadius - 8} x2={throatX + 6} y1={visualCenterY} y2={visualCenterY} stroke="#86efac" strokeWidth="1.5" strokeOpacity="0.55" />
+            <line x1={throatX - 6} x2={throatX + divergenceArcRadius + 8} y1={visualCenterY} y2={visualCenterY} stroke="#fecdd3" strokeWidth="1.5" strokeOpacity="0.55" />
+            <circle cx={throatX} cy={throatTop} r="4" fill="#fb923c" />
+            <circle cx={throatX} cy={throatBottom} r="4" fill="#fb923c" />
+            <line x1={throatX} x2={throatX} y1={throatTop} y2={throatBottom} stroke="#fb923c" strokeWidth="2.5" strokeDasharray="5 4" />
+            <line x1={throatX} x2={throatX} y1="244" y2="278" stroke="#fb923c" strokeWidth="2" />
+            <line x1={exitX} x2={exitX} y1="244" y2="278" stroke="#c084fc" strokeWidth="2" />
+            <line x1={chamberEndX} x2={throatX} y1="265" y2="265" stroke="#93c5fd" strokeWidth="2" />
+            <line x1={throatX} x2={exitX} y1="292" y2="292" stroke="#93c5fd" strokeWidth="2" />
+            <text x={inletX - 4} y={convergingStartTop - 12} fill="#dbeafe" fontSize="13">chamber ID {parameters.casingInnerDiameterMm} mm</text>
+            <text x={throatX - 30} y={Math.max(38, throatTop - 22)} fill="#fb923c" fontSize="14">throat {parameters.nozzleThroatMm} mm</text>
+            <text x={exitX - 54} y={exitTop - 12} fill="#c084fc" fontSize="14">exit {parameters.nozzleExitMm} mm</text>
+            <text x={throatX - convergenceArcRadius - 4} y={visualCenterY - 18} fill="#bbf7d0" fontSize="13">{convergenceAngle} deg</text>
+            <text x={throatX + divergenceArcRadius + 4} y={visualCenterY - 18} fill="#fecdd3" fontSize="13">{divergenceAngle} deg</text>
+            <text x={chamberEndX + 28} y="258" fill="#bfdbfe" fontSize="13">convergence</text>
+            <text x={throatX + 54} y="285" fill="#bfdbfe" fontSize="13">divergence</text>
+            <text x="68" y="306" fill="#94a3b8" fontSize="12">Geometry view only. CFD contours are rendered from solved OpenFOAM cells below.</text>
           </svg>
+          <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+            <label className="text-sm text-orange-50/65">Mesh density
+              <select value={meshDensity} onChange={(event) => setMeshDensity(event.target.value as NozzleCfdInputs["meshDensity"])} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50">
+                <option value="coarse">Coarse validation mesh</option>
+                <option value="standard">Standard throat-refined mesh</option>
+                <option value="fine">Fine shock-capturing mesh</option>
+              </select>
+            </label>
+            <Button onClick={runCfd} disabled={cfdRunning}><Wind className="h-4 w-4" />{cfdRunning ? "Running CFD..." : "Run CFD"}</Button>
+          </div>
+          <NozzleCfdViewer result={cfdResult} error={cfdError} running={cfdRunning} />
           <p className="mt-4 rounded-md border border-amber-200/20 bg-amber-200/8 p-3 text-xs leading-5 text-amber-50/82">Rocketry House records nozzle geometry for analysis and data comparison. It does not provide manufacturing certification or hazardous build instructions.</p>
-          <div className="mt-5 flex justify-end gap-2">
+          <div className="sticky bottom-0 -mx-5 mt-5 flex justify-end gap-2 border-t border-white/10 bg-[#111827]/95 px-5 py-4 backdrop-blur">
             <Button variant="ghost" onClick={onClose}>Close</Button>
           </div>
         </div>
       </Card>
+    </div>
+  );
+}
+
+function contourColor(value: number, min: number, max: number) {
+  const t = Math.max(0, Math.min(1, (value - min) / Math.max(max - min, 1e-9)));
+  const stops = [
+    [15, 23, 42],
+    [30, 64, 175],
+    [6, 182, 212],
+    [132, 204, 22],
+    [250, 204, 21],
+    [249, 115, 22],
+    [220, 38, 38]
+  ];
+  const scaled = t * (stops.length - 1);
+  const index = Math.min(stops.length - 2, Math.floor(scaled));
+  const local = scaled - index;
+  const start = stops[index];
+  const end = stops[index + 1];
+  const rgb = start.map((channel, channelIndex) => Math.round(channel + (end[channelIndex] - channel) * local));
+  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+}
+
+function CfdContour({ field, shocks }: { field: NozzleCfdField; shocks: NozzleCfdResult["shocks"] }) {
+  const width = 520;
+  const height = 160;
+  const cellSize = Math.max(3, Math.min(12, Math.round(240 / Math.sqrt(Math.max(field.cells.length, 1)))));
+  return (
+    <div className="rounded-lg border border-white/10 bg-[#070a12] p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-orange-50">{field.label}</p>
+          <p className="text-xs text-orange-50/45">{field.min.toFixed(3)} to {field.max.toFixed(3)} {field.unit}</p>
+        </div>
+        <div className="h-3 w-28 rounded-full bg-gradient-to-r from-slate-950 via-cyan-400 via-lime-400 via-amber-400 to-red-600" />
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full rounded-md bg-slate-950" role="img" aria-label={`${field.label} solved CFD contour`}>
+        {field.cells.map((cell, index) => (
+          <rect
+            key={`${field.name}-${index}`}
+            x={cell.x * width}
+            y={(0.5 - cell.y) * height}
+            width={cellSize}
+            height={cellSize}
+            fill={contourColor(cell.value, field.min, field.max)}
+            opacity="0.92"
+          />
+        ))}
+        {shocks.map((shock, index) => (
+          <line key={index} x1={shock.x * width} x2={shock.x * width} y1="16" y2={height - 16} stroke="#fef2f2" strokeWidth="2" strokeDasharray="5 5" opacity={Math.min(0.9, Math.max(0.2, shock.strength))} />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult | null; error: string | null; running: boolean }) {
+  const activeFields = result?.fields ?? [];
+
+  if (running) {
+    return (
+      <div className="mt-4 rounded-lg border border-sky-200/20 bg-sky-200/8 p-4 text-sm text-sky-50/80">
+        OpenFOAM job requested. Waiting for rhoCentralFoam residuals and field export...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="mt-4 rounded-lg border border-amber-200/25 bg-amber-200/10 p-4 text-sm leading-6 text-amber-50/88">
+        <p className="font-semibold">CFD backend not available</p>
+        <p className="mt-1">{error}</p>
+        <p className="mt-2 text-xs text-amber-50/65">No synthetic CFD fields are rendered. Configure an OpenFOAM runner to generate real finite-volume results.</p>
+      </div>
+    );
+  }
+
+  if (!result) {
+    return (
+      <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-orange-50/62">
+        Press Run CFD to send this axisymmetric nozzle case to an OpenFOAM rhoCentralFoam backend. Results will include solved contours, residual history, shock markers, and centerline plots.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Metric label="Exit Mach" value={`M ${result.metrics.exitMach.toFixed(2)}`} />
+        <Metric label="Mass flow" value={`${result.metrics.massFlowKgS.toFixed(3)} kg/s`} />
+        <Metric label="Isp" value={`${result.metrics.specificImpulseS.toFixed(1)} s`} />
+        <Metric label="Cells" value={result.mesh.cells.toLocaleString()} />
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {activeFields.map((field) => <CfdContour key={field.name} field={field} shocks={result.shocks} />)}
+      </div>
+      <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+        <p className="mb-2 text-sm font-semibold text-orange-50">Residual convergence</p>
+        <div className="h-52">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={result.residuals}>
+              <CartesianGrid stroke="rgba(255,255,255,0.08)" />
+              <XAxis dataKey="iteration" stroke="rgba(255,247,237,0.48)" />
+              <YAxis scale="log" domain={["auto", "auto"]} stroke="rgba(255,247,237,0.48)" />
+              <Tooltip contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.12)", color: "#fff7ed" }} />
+              <Line type="monotone" dataKey="continuity" stroke="#38bdf8" dot={false} />
+              <Line type="monotone" dataKey="momentum" stroke="#f97316" dot={false} />
+              <Line type="monotone" dataKey="energy" stroke="#a78bfa" dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2203,11 +2571,14 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   return <div className="rounded-md border border-white/10 bg-white/[0.04] p-3"><p className="text-xs text-orange-50/45">{label}</p><p className="mt-1 font-semibold text-orange-50">{value}</p></div>;
 }
 
-function Curve({ title, data, lines }: { title: string; data: Record<string, number | string | undefined>[]; lines: Array<[string, string]> }) {
+function Curve({ title, units, data, lines }: { title: string; units?: string; data: Record<string, number | string | undefined>[]; lines: Array<[string, string]> }) {
   const mounted = useClientMounted();
   return (
     <div className="h-64 rounded-lg border border-white/10 bg-white/[0.03] p-3">
-      <p className="mb-2 text-xs font-medium text-orange-50/62">{title}</p>
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <p className="text-xs font-medium text-orange-50/70">{title}</p>
+        {units ? <p className="text-[11px] text-orange-50/42">{units}</p> : null}
+      </div>
       {mounted ? (
         <ResponsiveContainer width="100%" height="88%">
           <LineChart data={data}>
@@ -2270,14 +2641,7 @@ function getMotorStorageKey() {
 function readStoredMotors() {
   if (typeof window === "undefined") return [];
   try {
-    const user = readMockUser();
     const parsed = JSON.parse(localStorage.getItem(getMotorStorageKey()) ?? "[]") as SavedMotor[];
-    if (isDemoAccount(user)) {
-      return [
-        ...parsed,
-        ...mockSavedMotors.filter((mockMotor) => !parsed.some((savedMotor) => savedMotor.id === mockMotor.id))
-      ];
-    }
     return parsed;
   } catch {
     return [];
@@ -2294,7 +2658,7 @@ async function syncPersistentMotors() {
     ...cloudMotors,
     ...localMotors.filter((motor) => !cloudMotors.some((cloudMotor) => cloudMotor.id === motor.id))
   ];
-  localStorage.setItem(getMotorStorageKey(), JSON.stringify(merged.filter((motor) => !mockSavedMotors.some((mockMotor) => mockMotor.id === motor.id))));
+  localStorage.setItem(getMotorStorageKey(), JSON.stringify(merged));
   window.dispatchEvent(new Event("rocketry-motors-change"));
 }
 

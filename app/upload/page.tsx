@@ -115,7 +115,7 @@ const motorEvidenceSources = [
   "Uploaded measured thrust CSV",
   "Static-fire report",
   "Flight-derived estimate",
-  "Unknown / placeholder"
+  "Unknown / not disclosed"
 ] as const;
 
 const projectInfoGroups = [

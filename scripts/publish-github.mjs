@@ -12,7 +12,17 @@ if (!token) {
 }
 
 const ignored = new Set([".git", ".next", "node_modules"]);
-const ignoredFiles = new Set(["tsconfig.tsbuildinfo"]);
+const ignoredFiles = new Set([
+  ".env.local",
+  "rocket-dev-3000.err.log",
+  "rocket-dev-3000.out.log",
+  "rocket-dev-3005.err.log",
+  "rocket-dev-3005.out.log",
+  "server.err.log",
+  "server.out.log",
+  "tsconfig.tsbuildinfo",
+  "vercel-failure.html"
+]);
 
 async function github(endpoint, options = {}) {
   const response = await fetch(`https://api.github.com${endpoint}`, {
