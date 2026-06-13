@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { cfdUnavailable, openFoamRunnerConfigured, runOpenFoamNozzleCase } from "@/lib/cfd/openfoam";
+import { solveInternalNozzleCfd } from "@/lib/cfd/internal-nozzle-solver";
 import type { NozzleCfdInputs } from "@/types/cfd";
 
 export const runtime = "nodejs";
@@ -54,17 +54,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: validationError }, { status: 400 });
   }
 
-  if (!openFoamRunnerConfigured()) {
-    return NextResponse.json(cfdUnavailable(), { status: 503 });
-  }
-
   try {
-    const result = await runOpenFoamNozzleCase(body as NozzleCfdInputs);
+    const result = solveInternalNozzleCfd(body as NozzleCfdInputs);
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "OpenFOAM runner failed." },
-      { status: 502 }
+      { error: error instanceof Error ? error.message : "Internal CFD solver failed." },
+      { status: 500 }
     );
   }
 }
