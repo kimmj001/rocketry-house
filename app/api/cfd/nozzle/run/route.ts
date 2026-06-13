@@ -39,8 +39,8 @@ function validateInputs(body: Partial<NozzleCfdInputs>) {
     return "Nozzle exit diameter must be greater than or equal to throat diameter.";
   }
 
-  if (!["coarse", "standard", "fine"].includes(body.meshDensity ?? "")) {
-    return "Mesh density must be coarse, standard, or fine.";
+  if (!["coarse", "standard", "fine", "research"].includes(body.meshDensity ?? "")) {
+    return "Mesh density must be coarse, standard, fine, or research.";
   }
 
   return null;
