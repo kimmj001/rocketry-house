@@ -52,7 +52,7 @@ export type NozzleCfdCenterlinePoint = {
 export type NozzleCfdResult = {
   id: string;
   status: "queued" | "running" | "converged" | "failed";
-  solver: "OpenFOAM rhoCentralFoam";
+  solver: "Rocketry House internal density-based nozzle CFD" | "OpenFOAM rhoCentralFoam";
   mesh: {
     cells: number;
     throatRefinementRatio: number;
