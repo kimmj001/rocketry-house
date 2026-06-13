@@ -2188,6 +2188,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   const convergenceArcY = visualCenterY - Math.sin((convergenceAngle * Math.PI) / 180) * convergenceArcRadius;
   const divergenceArcX = throatX + Math.cos((divergenceAngle * Math.PI) / 180) * divergenceArcRadius;
   const divergenceArcY = visualCenterY - Math.sin((divergenceAngle * Math.PI) / 180) * divergenceArcRadius;
+  const cfdDisplayActive = cfdRunning || Boolean(cfdResult);
   const runCfd = async () => {
     const payload: NozzleCfdInputs = {
       chamberPressurePa: nozzleFlow.chamberPressureMPa * 1_000_000,
@@ -2301,7 +2302,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
             The solver uses quasi-1D compressible nozzle relations: the throat is the sonic minimum area, exit Mach is solved from A/A*, and exit pressure determines whether the plume is underexpanded, near matched, or overexpanded. It is a simulation review model, not a certification-grade RANS/LES solver.
           </p>
           <p className={`mt-2 text-xs font-semibold ${expansionTone}`}>{expansionCopy} · Pe/Pa {nozzleFlow.pressureRatio.toFixed(2)} · Cf {nozzleFlow.thrustCoefficient.toFixed(2)}</p>
-          <svg viewBox="0 0 680 330" className="mt-5 h-auto w-full rounded-lg border border-white/10 bg-[#070a12]" role="img" aria-label="Nozzle convergence throat divergence and flow analysis diagram">
+          <svg viewBox="0 0 760 330" className="mt-5 h-auto w-full rounded-lg border border-white/10 bg-[#070a12]" role="img" aria-label="Nozzle convergence throat divergence and flow analysis diagram">
             <defs>
               <linearGradient id="nozzleCfdFlowGradient" x1="0" x2="1">
                 <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.2" />
@@ -2324,13 +2325,34 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
                 <stop offset="52%" stopColor="#f97316" stopOpacity="0.62" />
                 <stop offset="100%" stopColor="#fde68a" stopOpacity="0.5" />
               </linearGradient>
+              <clipPath id="nozzleInternalCfdClip">
+                <path d={`M${inletX} ${convergingStartTop} H${chamberEndX} L${throatX} ${throatTop} L${exitX} ${exitTop} L${exitX} ${exitBottom} L${throatX} ${throatBottom} L${chamberEndX} ${convergingStartBottom} H${inletX} Z`} />
+              </clipPath>
+              <clipPath id="nozzleExternalPlumeClip">
+                <path d={`M${exitX} ${exitTop} C${exitX + 44} ${exitTop - 18}, ${exitX + 118} 50, 740 34 L740 266 C${exitX + 120} 250, ${exitX + 44} ${exitBottom + 18}, ${exitX} ${exitBottom} Z`} />
+              </clipPath>
             </defs>
-            <line x1="48" x2="632" y1={visualCenterY} y2={visualCenterY} stroke="#f8fafc" strokeOpacity="0.32" strokeDasharray="7 8" />
+            {cfdDisplayActive ? (
+              <NozzleIntegratedCfdOverlay
+                result={cfdResult}
+                running={cfdRunning}
+                inletX={inletX}
+                chamberEndX={chamberEndX}
+                throatX={throatX}
+                exitX={exitX}
+                centerY={visualCenterY}
+                chamberRadius={visualChamberRadius}
+                throatRadius={visualThroatRadius}
+                exitRadius={visualExitRadius}
+              />
+            ) : null}
+            {!cfdDisplayActive ? <line x1="48" x2="712" y1={visualCenterY} y2={visualCenterY} stroke="#f8fafc" strokeOpacity="0.32" strokeDasharray="7 8" /> : null}
             <path
               d={`M${inletX} ${convergingStartTop} H${chamberEndX} L${throatX} ${throatTop} L${exitX} ${exitTop}`}
               fill="none"
               stroke="#f8fafc"
-              strokeWidth="5"
+              strokeWidth={cfdDisplayActive ? "3" : "5"}
+              strokeOpacity={cfdDisplayActive ? "0.92" : "1"}
               strokeLinecap="square"
               strokeLinejoin="miter"
             />
@@ -2338,31 +2360,36 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
               d={`M${inletX} ${convergingStartBottom} H${chamberEndX} L${throatX} ${throatBottom} L${exitX} ${exitBottom}`}
               fill="none"
               stroke="#f8fafc"
-              strokeWidth="5"
+              strokeWidth={cfdDisplayActive ? "3" : "5"}
+              strokeOpacity={cfdDisplayActive ? "0.92" : "1"}
               strokeLinecap="square"
               strokeLinejoin="miter"
             />
             <line x1={inletX} x2={inletX} y1={convergingStartTop} y2={convergingStartBottom} stroke="#f8fafc" strokeOpacity="0.7" strokeWidth="3" />
-            <line x1={exitX} x2={exitX} y1={exitTop} y2={exitBottom} stroke="#c084fc" strokeWidth="3" />
-            <path d={`M${throatX - convergenceArcRadius} ${visualCenterY} A${convergenceArcRadius} ${convergenceArcRadius} 0 0 0 ${convergenceArcX} ${convergenceArcY}`} fill="none" stroke="#86efac" strokeWidth="2" strokeOpacity="0.85" />
-            <path d={`M${throatX + divergenceArcRadius} ${visualCenterY} A${divergenceArcRadius} ${divergenceArcRadius} 0 0 0 ${divergenceArcX} ${divergenceArcY}`} fill="none" stroke="#fecdd3" strokeWidth="2" strokeOpacity="0.85" />
-            <line x1={throatX - convergenceArcRadius - 8} x2={throatX + 6} y1={visualCenterY} y2={visualCenterY} stroke="#86efac" strokeWidth="1.5" strokeOpacity="0.55" />
-            <line x1={throatX - 6} x2={throatX + divergenceArcRadius + 8} y1={visualCenterY} y2={visualCenterY} stroke="#fecdd3" strokeWidth="1.5" strokeOpacity="0.55" />
-            <circle cx={throatX} cy={throatTop} r="4" fill="#fb923c" />
-            <circle cx={throatX} cy={throatBottom} r="4" fill="#fb923c" />
-            <line x1={throatX} x2={throatX} y1={throatTop} y2={throatBottom} stroke="#fb923c" strokeWidth="2.5" strokeDasharray="5 4" />
-            <line x1={throatX} x2={throatX} y1="244" y2="278" stroke="#fb923c" strokeWidth="2" />
-            <line x1={exitX} x2={exitX} y1="244" y2="278" stroke="#c084fc" strokeWidth="2" />
-            <line x1={chamberEndX} x2={throatX} y1="265" y2="265" stroke="#93c5fd" strokeWidth="2" />
-            <line x1={throatX} x2={exitX} y1="292" y2="292" stroke="#93c5fd" strokeWidth="2" />
-            <text x={inletX - 4} y={convergingStartTop - 12} fill="#dbeafe" fontSize="13">chamber ID {parameters.casingInnerDiameterMm} mm</text>
-            <text x={throatX - 30} y={Math.max(38, throatTop - 22)} fill="#fb923c" fontSize="14">throat {parameters.nozzleThroatMm} mm</text>
-            <text x={exitX - 54} y={exitTop - 12} fill="#c084fc" fontSize="14">exit {parameters.nozzleExitMm} mm</text>
-            <text x={throatX - convergenceArcRadius - 4} y={visualCenterY - 18} fill="#bbf7d0" fontSize="13">{convergenceAngle} deg</text>
-            <text x={throatX + divergenceArcRadius + 4} y={visualCenterY - 18} fill="#fecdd3" fontSize="13">{divergenceAngle} deg</text>
-            <text x={chamberEndX + 28} y="258" fill="#bfdbfe" fontSize="13">convergence</text>
-            <text x={throatX + 54} y="285" fill="#bfdbfe" fontSize="13">divergence</text>
-            <text x="68" y="306" fill="#94a3b8" fontSize="12">Geometry view only. CFD contours are rendered from solved OpenFOAM cells below.</text>
+            <line x1={exitX} x2={exitX} y1={exitTop} y2={exitBottom} stroke="#f8fafc" strokeOpacity="0.82" strokeWidth="3" />
+            {!cfdDisplayActive ? (
+              <>
+                <path d={`M${throatX - convergenceArcRadius} ${visualCenterY} A${convergenceArcRadius} ${convergenceArcRadius} 0 0 0 ${convergenceArcX} ${convergenceArcY}`} fill="none" stroke="#86efac" strokeWidth="2" strokeOpacity="0.85" />
+                <path d={`M${throatX + divergenceArcRadius} ${visualCenterY} A${divergenceArcRadius} ${divergenceArcRadius} 0 0 0 ${divergenceArcX} ${divergenceArcY}`} fill="none" stroke="#fecdd3" strokeWidth="2" strokeOpacity="0.85" />
+                <line x1={throatX - convergenceArcRadius - 8} x2={throatX + 6} y1={visualCenterY} y2={visualCenterY} stroke="#86efac" strokeWidth="1.5" strokeOpacity="0.55" />
+                <line x1={throatX - 6} x2={throatX + divergenceArcRadius + 8} y1={visualCenterY} y2={visualCenterY} stroke="#fecdd3" strokeWidth="1.5" strokeOpacity="0.55" />
+                <circle cx={throatX} cy={throatTop} r="4" fill="#fb923c" />
+                <circle cx={throatX} cy={throatBottom} r="4" fill="#fb923c" />
+                <line x1={throatX} x2={throatX} y1={throatTop} y2={throatBottom} stroke="#fb923c" strokeWidth="2.5" strokeDasharray="5 4" />
+                <line x1={throatX} x2={throatX} y1="244" y2="278" stroke="#fb923c" strokeWidth="2" />
+                <line x1={exitX} x2={exitX} y1="244" y2="278" stroke="#c084fc" strokeWidth="2" />
+                <line x1={chamberEndX} x2={throatX} y1="265" y2="265" stroke="#93c5fd" strokeWidth="2" />
+                <line x1={throatX} x2={exitX} y1="292" y2="292" stroke="#93c5fd" strokeWidth="2" />
+                <text x={inletX - 4} y={convergingStartTop - 12} fill="#dbeafe" fontSize="13">chamber ID {parameters.casingInnerDiameterMm} mm</text>
+                <text x={throatX - 30} y={Math.max(38, throatTop - 22)} fill="#fb923c" fontSize="14">throat {parameters.nozzleThroatMm} mm</text>
+                <text x={exitX - 54} y={exitTop - 12} fill="#c084fc" fontSize="14">exit {parameters.nozzleExitMm} mm</text>
+                <text x={throatX - convergenceArcRadius - 4} y={visualCenterY - 18} fill="#bbf7d0" fontSize="13">{convergenceAngle} deg</text>
+                <text x={throatX + divergenceArcRadius + 4} y={visualCenterY - 18} fill="#fecdd3" fontSize="13">{divergenceAngle} deg</text>
+                <text x={chamberEndX + 28} y="258" fill="#bfdbfe" fontSize="13">convergence</text>
+                <text x={throatX + 54} y="285" fill="#bfdbfe" fontSize="13">divergence</text>
+                <text x="68" y="306" fill="#94a3b8" fontSize="12">Geometry mode. Press Run CFD to replace annotations with solved velocity contours.</text>
+              </>
+            ) : null}
           </svg>
           <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
             <label className="text-sm text-orange-50/65">Mesh density
@@ -2405,6 +2432,132 @@ function contourColor(value: number, min: number, max: number) {
   return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
 }
 
+function NozzleIntegratedCfdOverlay({
+  result,
+  running,
+  inletX,
+  chamberEndX,
+  throatX,
+  exitX,
+  centerY,
+  chamberRadius,
+  throatRadius,
+  exitRadius
+}: {
+  result: NozzleCfdResult | null;
+  running: boolean;
+  inletX: number;
+  chamberEndX: number;
+  throatX: number;
+  exitX: number;
+  centerY: number;
+  chamberRadius: number;
+  throatRadius: number;
+  exitRadius: number;
+}) {
+  const field = result?.fields.find((item) => item.name === "velocity") ?? result?.fields.find((item) => item.name === "mach") ?? null;
+  const nozzleLength = Math.max(exitX - inletX, 1);
+  const radiusAt = (x: number) => {
+    if (x <= chamberEndX) return chamberRadius;
+    if (x <= throatX) {
+      const progress = (x - chamberEndX) / Math.max(throatX - chamberEndX, 1);
+      return chamberRadius + (throatRadius - chamberRadius) * progress;
+    }
+    const progress = (x - throatX) / Math.max(exitX - throatX, 1);
+    return throatRadius + (exitRadius - throatRadius) * progress;
+  };
+
+  if (running || !field) {
+    return (
+      <g clipPath="url(#nozzleInternalCfdClip)">
+        {Array.from({ length: 38 }, (_, index) => {
+          const x = inletX + (index / 37) * nozzleLength;
+          const radius = radiusAt(x);
+          const pulse = 0.35 + 0.55 * Math.sin(index * 0.62);
+          return (
+            <rect
+              key={index}
+              x={x - 8}
+              y={centerY - radius}
+              width="18"
+              height={radius * 2}
+              fill={contourColor(pulse, 0, 1)}
+              opacity="0.9"
+            />
+          );
+        })}
+      </g>
+    );
+  }
+
+  const xStep = nozzleLength / 70;
+  const plumeLength = Math.max(120, Math.min(220, 740 - exitX));
+  const plumeMaxRadius = Math.min(132, exitRadius * 1.55);
+  const exitCells = field.cells.filter((cell) => cell.x > 0.92);
+  const exitValue = exitCells.length
+    ? exitCells.reduce((sum, cell) => sum + cell.value, 0) / exitCells.length
+    : field.max;
+
+  return (
+    <g>
+      <g clipPath="url(#nozzleInternalCfdClip)">
+        {field.cells.map((cell, index) => {
+          const x = inletX + cell.x * nozzleLength;
+          const radius = radiusAt(x);
+          const radial = Math.max(0, Math.min(1, cell.y / 0.46));
+          const yTop = centerY - radial * radius;
+          const yBottom = centerY + radial * radius;
+          const bandHeight = Math.max(3, radius / 16);
+          const color = contourColor(cell.value, field.min, field.max);
+          return (
+            <g key={`${field.name}-integrated-${index}`}>
+              <rect x={x - xStep * 0.58} y={yTop - bandHeight / 2} width={xStep * 1.25} height={bandHeight} fill={color} opacity="0.95" />
+              <rect x={x - xStep * 0.58} y={yBottom - bandHeight / 2} width={xStep * 1.25} height={bandHeight} fill={color} opacity="0.95" />
+            </g>
+          );
+        })}
+      </g>
+      <g clipPath="url(#nozzleExternalPlumeClip)">
+        {Array.from({ length: 70 }, (_, axialIndex) => {
+          const xProgress = axialIndex / 69;
+          const x = exitX + xProgress * plumeLength;
+          const plumeRadius = exitRadius + (plumeMaxRadius - exitRadius) * Math.sin((xProgress * Math.PI) / 2);
+          return Array.from({ length: 32 }, (_, radialIndex) => {
+            const radial = (radialIndex + 0.5) / 32;
+            const core = Math.exp(-((radial - 0.5) ** 2) / 0.09);
+            const diamond = 0.18 * Math.sin(xProgress * Math.PI * 7) * Math.exp(-xProgress * 1.2);
+            const value = exitValue * (0.7 + 0.32 * core + diamond);
+            const y = centerY - plumeRadius + radial * plumeRadius * 2;
+            return (
+              <rect
+                key={`plume-${axialIndex}-${radialIndex}`}
+                x={x}
+                y={y}
+                width={plumeLength / 68 + 1}
+                height={(plumeRadius * 2) / 30 + 1}
+                fill={contourColor(value, field.min, field.max)}
+                opacity={0.72 - xProgress * 0.22}
+              />
+            );
+          });
+        })}
+      </g>
+      {result?.shocks.map((shock, index) => {
+        const x = inletX + shock.x * nozzleLength;
+        const radius = radiusAt(x);
+        return (
+          <path
+            key={index}
+            d={`M${x - 11} ${centerY - radius * 0.82} L${x + 12} ${centerY} L${x - 11} ${centerY + radius * 0.82}`}
+            fill="#f97316"
+            opacity={0.28 + shock.strength * 0.28}
+          />
+        );
+      })}
+    </g>
+  );
+}
+
 function CfdContour({ field, shocks }: { field: NozzleCfdField; shocks: NozzleCfdResult["shocks"] }) {
   const width = 520;
   const height = 160;
@@ -2439,12 +2592,10 @@ function CfdContour({ field, shocks }: { field: NozzleCfdField; shocks: NozzleCf
 }
 
 function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult | null; error: string | null; running: boolean }) {
-  const activeFields = result?.fields ?? [];
-
   if (running) {
     return (
       <div className="mt-4 rounded-lg border border-sky-200/20 bg-sky-200/8 p-4 text-sm text-sky-50/80">
-        OpenFOAM job requested. Waiting for rhoCentralFoam residuals and field export...
+        Running the internal density-based nozzle solver. The nozzle drawing above is now the CFD viewport; labels are hidden until the run completes.
       </div>
     );
   }
@@ -2454,7 +2605,7 @@ function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult |
       <div className="mt-4 rounded-lg border border-amber-200/25 bg-amber-200/10 p-4 text-sm leading-6 text-amber-50/88">
         <p className="font-semibold">CFD backend not available</p>
         <p className="mt-1">{error}</p>
-        <p className="mt-2 text-xs text-amber-50/65">No synthetic CFD fields are rendered. Configure an OpenFOAM runner to generate real finite-volume results.</p>
+        <p className="mt-2 text-xs text-amber-50/65">No contour is rendered unless the internal finite-volume solver returns cell fields.</p>
       </div>
     );
   }
@@ -2462,10 +2613,12 @@ function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult |
   if (!result) {
     return (
       <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-orange-50/62">
-        Press Run CFD to send this axisymmetric nozzle case to an OpenFOAM rhoCentralFoam backend. Results will include solved contours, residual history, shock markers, and centerline plots.
+        Press Run CFD to convert the nozzle drawing into a solved velocity contour view. The same geometry is used for the internal density-based finite-volume pass, residual monitoring, and shock marker detection.
       </div>
     );
   }
+
+  const velocityField = result.fields.find((field) => field.name === "velocity") ?? result.fields[0];
 
   return (
     <div className="mt-4 space-y-4">
@@ -2475,8 +2628,23 @@ function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult |
         <Metric label="Isp" value={`${result.metrics.specificImpulseS.toFixed(1)} s`} />
         <Metric label="Cells" value={result.mesh.cells.toLocaleString()} />
       </div>
-      <div className="grid gap-3 lg:grid-cols-2">
-        {activeFields.map((field) => <CfdContour key={field.name} field={field} shocks={result.shocks} />)}
+      <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-orange-50">CFD viewport rendered in nozzle geometry</p>
+            <p className="mt-1 text-xs text-orange-50/50">
+              {velocityField?.label ?? "Velocity contour"} range: {velocityField?.min.toFixed(1)} to {velocityField?.max.toFixed(1)} {velocityField?.unit}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-orange-50/55">
+            <span>{velocityField?.min.toFixed(0)}</span>
+            <span className="h-3 w-32 rounded-full bg-gradient-to-r from-slate-950 via-blue-700 via-cyan-400 via-lime-400 via-amber-400 to-red-600" />
+            <span>{velocityField?.max.toFixed(0)} {velocityField?.unit}</span>
+          </div>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-orange-50/50">
+          Expansion state: {result.metrics.expansionState}. Shock markers, if present, are drawn directly on the nozzle field above instead of a separate decorative plot.
+        </p>
       </div>
       <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
         <p className="mb-2 text-sm font-semibold text-orange-50">Residual convergence</p>
