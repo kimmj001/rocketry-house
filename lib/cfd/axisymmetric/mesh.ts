@@ -27,9 +27,17 @@ export function generateStructuredMesh(geometry: NozzleGeometry, density: MeshDe
   const dimensions = meshDimensions(density);
   const nx = dimensions.nx;
   const ny = dimensions.ny;
-  const dx = geometry.totalLengthM / Math.max(nx - 1, 1);
+  const uniformDx = geometry.totalLengthM / Math.max(nx - 1, 1);
   const dy = geometry.maxRadiusM / Math.max(ny - 1, 1);
-  const x = Array.from({ length: nx }, (_, i) => i * dx);
+  const x = Array.from({ length: nx }, (_, i) => i * uniformDx);
+  const throatIndex = x.reduce((best, value, index) =>
+    Math.abs(value - geometry.convergenceLengthM) < Math.abs(x[best] - geometry.convergenceLengthM) ? index : best,
+  0);
+  x[throatIndex] = geometry.convergenceLengthM;
+  for (let i = 1; i < x.length; i += 1) {
+    if (x[i] <= x[i - 1]) x[i] = x[i - 1] + uniformDx * 0.2;
+  }
+  const dx = x.slice(1).reduce((min, value, index) => Math.min(min, value - x[index]), uniformDx);
   const y = Array.from({ length: ny }, (_, j) => j * dy);
   const wallRadius = x.map((xM) => nozzleWallRadius(xM, geometry));
   const inside = Array.from({ length: nx * ny }, (_, index) => {
