@@ -13,13 +13,14 @@ export type NozzleCfdInputs = {
   convergenceLengthMm: number;
   divergenceLengthMm: number;
   ambientPressurePa: number;
-  meshDensity: "coarse" | "standard" | "fine";
+  meshDensity: "coarse" | "standard" | "fine" | "research";
 };
 
 export type NozzleCfdResidualPoint = {
   iteration: number;
   continuity: number;
   momentum: number;
+  yMomentum?: number;
   energy: number;
 };
 
@@ -29,7 +30,7 @@ export type NozzleCfdCell = {
   value: number;
 };
 
-export type NozzleCfdFieldName = "mach" | "pressure" | "temperature" | "density" | "velocity";
+export type NozzleCfdFieldName = "mach" | "pressure" | "temperature" | "density" | "velocity" | "totalPressure" | "totalTemperature";
 
 export type NozzleCfdField = {
   name: NozzleCfdFieldName;
@@ -52,7 +53,7 @@ export type NozzleCfdCenterlinePoint = {
 export type NozzleCfdResult = {
   id: string;
   status: "queued" | "running" | "converged" | "failed";
-  solver: "Rocketry House internal density-based nozzle CFD" | "OpenFOAM rhoCentralFoam";
+  solver: "Rocketry House 2D axisymmetric finite-volume CFD" | "Rocketry House internal density-based nozzle CFD" | "OpenFOAM rhoCentralFoam";
   mesh: {
     cells: number;
     throatRefinementRatio: number;
@@ -74,6 +75,14 @@ export type NozzleCfdResult = {
     expansionState: NozzleExpansionState;
   };
   vtkUrl?: string;
+  validation?: {
+    throatMach: number;
+    referenceExitMach: number;
+    exitMachErrorPct: number;
+    referenceExitPressurePa: number;
+    exitPressureErrorPct: number;
+    target: string;
+  };
   createdAt: string;
 };
 
