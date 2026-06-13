@@ -22,12 +22,14 @@ export function validateAgainstIsentropicTheory(inputs: NozzleCfdInputs, result:
   const referenceExitMach = solveSupersonicMach(areaRatio, gamma);
   const referenceExitPressure = inputs.chamberPressurePa /
     Math.pow(1 + ((gamma - 1) / 2) * referenceExitMach * referenceExitMach, gamma / (gamma - 1));
+  const throatX = inputs.convergenceLengthMm / Math.max(inputs.convergenceLengthMm + inputs.divergenceLengthMm, 1);
   const throatPoint = result.centerline.reduce((best, point) =>
-    Math.abs(point.mach - 1) < Math.abs(best.mach - 1) ? point : best,
+    Math.abs(point.x - throatX) < Math.abs(best.x - throatX) ? point : best,
   result.centerline[0]);
+  const exitPoint = result.centerline.at(-1) ?? result.centerline[0];
 
-  const exitMachErrorPct = Math.abs(result.metrics.exitMach - referenceExitMach) / Math.max(referenceExitMach, 1e-6) * 100;
-  const exitPressureErrorPct = Math.abs(result.metrics.exitPressurePa - referenceExitPressure) / Math.max(referenceExitPressure, 1) * 100;
+  const exitMachErrorPct = Math.abs(exitPoint.mach - referenceExitMach) / Math.max(referenceExitMach, 1e-6) * 100;
+  const exitPressureErrorPct = Math.abs(exitPoint.pressurePa - referenceExitPressure) / Math.max(referenceExitPressure, 1) * 100;
 
   return {
     throatMach: throatPoint.mach,
