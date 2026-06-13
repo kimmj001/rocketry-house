@@ -2188,7 +2188,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   const convergenceArcY = visualCenterY - Math.sin((convergenceAngle * Math.PI) / 180) * convergenceArcRadius;
   const divergenceArcX = throatX + Math.cos((divergenceAngle * Math.PI) / 180) * divergenceArcRadius;
   const divergenceArcY = visualCenterY - Math.sin((divergenceAngle * Math.PI) / 180) * divergenceArcRadius;
-  const cfdDisplayActive = cfdRunning || Boolean(cfdResult);
+  const cfdDisplayActive = cfdRunning || cfdResult?.status === "converged";
   const runCfd = async () => {
     const payload: NozzleCfdInputs = {
       chamberPressurePa: nozzleFlow.chamberPressureMPa * 1_000_000,
@@ -2397,6 +2397,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
                 <option value="coarse">Coarse validation mesh</option>
                 <option value="standard">Standard throat-refined mesh</option>
                 <option value="fine">Fine shock-capturing mesh</option>
+                <option value="research">Research-grade mesh</option>
               </select>
             </label>
             <Button onClick={runCfd} disabled={cfdRunning}><Wind className="h-4 w-4" />{cfdRunning ? "Running CFD..." : "Run CFD"}</Button>
@@ -2455,7 +2456,9 @@ function NozzleIntegratedCfdOverlay({
   throatRadius: number;
   exitRadius: number;
 }) {
-  const field = result?.fields.find((item) => item.name === "velocity") ?? result?.fields.find((item) => item.name === "mach") ?? null;
+  const field = result?.status === "converged"
+    ? result.fields.find((item) => item.name === "velocity") ?? result.fields.find((item) => item.name === "mach") ?? null
+    : null;
   const nozzleLength = Math.max(exitX - inletX, 1);
   const radiusAt = (x: number) => {
     if (x <= chamberEndX) return chamberRadius;
@@ -2470,33 +2473,12 @@ function NozzleIntegratedCfdOverlay({
   if (running || !field) {
     return (
       <g clipPath="url(#nozzleInternalCfdClip)">
-        {Array.from({ length: 38 }, (_, index) => {
-          const x = inletX + (index / 37) * nozzleLength;
-          const radius = radiusAt(x);
-          const pulse = 0.35 + 0.55 * Math.sin(index * 0.62);
-          return (
-            <rect
-              key={index}
-              x={x - 8}
-              y={centerY - radius}
-              width="18"
-              height={radius * 2}
-              fill={contourColor(pulse, 0, 1)}
-              opacity="0.9"
-            />
-          );
-        })}
+        <rect x={inletX} y={centerY - chamberRadius} width={nozzleLength} height={chamberRadius * 2} fill="#020617" opacity="0.72" />
       </g>
     );
   }
 
   const xStep = nozzleLength / 70;
-  const plumeLength = Math.max(120, Math.min(220, 740 - exitX));
-  const plumeMaxRadius = Math.min(132, exitRadius * 1.55);
-  const exitCells = field.cells.filter((cell) => cell.x > 0.92);
-  const exitValue = exitCells.length
-    ? exitCells.reduce((sum, cell) => sum + cell.value, 0) / exitCells.length
-    : field.max;
 
   return (
     <g>
@@ -2515,31 +2497,6 @@ function NozzleIntegratedCfdOverlay({
               <rect x={x - xStep * 0.58} y={yBottom - bandHeight / 2} width={xStep * 1.25} height={bandHeight} fill={color} opacity="0.95" />
             </g>
           );
-        })}
-      </g>
-      <g clipPath="url(#nozzleExternalPlumeClip)">
-        {Array.from({ length: 70 }, (_, axialIndex) => {
-          const xProgress = axialIndex / 69;
-          const x = exitX + xProgress * plumeLength;
-          const plumeRadius = exitRadius + (plumeMaxRadius - exitRadius) * Math.sin((xProgress * Math.PI) / 2);
-          return Array.from({ length: 32 }, (_, radialIndex) => {
-            const radial = (radialIndex + 0.5) / 32;
-            const core = Math.exp(-((radial - 0.5) ** 2) / 0.09);
-            const diamond = 0.18 * Math.sin(xProgress * Math.PI * 7) * Math.exp(-xProgress * 1.2);
-            const value = exitValue * (0.7 + 0.32 * core + diamond);
-            const y = centerY - plumeRadius + radial * plumeRadius * 2;
-            return (
-              <rect
-                key={`plume-${axialIndex}-${radialIndex}`}
-                x={x}
-                y={y}
-                width={plumeLength / 68 + 1}
-                height={(plumeRadius * 2) / 30 + 1}
-                fill={contourColor(value, field.min, field.max)}
-                opacity={0.72 - xProgress * 0.22}
-              />
-            );
-          });
         })}
       </g>
       {result?.shocks.map((shock, index) => {
@@ -2595,7 +2552,7 @@ function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult |
   if (running) {
     return (
       <div className="mt-4 rounded-lg border border-sky-200/20 bg-sky-200/8 p-4 text-sm text-sky-50/80">
-        Running the internal density-based nozzle solver. The nozzle drawing above is now the CFD viewport; labels are hidden until the run completes.
+        Running the 2D axisymmetric finite-volume solver. The nozzle drawing above is held as the CFD viewport; labels stay hidden until computed cell fields return.
       </div>
     );
   }
@@ -2613,7 +2570,29 @@ function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult |
   if (!result) {
     return (
       <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-orange-50/62">
-        Press Run CFD to convert the nozzle drawing into a solved velocity contour view. The same geometry is used for the internal density-based finite-volume pass, residual monitoring, and shock marker detection.
+        Press Run CFD to convert the nozzle drawing into a computed velocity contour view. The same geometry is used for structured mesh generation, finite-volume marching, residual monitoring, and shock marker detection.
+      </div>
+    );
+  }
+
+  if (result.status !== "converged") {
+    const last = result.residuals.at(-1);
+    return (
+      <div className="mt-4 rounded-lg border border-amber-200/25 bg-amber-200/10 p-4 text-sm leading-6 text-amber-50/88">
+        <p className="font-semibold">CFD did not reach convergence target</p>
+        <p className="mt-1 text-amber-50/72">
+          The solver returned computed cells, but Rocketry House does not render contours before convergence. Try a coarser geometry change, lower expansion ratio, or coarse mesh for a quick validation run.
+        </p>
+        {last ? (
+          <p className="mt-2 text-xs text-amber-50/62">
+            Last residuals: continuity {last.continuity.toExponential(2)}, x-momentum {last.momentum.toExponential(2)}, y-momentum {(last.yMomentum ?? 0).toExponential(2)}, energy {last.energy.toExponential(2)}.
+          </p>
+        ) : null}
+        {result.validation ? (
+          <p className="mt-2 text-xs text-amber-50/62">
+            Validation check: throat M {result.validation.throatMach.toFixed(2)}, exit Mach error {result.validation.exitMachErrorPct.toFixed(1)}%, exit pressure error {result.validation.exitPressureErrorPct.toFixed(1)}%.
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -2643,8 +2622,15 @@ function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult |
           </div>
         </div>
         <p className="mt-2 text-xs leading-5 text-orange-50/50">
-          Expansion state: {result.metrics.expansionState}. Shock markers, if present, are drawn directly on the nozzle field above instead of a separate decorative plot.
+          Solver: {result.solver}. Expansion state: {result.metrics.expansionState}. Shock markers, if present, are detected from computed Mach/pressure gradients.
         </p>
+        {result.validation ? (
+          <div className="mt-3 grid gap-2 text-xs text-orange-50/58 sm:grid-cols-3">
+            <span>Throat check M {result.validation.throatMach.toFixed(2)}</span>
+            <span>Exit M error {result.validation.exitMachErrorPct.toFixed(1)}%</span>
+            <span>Exit p error {result.validation.exitPressureErrorPct.toFixed(1)}%</span>
+          </div>
+        ) : null}
       </div>
       <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
         <p className="mb-2 text-sm font-semibold text-orange-50">Residual convergence</p>
@@ -2657,6 +2643,7 @@ function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult |
               <Tooltip contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.12)", color: "#fff7ed" }} />
               <Line type="monotone" dataKey="continuity" stroke="#38bdf8" dot={false} />
               <Line type="monotone" dataKey="momentum" stroke="#f97316" dot={false} />
+              <Line type="monotone" dataKey="yMomentum" stroke="#22c55e" dot={false} />
               <Line type="monotone" dataKey="energy" stroke="#a78bfa" dot={false} />
             </LineChart>
           </ResponsiveContainer>
