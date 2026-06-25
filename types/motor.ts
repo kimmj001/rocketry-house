@@ -1,4 +1,4 @@
-export type MotorVisibility = "private" | "public" | "marketplace";
+export type MotorVisibility = "private" | "public" | "unlisted" | "marketplace";
 export type MotorVerificationStatus = "Pre-flight analysis" | "Static fire attached" | "Measured thrust uploaded" | "Reviewed";
 
 export type MotorParameters = {
