@@ -7,10 +7,11 @@ export function SiteFooter() {
         <div>
           <p className="font-semibold text-slate-900">Rocketry House</p>
           <p className="mt-1">For educational and lawful rocketry collaboration.</p>
+          <p className="mt-1">Contact: rocketryhouse@gmail.com</p>
         </div>
         <nav className="flex flex-wrap gap-4">
           <Link href="/privacy" className="font-medium hover:text-orange-600">
-            개인정보처리방침
+            Privacy Policy
           </Link>
           <Link href="/community" className="font-medium hover:text-orange-600">
             Community
