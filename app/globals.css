@@ -52,6 +52,10 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
+.site-scroll-root[data-fixed-workspace="true"] {
+  overflow-y: hidden;
+}
+
 main {
   min-height: 100dvh;
 }

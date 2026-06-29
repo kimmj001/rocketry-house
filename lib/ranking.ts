@@ -37,7 +37,6 @@ export type RankingProjectMetrics = {
   bookmarks?: number;
   forks?: number;
   downloads?: number;
-  purchases?: number;
   citations?: number;
   moderationReports?: number;
   unresolvedSafetyReports?: number;
@@ -71,7 +70,7 @@ export const RANKING_WEIGHT_GROUPS = [
   { key: "engineeringPerformance", label: "Engineering performance", weight: 0.2, description: "Altitude, stable rail departure, stability margin, impulse, thrust, and mass efficiency." },
   { key: "simulationAccuracy", label: "Simulation accuracy", weight: 0.15, description: "How closely measured altitude matches the published simulation estimate." },
   { key: "communityQuality", label: "Community quality", weight: 0.15, description: "Reviews, ratings, likes, comments, bookmarks, and cited engineering discussion." },
-  { key: "reuseImpact", label: "Reuse impact", weight: 0.1, description: "Forks, downloads, purchases, and downstream reuse of project or motor data." },
+  { key: "reuseImpact", label: "Reuse impact", weight: 0.1, description: "Forks, downloads, citations, and downstream reuse of project or motor data." },
   { key: "safetyReliability", label: "Safety and reliability", weight: 0.1, description: "Successful recovery, transparent failure reports, and low unresolved safety-report pressure." }
 ] as const;
 
@@ -88,7 +87,7 @@ export const RANKING_EVENT_TYPES = [
   "bookmark_created",
   "fork_created",
   "download_created",
-  "purchase_created",
+  "citation_created",
   "moderation_report_created",
   "verification_event_created"
 ] as const;
@@ -190,7 +189,7 @@ export function computeProjectRankingScore(metrics: RankingProjectMetrics): Rank
   const reuseImpact = clamp(
     logScore(metrics.forks, 250) * 0.38 +
       logScore(metrics.downloads, 5000) * 0.34 +
-      logScore(metrics.purchases, 1000) * 0.18 +
+      logScore(metrics.citations, 1000) * 0.18 +
       Number(Boolean(metrics.hasWebCad)) * 10
   );
 

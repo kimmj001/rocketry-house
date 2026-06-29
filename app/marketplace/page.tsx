@@ -1,9 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Filter, Search, SlidersHorizontal } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ProjectCard } from "@/components/project-card";
+import { archivedProjectToRocketProject } from "@/lib/project-archive";
+import { loadPersistentRecords, PUBLIC_PROJECTS_OWNER_KEY, type CloudRecord } from "@/lib/cloud-persistence";
+import type { RocketProject } from "@/lib/types";
 
 const categories = ["All", "Rockets", "Motors", "Telemetry", "Writeups"];
 const filterGroups = [
@@ -17,13 +21,69 @@ export default function MarketplacePage() {
   const [category, setCategory] = useState("All");
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [publicProjects, setPublicProjects] = useState<RocketProject[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadPublicProjects() {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const records = await loadPersistentRecords("projects", { ownerKey: PUBLIC_PROJECTS_OWNER_KEY });
+        if (!mounted) return;
+        setPublicProjects(
+          (records as CloudRecord<Parameters<typeof archivedProjectToRocketProject>[0]["payload"]>[])
+            .map((record, index) => archivedProjectToRocketProject(record, index))
+        );
+      } catch (error) {
+        if (!mounted) return;
+        setPublicProjects([]);
+        setLoadError(error instanceof Error ? error.message : "Could not load public projects.");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    void loadPublicProjects();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const projects = useMemo(() => {
-    void query;
-    void category;
-    void activeFilters;
-    return [];
-  }, [activeFilters, category, query]);
+    const normalizedQuery = query.trim().toLowerCase();
+
+    return publicProjects.filter((project) => {
+      const searchable = [
+        project.title,
+        project.creator,
+        project.description,
+        project.motorClass,
+        project.difficulty,
+        project.verificationStatus,
+        ...project.tags
+      ].join(" ").toLowerCase();
+
+      if (normalizedQuery && !searchable.includes(normalizedQuery)) return false;
+      if (category === "Motors" && !project.hasThrustData && !/motor|propellant|thrust/i.test(searchable)) return false;
+      if (category === "Telemetry" && !project.hasTelemetry && !project.hasFlightLog) return false;
+      if (category === "Writeups" && !project.publicReference) return false;
+
+      return activeFilters.every((filter) => {
+        if (filter === "Free") return project.priceCents === 0;
+        if (filter === "Paid") return project.priceCents > 0;
+        if (filter === "Verified") return project.verificationStatus !== "Unverified" && project.verificationStatus !== "Design uploaded";
+        if (filter === "Has CAD") return project.hasWebCad;
+        if (filter === "Telemetry") return project.hasTelemetry || project.hasFlightLog;
+        if (filter === "Motor data") return project.hasThrustData;
+        if (filter === "High Power") return project.difficulty === "High Power";
+        return true;
+      });
+    });
+  }, [activeFilters, category, publicProjects, query]);
 
   function toggleFilter(filter: string) {
     setActiveFilters((current) => current.includes(filter) ? current.filter((item) => item !== filter) : [...current, filter]);
@@ -78,12 +138,24 @@ export default function MarketplacePage() {
         </div>
         </div>
 
-        <p className="mt-5 text-sm text-slate-600">{projects.length} real projects match the current view.</p>
+        <p className="mt-5 text-sm text-slate-600">
+          {loading ? "Loading public project archive..." : `${projects.length} public projects match the current view.`}
+        </p>
+        {loadError ? <Card className="mt-4 border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">{loadError}</Card> : null}
 
         <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-          {projects.map(() => null)}
+          {loading
+            ? Array.from({ length: 4 }, (_, index) => (
+                <Card key={index} className="h-96 animate-pulse border-slate-200 bg-white p-4">
+                  <div className="h-40 rounded-lg bg-slate-100" />
+                  <div className="mt-5 h-5 w-3/4 rounded bg-slate-100" />
+                  <div className="mt-3 h-4 w-1/2 rounded bg-slate-100" />
+                  <div className="mt-8 h-20 rounded bg-slate-100" />
+                </Card>
+              ))
+            : projects.map((project) => <ProjectCard key={project.slug} project={project} />)}
         </div>
-        {!projects.length ? <Card className="mt-8 border-slate-200 bg-white p-8 text-center text-slate-600">No public projects yet. Marketplace listings will appear only after real users publish project packages.</Card> : null}
+        {!loading && !projects.length ? <Card className="mt-8 border-slate-200 bg-white p-8 text-center text-slate-600">No public projects match this view. Try clearing filters or publish a project package.</Card> : null}
       </div>
     </main>
   );

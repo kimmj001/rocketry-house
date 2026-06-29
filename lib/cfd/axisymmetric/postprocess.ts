@@ -41,9 +41,12 @@ function detectShockRegions(centerline: NozzleCfdResult["centerline"]) {
   return shocks.slice(0, 4);
 }
 
+function relativeJump(before: number, after: number) {
+  return Math.abs(after - before) / Math.max(Math.abs(before), Math.abs(after), 1e-9);
+}
+
 function sampleEvery(mesh: CfdMesh) {
-  if (mesh.nx > 170) return { x: 3, y: 2 };
-  if (mesh.nx > 90) return { x: 2, y: 1 };
+  void mesh;
   return { x: 1, y: 1 };
 }
 
@@ -53,6 +56,7 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
   const temperatureCells: NozzleCfdCell[] = [];
   const densityCells: NozzleCfdCell[] = [];
   const velocityCells: NozzleCfdCell[] = [];
+  const faceFluxCells: NozzleCfdCell[] = [];
   const totalPressureCells: NozzleCfdCell[] = [];
   const totalTemperatureCells: NozzleCfdCell[] = [];
   const stride = sampleEvery(mesh);
@@ -64,17 +68,26 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
       if (!mesh.inside[index]) continue;
       const primitive = primitiveCell(index, solver.state, inputs);
       const x = mesh.x[i] / mesh.x[mesh.nx - 1];
-      const y = mesh.y[j] / Math.max(mesh.wallRadius[i], mesh.dy);
-      if (y > 1.04) continue;
+      const localWall = Math.max(mesh.wallRadius[i], mesh.dy);
+      const physicalY = mesh.y[j] / Math.max(mesh.y[mesh.ny - 1], mesh.dy);
+      const wallY = mesh.y[j] / localWall;
       const vMag = Math.sqrt(primitive.u * primitive.u + primitive.v * primitive.v);
       const totalFactor = 1 + ((gamma - 1) / 2) * primitive.mach * primitive.mach;
-      machCells.push({ x, y: y * 0.46, value: primitive.mach });
-      pressureCells.push({ x, y: y * 0.46, value: primitive.p / 1000 });
-      temperatureCells.push({ x, y: y * 0.46, value: primitive.t });
-      densityCells.push({ x, y: y * 0.46, value: primitive.rho });
-      velocityCells.push({ x, y: y * 0.46, value: vMag });
-      totalPressureCells.push({ x, y: y * 0.46, value: primitive.p * Math.pow(totalFactor, gamma / (gamma - 1)) / 1000 });
-      totalTemperatureCells.push({ x, y: y * 0.46, value: primitive.t * totalFactor });
+      const cellGeometry = {
+        x,
+        y: physicalY,
+        wallY,
+        physicalY,
+        inNozzle: mesh.x[i] <= mesh.x[mesh.nozzleExitIndex]
+      };
+      machCells.push({ ...cellGeometry, value: primitive.mach });
+      pressureCells.push({ ...cellGeometry, value: primitive.p / 1000 });
+      temperatureCells.push({ ...cellGeometry, value: primitive.t });
+      densityCells.push({ ...cellGeometry, value: primitive.rho });
+      velocityCells.push({ ...cellGeometry, value: vMag });
+      faceFluxCells.push({ ...cellGeometry, value: primitive.rho * vMag });
+      totalPressureCells.push({ ...cellGeometry, value: primitive.p * Math.pow(totalFactor, gamma / (gamma - 1)) / 1000 });
+      totalTemperatureCells.push({ ...cellGeometry, value: primitive.t * totalFactor });
     }
   }
 
@@ -91,7 +104,7 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
     };
   });
 
-  const exitColumn = mesh.nx - 1;
+  const exitColumn = mesh.nozzleExitIndex;
   let mdot = 0;
   let thrustMomentum = 0;
   let exitPressureArea = 0;
@@ -113,7 +126,23 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
   const thrust = thrustMomentum + exitPressureArea;
   const throatArea = Math.PI * (inputs.throatDiameterMm / 2000) ** 2;
   const exitArea = Math.PI * (inputs.exitDiameterMm / 2000) ** 2;
-  const exit = centerline.at(-1) ?? centerline[0];
+  const nozzleExit = centerline[mesh.nozzleExitIndex] ?? centerline.at(-1) ?? centerline[0];
+  const beforeExit = centerline[Math.max(0, mesh.nozzleExitIndex - 1)] ?? nozzleExit;
+  const afterExit = centerline[Math.min(centerline.length - 1, mesh.nozzleExitIndex + 1)] ?? nozzleExit;
+  const probeStart = Math.max(0, mesh.nozzleExitIndex - 8);
+  const probeEnd = Math.min(centerline.length - 1, mesh.nozzleExitIndex + 12);
+  const probe = centerline.slice(probeStart, probeEnd + 1).map((point) => ({
+    x: point.x,
+    mach: point.mach,
+    pressurePa: point.pressurePa,
+    temperatureK: point.temperatureK,
+    densityKgM3: point.densityKgM3,
+    axialVelocityMS: point.velocityMS
+  }));
+  const finalResidual = solver.residuals.at(-1);
+  const skippedSteps = Object.entries(solver.audit)
+    .filter(([, called]) => !called)
+    .map(([name]) => name);
 
   return {
     id: `fv-cfd-${Date.now()}`,
@@ -122,7 +151,29 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
     mesh: {
       cells: mesh.cells,
       throatRefinementRatio: mesh.refinementRatio,
-      yPlusEstimate: inputs.meshDensity === "research" ? 1.8 : inputs.meshDensity === "fine" ? 3.2 : inputs.meshDensity === "standard" ? 7.4 : 18.5
+      yPlusEstimate: inputs.meshDensity === "research" ? 0.9 : inputs.meshDensity === "fine" ? 1.8 : inputs.meshDensity === "standard" ? 3.8 : 9.5,
+      nozzleExitX: Number((mesh.x[mesh.nozzleExitIndex] / mesh.x[mesh.nx - 1]).toFixed(4)),
+      domainLengthRatio: Number((mesh.x[mesh.nx - 1] / Math.max(mesh.x[mesh.nozzleExitIndex], 1e-9)).toFixed(2))
+    },
+    solverAudit: {
+      cells: mesh.cells,
+      iterations: solver.iterations,
+      finalCfl: solver.finalCfl,
+      finalResiduals: finalResidual ? {
+        continuity: finalResidual.continuity,
+        xMomentum: finalResidual.momentum,
+        yMomentum: finalResidual.yMomentum ?? 0,
+        energy: finalResidual.energy
+      } : undefined,
+      numericalSteps: solver.audit,
+      runtimeMs: solver.runtimeMs,
+      maximumCfl: solver.maximumCfl,
+      minimumDensityKgM3: solver.minimumDensityKgM3,
+      minimumPressurePa: solver.minimumPressurePa,
+      conservationError: solver.conservationError,
+      positivityAbort: solver.positivityAbort,
+      nanDetected: solver.nanDetected,
+      skippedSteps
     },
     residuals: solver.residuals,
     fields: [
@@ -131,6 +182,7 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
       makeField("temperature", "Static temperature", "K", temperatureCells),
       makeField("density", "Density", "kg/m3", densityCells),
       makeField("velocity", "Velocity magnitude", "m/s", velocityCells),
+      makeField("faceFlux", "Face flux magnitude", "kg/(m2 s)", faceFluxCells),
       makeField("totalPressure", "Total pressure", "kPa", totalPressureCells),
       makeField("totalTemperature", "Total temperature", "K", totalTemperatureCells)
     ],
@@ -138,14 +190,25 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
     shocks: detectShockRegions(centerline),
     metrics: {
       exitMach: Number((exitMassWeightedMach / Math.max(mdot, 1e-9)).toFixed(3)),
-      exitPressurePa: exit.pressurePa,
+      exitPressurePa: nozzleExit.pressurePa,
       exitTemperatureK: Number((exitTempWeighted / Math.max(mdot, 1e-9)).toFixed(2)),
       massFlowKgS: Number(mdot.toFixed(5)),
       thrustCoefficient: Number((thrust / Math.max(inputs.chamberPressurePa * throatArea, 1e-9)).toFixed(4)),
       specificImpulseS: Number((thrust / Math.max(mdot * G0, 1e-9)).toFixed(2)),
       characteristicVelocityMS: Number((inputs.chamberPressurePa * throatArea / Math.max(mdot, 1e-9)).toFixed(1)),
       areaRatio: Number((exitArea / Math.max(throatArea, 1e-12)).toFixed(3)),
-      expansionState: expansionState(exit.pressurePa, inputs.ambientPressurePa)
+      expansionState: expansionState(nozzleExit.pressurePa, inputs.ambientPressurePa)
+    },
+    continuityCheck: {
+      exitX: Number((mesh.x[mesh.nozzleExitIndex] / mesh.x[mesh.nx - 1]).toFixed(4)),
+      probe,
+      maxRelativeJump: {
+        mach: Number(relativeJump(beforeExit.mach, afterExit.mach).toFixed(4)),
+        staticPressure: Number(relativeJump(beforeExit.pressurePa, afterExit.pressurePa).toFixed(4)),
+        staticTemperature: Number(relativeJump(beforeExit.temperatureK, afterExit.temperatureK).toFixed(4)),
+        density: Number(relativeJump(beforeExit.densityKgM3, afterExit.densityKgM3).toFixed(4)),
+        axialVelocity: Number(relativeJump(beforeExit.velocityMS, afterExit.velocityMS).toFixed(4))
+      }
     },
     createdAt: new Date().toISOString()
   };

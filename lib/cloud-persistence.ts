@@ -18,6 +18,7 @@ type PersistenceOptions = {
 };
 
 export const PUBLIC_COMMUNITY_OWNER_KEY = "public:community";
+export const PUBLIC_PROJECTS_OWNER_KEY = "public:projects";
 
 function memoryId() {
   return `device-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
@@ -55,28 +56,31 @@ function resolveOwnerKey(options?: PersistenceOptions) {
 async function resolveCloudOwnerKey(options?: PersistenceOptions, mode: "read" | "write" = "read") {
   const requestedOwner = resolveOwnerKey(options);
   const supabase = getSupabaseClient();
-  if (!supabase || isMockMode) return { ownerKey: requestedOwner, authenticated: false, publicCommunity: requestedOwner === PUBLIC_COMMUNITY_OWNER_KEY };
+  const publicCommunity = requestedOwner === PUBLIC_COMMUNITY_OWNER_KEY;
+  const publicProjects = requestedOwner === PUBLIC_PROJECTS_OWNER_KEY;
+  if (!supabase || isMockMode) return { ownerKey: requestedOwner, authenticated: false, publicCommunity, publicProjects };
 
   const { data } = await supabase.auth.getUser();
   const userId = data.user?.id;
-  const publicCommunity = requestedOwner === PUBLIC_COMMUNITY_OWNER_KEY;
 
-  if (publicCommunity) {
+  if (publicCommunity || publicProjects) {
     return {
-      ownerKey: PUBLIC_COMMUNITY_OWNER_KEY,
+      ownerKey: requestedOwner,
       authenticated: Boolean(userId),
-      publicCommunity
+      publicCommunity,
+      publicProjects
     };
   }
 
   if (!userId) {
-    return { ownerKey: requestedOwner, authenticated: false, publicCommunity: false };
+    return { ownerKey: requestedOwner, authenticated: false, publicCommunity: false, publicProjects: false };
   }
 
   return {
     ownerKey: `user:${userId}`,
     authenticated: true,
-    publicCommunity: false
+    publicCommunity: false,
+    publicProjects: false
   };
 }
 
@@ -138,7 +142,7 @@ export async function loadPersistentRecords<T>(collection: string, options?: Per
   const supabase = getSupabaseClient();
   if (!supabase || isMockMode) return localRecords;
   const owner = await resolveCloudOwnerKey(options, "read");
-  if (!owner.authenticated && !owner.publicCommunity) return localRecords;
+  if (!owner.authenticated && !owner.publicCommunity && !owner.publicProjects) return localRecords;
 
   const { data, error } = await supabase
     .from("user_data_records")

@@ -110,10 +110,10 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
           <p className="text-sm uppercase tracking-[0.2em] text-orange-100/60">Rocketry House Account</p>
           <h1 className="mt-3 max-w-3xl text-5xl font-semibold">{isSignUp ? "Create your Rocketry House account." : "Welcome back to your rocket workshop."}</h1>
           <p className="mt-5 max-w-2xl text-lg text-orange-50/68">
-            Sign in to keep motors, CAD rockets, simulations, forks, purchases, and marketplace listings tied to your personal, team, or organization account.
+            Sign in to keep motors, CAD rockets, simulations, forks, upload archives, and profile activity tied to your personal, team, or organization account.
           </p>
           <div className="mt-8 grid gap-3 sm:grid-cols-3">
-            {["Motor library", "Rocket builds", "Project sales"].map((item) => <div key={item} className="rounded-lg border border-white/10 bg-white/[0.04] p-4 text-sm">{item}</div>)}
+            {["Motor library", "Rocket builds", "Project archive"].map((item) => <div key={item} className="rounded-lg border border-white/10 bg-white/[0.04] p-4 text-sm">{item}</div>)}
           </div>
         </section>
 

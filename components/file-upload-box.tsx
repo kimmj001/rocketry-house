@@ -9,6 +9,7 @@ type FileUploadBoxProps = {
   description?: string;
   formats?: string;
   status?: "required" | "recommended" | "optional";
+  compact?: boolean;
   onFilesSelected?: (title: string, files: File[]) => void;
 };
 
@@ -17,6 +18,7 @@ export function FileUploadBox({
   description = "CSV/JSON/TXT are scanned for likely time, altitude, velocity, acceleration, thrust, pressure, and GPS columns. Unknown data falls back to a raw preview and manual mapping.",
   formats = "CSV, JSON, TXT, PDF, images, video links, ZIP, .ork-like XML, STL, STEP",
   status = "optional",
+  compact = false,
   onFilesSelected
 }: FileUploadBoxProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -46,7 +48,11 @@ export function FileUploadBox({
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") inputRef.current?.click();
       }}
-      className="cursor-pointer rounded-lg border border-dashed border-orange-200/30 bg-white/[0.03] p-5 text-left transition hover:border-orange-200/55 hover:bg-white/[0.06]"
+      className={`cursor-pointer rounded-lg border border-dashed text-left transition ${
+        compact
+          ? "min-h-0 border-slate-200 bg-slate-50 px-2 py-1 text-slate-950 hover:border-orange-300 hover:bg-orange-50"
+          : "border-orange-200/30 bg-white/[0.03] p-5 hover:border-orange-200/55 hover:bg-white/[0.06]"
+      }`}
     >
       <input
         ref={inputRef}
@@ -55,23 +61,23 @@ export function FileUploadBox({
         className="hidden"
         onChange={(event) => selectFiles(event.target.files)}
       />
-      <div className="flex items-start justify-between gap-4">
-        {files.length ? <CheckCircle2 className="h-7 w-7 shrink-0 text-emerald-200" /> : <UploadCloud className="h-7 w-7 shrink-0 text-orange-200" />}
-        <span className="rounded-full border border-white/12 bg-white/8 px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-orange-50/58">
+      <div className="flex items-center justify-between gap-2">
+        {files.length ? <CheckCircle2 className={`${compact ? "h-3.5 w-3.5 text-emerald-600" : "h-7 w-7 text-emerald-200"} shrink-0`} /> : <UploadCloud className={`${compact ? "h-3.5 w-3.5 text-orange-600" : "h-7 w-7 text-orange-200"} shrink-0`} />}
+        <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] ${compact ? "hidden" : "border-white/12 bg-white/8 text-orange-50/58"}`}>
           {status}
         </span>
       </div>
-      <p className="mt-4 font-medium">{title}</p>
-      <p className="mt-2 text-sm leading-6 text-orange-50/58">{description}</p>
-      <p className="mt-4 rounded-md bg-black/12 p-2 text-xs text-cyan-100/62">{formats}</p>
+      <p className={`${compact ? "mt-0.5 truncate text-[11px]" : "mt-4"} font-medium`}>{title}</p>
+      <p className={`${compact ? "sr-only" : "mt-2 text-sm leading-6 text-orange-50/58"}`}>{description}</p>
+      <p className={`${compact ? "mt-0.5 truncate bg-white px-1.5 py-0.5 text-[9px] leading-3 text-slate-500" : "mt-4 bg-black/12 p-2 text-xs text-cyan-100/62"} rounded-md`}>{formats}</p>
       {files.length ? (
-        <div className="mt-3 space-y-1 rounded-md bg-emerald-300/10 p-2 text-xs text-emerald-50/80">
+        <div className={`mt-1 space-y-0.5 rounded-md p-1 text-[9px] ${compact ? "bg-emerald-50 text-emerald-800" : "bg-emerald-300/10 text-emerald-50/80"}`}>
           {files.slice(0, 3).map((file) => <p key={`${file.name}-${file.size}`}>{file.name}</p>)}
           {files.length > 3 ? <p>+{files.length - 3} more files</p> : null}
-          {syncState ? <p className="text-emerald-50/65">{syncState}</p> : null}
+          {syncState ? <p className={compact ? "text-emerald-700" : "text-emerald-50/65"}>{syncState}</p> : null}
         </div>
       ) : (
-        <p className="mt-3 text-xs text-orange-50/42">Click to choose files.</p>
+        compact ? null : <p className="mt-1 text-[10px] text-orange-50/42">Click to choose files.</p>
       )}
     </div>
   );

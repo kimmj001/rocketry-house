@@ -11,7 +11,7 @@ export default function RankingPage() {
         <h1 className="mt-3 max-w-4xl text-4xl font-semibold">Rankings will open when real public activity exists.</h1>
         <p className="mt-4 max-w-3xl text-orange-50/68">
           Rocketry House no longer shows seeded leaderboard data. Accounts, teams, organizations, and projects will rank only from real
-          posts, uploads, verified evidence, purchases, forks, reviews, and launch records.
+          posts, uploads, verified evidence, forks, reviews, and launch records.
         </p>
 
         <div className="mt-8 grid gap-4 md:grid-cols-4">

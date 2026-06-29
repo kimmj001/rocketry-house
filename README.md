@@ -21,6 +21,14 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+If the local browser ever shows an unstyled HTML page, the dev cache was likely mixed with a production build while the dev server was running. Restart cleanly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/restart-dev.ps1
+```
+
+When checking a production build locally, stop the dev server first so `.next` is not rewritten while the browser is loading dev CSS chunks.
+
 ## Optional Supabase
 
 Create `.env.local`:
@@ -44,7 +52,7 @@ Without those env vars, the app runs from mock data plus browser-local backup.
 
 Rocketry House protects user-created MVP data with a two-layer persistence path:
 
-- Local backup: community posts, comments, likes, bookmarks, upload drafts, inline CAD JSON, saved motors, purchases, profiles, and selected file metadata are cached in browser storage.
+- Local backup: community posts, comments, likes, bookmarks, upload drafts, inline CAD JSON, saved motors, profiles, and selected file metadata are cached in browser storage.
 - Supabase sync: when `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are present, the same records are upserted into `user_data_records`.
 - Supabase Storage: selected upload files are sent to the `rocketry-house-files` bucket when Supabase is configured. In mock mode, file metadata is still retained locally.
 
@@ -62,9 +70,13 @@ For a public production launch, run `supabase/cloud-persistence.sql` in Supabase
 
 The app is ready for Vercel deployment as a Next.js project.
 
-Required for the current public MVP:
+Required for persistent public MVP data:
 
-- No environment variables are required. The app falls back to local mock data when Supabase is not configured.
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `supabase/cloud-persistence.sql` applied in the Supabase SQL editor or through your database pipeline
+
+Without Supabase, the app still opens in local mock mode, but account, community, upload, motor, and rocket records only persist in the current browser storage.
 
 Optional production environment variables:
 
@@ -88,7 +100,7 @@ The repo includes `vercel.json` with the Next.js framework and build command.
 - `lib/cad/store.ts` owns browser CAD editing state with Zustand.
 - `lib/simulation/estimates.ts` isolates the engineering estimate layer. This boundary is where a higher-fidelity aerodynamic and flight simulation engine should be integrated later.
 - `lib/telemetry.ts` contains messy-data column detection helpers.
-- `supabase/schema.sql` contains tables for profiles, projects, versions, components, files, purchases, forks, royalties, reviews, discussions, flight logs, telemetry, thrust data, verification, and moderation.
+- `supabase/schema.sql` contains tables for profiles, projects, versions, components, files, forks, reviews, discussions, flight logs, telemetry, thrust data, verification, and moderation.
 
 ## Safety Positioning
 
@@ -105,5 +117,5 @@ Rocketry House is for educational and lawful rocketry use only. The UI includes 
 - Creator dashboard
 - Profile
 - Fork tree
-- Mock checkout
-- Purchases/downloads
+- Project release workflow
+- Project archive/downloads

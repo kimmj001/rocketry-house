@@ -9,3 +9,5 @@ pnpm.zip
 .pnpm-standalone
 *.log
 *.tsbuildinfo
+scripts/seed-team-projects.mjs
+vercel-failure.html

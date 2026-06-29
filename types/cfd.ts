@@ -27,10 +27,13 @@ export type NozzleCfdResidualPoint = {
 export type NozzleCfdCell = {
   x: number;
   y: number;
+  wallY?: number;
+  physicalY?: number;
+  inNozzle?: boolean;
   value: number;
 };
 
-export type NozzleCfdFieldName = "mach" | "pressure" | "temperature" | "density" | "velocity" | "totalPressure" | "totalTemperature";
+export type NozzleCfdFieldName = "mach" | "pressure" | "temperature" | "density" | "velocity" | "faceFlux" | "totalPressure" | "totalTemperature";
 
 export type NozzleCfdField = {
   name: NozzleCfdFieldName;
@@ -58,6 +61,38 @@ export type NozzleCfdResult = {
     cells: number;
     throatRefinementRatio: number;
     yPlusEstimate?: number;
+    nozzleExitX?: number;
+    domainLengthRatio?: number;
+  };
+  solverAudit?: {
+    cells: number;
+    iterations: number;
+    finalCfl: number;
+    finalResiduals?: {
+      continuity: number;
+      xMomentum: number;
+      yMomentum: number;
+      energy: number;
+    };
+    numericalSteps: {
+      computePrimitive: boolean;
+      physicalFluxX: boolean;
+      physicalFluxY: boolean;
+      computeFaceFluxes: boolean;
+      rusanovFlux: boolean;
+      computeCflDt: boolean;
+      applyBoundaryConditions: boolean;
+      updateConservativeStateByFluxDivergence: boolean;
+      computeResiduals: boolean;
+    };
+    runtimeMs: number;
+    maximumCfl: number;
+    minimumDensityKgM3: number;
+    minimumPressurePa: number;
+    conservationError: number;
+    positivityAbort: boolean;
+    nanDetected: boolean;
+    skippedSteps: string[];
   };
   residuals: NozzleCfdResidualPoint[];
   fields: NozzleCfdField[];
@@ -81,7 +116,39 @@ export type NozzleCfdResult = {
     exitMachErrorPct: number;
     referenceExitPressurePa: number;
     exitPressureErrorPct: number;
+    checks?: {
+      throatChoked: boolean;
+      centerlineMachIncreases: boolean;
+      divergingMachIncreases: boolean;
+      pressureDropsThroughNozzle: boolean;
+      densityDropsThroughNozzle: boolean;
+      velocityIncreasesThroughNozzle: boolean;
+      checkerboardStable: boolean;
+      exitContinuous: boolean;
+      residualConverged: boolean;
+      exitMachWithin10Pct: boolean;
+      physicallyValid: boolean;
+    };
+    warnings?: string[];
     target: string;
+  };
+  continuityCheck?: {
+    exitX: number;
+    probe: Array<{
+      x: number;
+      mach: number;
+      pressurePa: number;
+      temperatureK: number;
+      densityKgM3: number;
+      axialVelocityMS: number;
+    }>;
+    maxRelativeJump: {
+      mach: number;
+      staticPressure: number;
+      staticTemperature: number;
+      density: number;
+      axialVelocity: number;
+    };
   };
   createdAt: string;
 };

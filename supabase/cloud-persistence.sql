@@ -27,9 +27,12 @@ drop policy if exists "Rocketry House MVP can delete app records" on user_data_r
 drop policy if exists "Users can read own app records and public community" on user_data_records;
 drop policy if exists "Users can insert own app records and public community" on user_data_records;
 drop policy if exists "Users can update own app records and public community" on user_data_records;
+drop policy if exists "Users can read own app records and public archives" on user_data_records;
+drop policy if exists "Users can insert own app records and public archives" on user_data_records;
+drop policy if exists "Users can update own app records and public archives" on user_data_records;
 drop policy if exists "Users can delete own app records" on user_data_records;
 
-create policy "Users can read own app records and public community"
+create policy "Users can read own app records and public archives"
   on user_data_records for select
   using (
     owner_key = ('user:' || auth.uid()::text)
@@ -37,9 +40,13 @@ create policy "Users can read own app records and public community"
       owner_key = 'public:community'
       and collection in ('community_posts', 'community_comments')
     )
+    or (
+      owner_key = 'public:projects'
+      and collection in ('projects', 'rocket_projects')
+    )
   );
 
-create policy "Users can insert own app records and public community"
+create policy "Users can insert own app records and public archives"
   on user_data_records for insert
   with check (
     auth.uid() is not null
@@ -49,10 +56,14 @@ create policy "Users can insert own app records and public community"
         owner_key = 'public:community'
         and collection in ('community_posts', 'community_comments')
       )
+      or (
+        owner_key = 'public:projects'
+        and collection in ('projects', 'rocket_projects')
+      )
     )
   );
 
-create policy "Users can update own app records and public community"
+create policy "Users can update own app records and public archives"
   on user_data_records for update
   using (
     auth.uid() is not null
@@ -61,6 +72,10 @@ create policy "Users can update own app records and public community"
       or (
         owner_key = 'public:community'
         and collection in ('community_posts', 'community_comments')
+      )
+      or (
+        owner_key = 'public:projects'
+        and collection in ('projects', 'rocket_projects')
       )
     )
   )
@@ -71,6 +86,10 @@ create policy "Users can update own app records and public community"
       or (
         owner_key = 'public:community'
         and collection in ('community_posts', 'community_comments')
+      )
+      or (
+        owner_key = 'public:projects'
+        and collection in ('projects', 'rocket_projects')
       )
     )
   );

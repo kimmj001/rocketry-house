@@ -9,6 +9,14 @@ export function solveInternalNozzleCfd(inputs: NozzleCfdInputs): NozzleCfdResult
   const geometry = buildNozzleGeometry(inputs);
   const mesh = generateStructuredMesh(geometry, inputs.meshDensity);
   const solver = runFiniteVolumeSolver(inputs, geometry, mesh);
+  const skippedSteps = Object.entries(solver.audit)
+    .filter(([, called]) => !called)
+    .map(([name]) => name);
+
+  if (skippedSteps.length) {
+    throw new Error(`CFD numerical audit failed. Skipped steps: ${skippedSteps.join(", ")}`);
+  }
+
   const result = postProcessNozzleSolution(inputs, mesh, solver);
   const validation = validateAgainstIsentropicTheory(inputs, result);
 

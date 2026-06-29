@@ -1,19 +1,22 @@
 import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
-import { BookOpen, ExternalLink, MessageSquare, ShoppingCart, Upload } from "lucide-react";
+import { BookOpen, ExternalLink, GitFork, MessageSquare, Upload } from "lucide-react";
 import { ProjectTabs } from "@/components/project-tabs";
 import { VerificationBadge } from "@/components/badges";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { TelemetryChart } from "@/components/charts";
 import { RawDataPreview } from "@/components/raw-data-preview";
+import { archivedProjectToRocketProject } from "@/lib/project-archive";
 import { discussions, mockProjects } from "@/lib/mock-data";
-import { bySlug, canonicalSlug, formatPrice } from "@/lib/utils";
+import { getSupabaseClient, isMockMode } from "@/lib/supabase";
+import type { RocketProject } from "@/lib/types";
+import { bySlug, canonicalSlug } from "@/lib/utils";
 
 export default async function ProjectDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   if (canonicalSlug(slug) !== slug) redirect(`/projects/${canonicalSlug(slug)}`);
-  const project = bySlug(mockProjects, slug);
+  const project = bySlug(mockProjects, slug) ?? await loadArchivedProject(slug);
   if (!project) notFound();
   const originalProject = project.originalProjectId ? mockProjects.find((candidate) => candidate.id === project.originalProjectId) : undefined;
   const projectDiscussions = discussions.filter((discussion) => discussion.projectId === project.id);
@@ -35,7 +38,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             )}
             {originalProject && <p className="mt-3 text-sm text-cyan-100">Based on {originalProject.title}</p>}
             <div className="mt-6 grid gap-3 sm:grid-cols-4">
-              <Stat label="Price" value={formatPrice(project.priceCents)} />
+              <Stat label="Access" value="Open reference" />
               <Stat label="Difficulty" value={project.difficulty} />
               <Stat label="Motor" value={project.motorClass} />
               <Stat label="Forks" value={String(project.forkCount)} />
@@ -50,9 +53,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <aside className="space-y-5">
             <div className="relative aspect-[16/11] overflow-hidden rounded-lg border border-white/10 bg-white/[0.03]"><Image src={project.image} alt={project.title} fill className="object-contain p-4" /></div>
             <Card className="p-5">
-              <h2 className="font-semibold">Project marketplace</h2>
-              <p className="mt-2 text-sm text-orange-50/65">Purchase unlocks project files, evidence packages, and fork permissions. Platform commission is 5%.</p>
-              <div className="mt-4 flex gap-2"><Button asChild href={`/checkout/${project.slug}`}><ShoppingCart className="h-4 w-4" />Checkout</Button><Button asChild href={`/forks/${project.slug}`} variant="outline">Fork tree</Button></div>
+              <h2 className="font-semibold">Project access</h2>
+              <p className="mt-2 text-sm text-orange-50/65">Projects are shared as engineering references. Files, evidence, and fork permissions follow the selected visibility and license.</p>
+              <div className="mt-4 flex gap-2"><Button asChild href={`/forks/${project.slug}`}><GitFork className="h-4 w-4" />Fork tree</Button><Button asChild href={`/upload`} variant="outline">Publish your project</Button></div>
             </Card>
             <Card className="p-5">
               <h2 className="flex items-center gap-2 font-semibold"><MessageSquare className="h-5 w-5 text-cyan-200" />Project discussions</h2>
@@ -68,4 +71,20 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
 function Stat({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4"><p className="text-xs text-orange-50/55">{label}</p><p className="mt-1 font-semibold">{value}</p></div>;
+}
+
+async function loadArchivedProject(slug: string): Promise<RocketProject | undefined> {
+  const supabase = getSupabaseClient();
+  if (!supabase || isMockMode) return undefined;
+
+  const { data, error } = await supabase
+    .from("user_data_records")
+    .select("collection, record_key, payload, updated_at")
+    .eq("owner_key", "public:projects")
+    .eq("collection", "projects")
+    .eq("record_key", slug)
+    .maybeSingle();
+
+  if (error || !data) return undefined;
+  return archivedProjectToRocketProject(data);
 }

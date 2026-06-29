@@ -1,0 +1,21 @@
+"use client";
+
+import { usePathname } from "next/navigation";
+import type { ReactNode } from "react";
+import { SiteFooter } from "@/components/site-footer";
+import { SiteNav } from "@/components/site-nav";
+
+const fixedWorkspaceRoutes = ["/upload"];
+
+export function SiteShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const isFixedWorkspace = fixedWorkspaceRoutes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+
+  return (
+    <div className="site-scroll-root" data-site-scroll-root data-fixed-workspace={isFixedWorkspace ? "true" : "false"} tabIndex={-1}>
+      <SiteNav />
+      {children}
+      {!isFixedWorkspace && <SiteFooter />}
+    </div>
+  );
+}

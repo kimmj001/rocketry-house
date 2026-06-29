@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Activity, BookOpen, Download, GitFork, Star } from "lucide-react";
-import { PriceTag, VerificationBadge } from "@/components/badges";
+import { VerificationBadge } from "@/components/badges";
 import { Card } from "@/components/ui/card";
 import type { RocketProject } from "@/lib/types";
 
@@ -18,7 +18,7 @@ export function ProjectCard({ project }: { project: RocketProject }) {
               <h3 className="font-semibold leading-tight">{project.title}</h3>
               <p className="mt-1 text-sm text-slate-500">by {project.creator}</p>
             </div>
-            <PriceTag cents={project.priceCents} />
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">Open reference</span>
           </div>
           <VerificationBadge status={project.verificationStatus} />
           <div className="flex flex-wrap gap-2 text-[11px] text-slate-600">

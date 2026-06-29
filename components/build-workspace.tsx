@@ -21,6 +21,7 @@ import type { NozzleCfdField, NozzleCfdInputs, NozzleCfdResult } from "@/types/c
 import type { RocketComponent, RocketComponentType, SimulationResult } from "@/lib/types";
 
 const MOTOR_STORAGE_KEY = "rocketry-house.saved-motors";
+type CfdDebugView = NozzleCfdField["name"] | "mesh" | "residual";
 
 const safetyWarnings = [
   "Motor simulations are estimates and must not be treated as safety certification.",
@@ -291,7 +292,7 @@ function validateMotorInputs(parameters: MotorParameters) {
   return issues;
 }
 
-function createRocketComponent(type: RocketComponentType, components: RocketComponent[], label?: string): RocketComponent {
+export function createRocketComponent(type: RocketComponentType, components: RocketComponent[], label?: string): RocketComponent {
   const length = Math.max(1, totalLength(components));
   const diameter = components.find((component) => component.type === "body_tube")?.diameter ?? components[0]?.diameter ?? 54;
   const position = Math.max(0, Math.round(length * 0.55));
@@ -383,9 +384,8 @@ export function MotorBuilder() {
   const [result, setResult] = useState<MotorSimulationResult>(() => simulateMotor(defaultMotorParameters));
   const [modalOpen, setModalOpen] = useState(false);
   const [savedName, setSavedName] = useState(defaultMotorParameters.projectName);
-  const [visibility, setVisibility] = useState<"private" | "public" | "marketplace">("private");
+  const [visibility, setVisibility] = useState<"private" | "public" | "unlisted">("private");
   const [license, setLicense] = useState("CC BY-NC 4.0");
-  const [price, setPrice] = useState(0);
   const [nozzleOpen, setNozzleOpen] = useState(false);
   const [compareMotors, setCompareMotors] = useState(false);
   const [saveStatus, setSaveStatus] = useState("Motor not saved yet.");
@@ -406,7 +406,7 @@ export function MotorBuilder() {
       description: "Saved from Build > Motor as a pre-flight simulation package.",
       visibility,
       license,
-      priceCents: Math.round(price * 100),
+      priceCents: 0,
       motorType: "Solid Rocket Motor",
       estimatedClass: result.motorClass,
       totalImpulseNs: result.totalImpulseNs,
@@ -462,8 +462,6 @@ export function MotorBuilder() {
           setVisibility={setVisibility}
           license={license}
           setLicense={setLicense}
-          price={price}
-          setPrice={setPrice}
           onClose={() => setModalOpen(false)}
           onSave={saveMotor}
         />
@@ -799,7 +797,7 @@ function RocketDesignWorkbench({
   );
 }
 
-function RocketComponentTree({ components, selectedId, select }: { components: RocketComponent[]; selectedId: string; select: (id: string) => void }) {
+export function RocketComponentTree({ components, selectedId, select }: { components: RocketComponent[]; selectedId: string; select: (id: string) => void }) {
   const sorted = sortComponents(components);
   return (
     <div className="mt-4 max-h-[420px] overflow-y-auto rounded-lg border border-white/10 bg-[#070a12]/70 p-2">
@@ -817,7 +815,7 @@ function RocketComponentTree({ components, selectedId, select }: { components: R
   );
 }
 
-function RocketViewportToolbar({ designView, setDesignView, result, selectedMotor }: { designView: "Side view" | "3D Figure"; setDesignView: (view: "Side view" | "3D Figure") => void; result: SimulationResult; selectedMotor?: SavedMotor }) {
+export function RocketViewportToolbar({ designView, setDesignView, result, selectedMotor }: { designView: "Side view" | "3D Figure"; setDesignView: (view: "Side view" | "3D Figure") => void; result: SimulationResult; selectedMotor?: SavedMotor }) {
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
       <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr]">
@@ -842,7 +840,7 @@ function RocketViewportToolbar({ designView, setDesignView, result, selectedMoto
   );
 }
 
-function RocketSideProfile({ components, result, selectedId, select }: { components: RocketComponent[]; result: SimulationResult; selectedId: string; select: (id: string) => void }) {
+export function RocketSideProfile({ components, result, selectedId, select }: { components: RocketComponent[]; result: SimulationResult; selectedId: string; select: (id: string) => void }) {
   const sorted = sortComponents(components);
   const nominalLength = Math.max(totalLength(sorted), 1);
   const maxDiameter = Math.max(...sorted.map((component) => component.diameter), 1);
@@ -947,7 +945,7 @@ function CGCPMarker({ x, y, color, label }: { x: number; y: number; color: strin
   );
 }
 
-function ComponentConfigurationPanel({ component, updateComponent }: { component: RocketComponent; updateComponent: (id: string, patch: Partial<RocketComponent>) => void }) {
+export function ComponentConfigurationPanel({ component, updateComponent }: { component: RocketComponent; updateComponent: (id: string, patch: Partial<RocketComponent>) => void }) {
   return (
     <div>
       <h2 className="font-semibold">{componentFriendlyName[component.type]} configuration</h2>
@@ -2057,7 +2055,7 @@ function RocketGraphSet({ result }: { result: SimulationResult }) {
         <TelemetryChart data={result.timeSeries} type="altitude" />
         <TelemetryChart data={result.timeSeries} type="velocity" />
         <TelemetryChart data={result.timeSeries} type="thrust" />
-        <Curve title="Acceleration / drag trend" units="m/s짼 and N trend over s" data={result.timeSeries.map((point) => ({ ...point, drag: Math.round(Math.abs((point.velocity ?? 0) ** 2) * result.dragCoefficientEstimate * 0.01) }))} lines={[["acceleration", "#9fd7bf"], ["drag", "#d7b56d"]]} />
+        <Curve title="Acceleration / drag trend" units="m/s^2 and N trend over s" data={result.timeSeries.map((point) => ({ ...point, drag: Math.round(Math.abs((point.velocity ?? 0) ** 2) * result.dragCoefficientEstimate * 0.01) }))} lines={[["acceleration", "#9fd7bf"], ["drag", "#d7b56d"]]} />
       </div>
     </Card>
   );
@@ -2109,12 +2107,10 @@ function MotorDetail({ motor }: { motor: SavedMotor }) {
 function MotorSaveModal(props: {
   name: string;
   setName: (value: string) => void;
-  visibility: "private" | "public" | "marketplace";
-  setVisibility: (value: "private" | "public" | "marketplace") => void;
+  visibility: "private" | "public" | "unlisted";
+  setVisibility: (value: "private" | "public" | "unlisted") => void;
   license: string;
   setLicense: (value: string) => void;
-  price: number;
-  setPrice: (value: number) => void;
   onClose: () => void;
   onSave: () => void;
 }) {
@@ -2124,9 +2120,9 @@ function MotorSaveModal(props: {
         <h2 className="font-semibold">Save motor to Motor Library</h2>
         <div className="mt-4 grid gap-3">
           <label className="text-sm text-orange-50/65">Motor name<input value={props.name} onChange={(event) => props.setName(event.target.value)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" /></label>
-          <label className="text-sm text-orange-50/65">Visibility<select value={props.visibility} onChange={(event) => props.setVisibility(event.target.value as never)} className="mt-1 w-full rounded-md border border-white/10 bg-[#121421] px-3 py-2 text-orange-50"><option>private</option><option>public</option><option>marketplace</option></select></label>
+          <label className="text-sm text-orange-50/65">Visibility<select value={props.visibility} onChange={(event) => props.setVisibility(event.target.value as never)} className="mt-1 w-full rounded-md border border-white/10 bg-[#121421] px-3 py-2 text-orange-50"><option>private</option><option>public</option><option>unlisted</option></select></label>
           <label className="text-sm text-orange-50/65">License<input value={props.license} onChange={(event) => props.setLicense(event.target.value)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" /></label>
-          <label className="text-sm text-orange-50/65">Marketplace price<input type="number" value={props.price} onChange={(event) => props.setPrice(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" /></label>
+          <p className="rounded-md border border-white/10 bg-white/[0.04] p-3 text-sm text-orange-50/65">Motors are saved as engineering records. Public release and article coverage are handled through the project upload flow.</p>
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="ghost" onClick={props.onClose}>Cancel</Button>
@@ -2142,6 +2138,8 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   const [cfdResult, setCfdResult] = useState<NozzleCfdResult | null>(null);
   const [cfdError, setCfdError] = useState<string | null>(null);
   const [cfdRunning, setCfdRunning] = useState(false);
+  const [cfdFieldName, setCfdFieldName] = useState<NozzleCfdField["name"]>("mach");
+  const [cfdDebugView, setCfdDebugView] = useState<CfdDebugView>("mach");
   const convergenceAngle = Math.max(1, Math.min(89, parameters.convergenceAngleDeg ?? 60));
   const divergenceAngle = Math.max(1, Math.min(89, parameters.divergenceAngleDeg ?? 24));
   const chamberRadius = parameters.casingInnerDiameterMm / 2;
@@ -2188,7 +2186,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   const convergenceArcY = visualCenterY - Math.sin((convergenceAngle * Math.PI) / 180) * convergenceArcRadius;
   const divergenceArcX = throatX + Math.cos((divergenceAngle * Math.PI) / 180) * divergenceArcRadius;
   const divergenceArcY = visualCenterY - Math.sin((divergenceAngle * Math.PI) / 180) * divergenceArcRadius;
-  const cfdDisplayActive = cfdRunning || cfdResult?.status === "converged";
+  const cfdDisplayActive = cfdRunning || Boolean(cfdResult);
   const runCfd = async () => {
     const payload: NozzleCfdInputs = {
       chamberPressurePa: nozzleFlow.chamberPressureMPa * 1_000_000,
@@ -2208,7 +2206,6 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
 
     setCfdRunning(true);
     setCfdError(null);
-    setCfdResult(null);
 
     try {
       const response = await fetch("/api/cfd/nozzle/run", {
@@ -2299,37 +2296,13 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
             <Metric label="Nozzle efficiency" value={`${Math.round(nozzleFlow.nozzleEfficiency * 100)}%`} />
           </div>
           <p className="mt-3 text-xs leading-5 text-orange-50/55">
-            The solver uses quasi-1D compressible nozzle relations: the throat is the sonic minimum area, exit Mach is solved from A/A*, and exit pressure determines whether the plume is underexpanded, near matched, or overexpanded. It is a simulation review model, not a certification-grade RANS/LES solver.
+            CFD verification mode renders raw finite-volume cells and reports validation failures openly. Treat non-converged fields as numerical diagnostics, not certified plume predictions.
           </p>
           <p className={`mt-2 text-xs font-semibold ${expansionTone}`}>{expansionCopy} · Pe/Pa {nozzleFlow.pressureRatio.toFixed(2)} · Cf {nozzleFlow.thrustCoefficient.toFixed(2)}</p>
           <svg viewBox="0 0 760 330" className="mt-5 h-auto w-full rounded-lg border border-white/10 bg-[#070a12]" role="img" aria-label="Nozzle convergence throat divergence and flow analysis diagram">
             <defs>
-              <linearGradient id="nozzleCfdFlowGradient" x1="0" x2="1">
-                <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.2" />
-                <stop offset="45%" stopColor="#f97316" stopOpacity="0.9" />
-                <stop offset="100%" stopColor="#fef3c7" stopOpacity="0.78" />
-              </linearGradient>
-              <radialGradient id="nozzleCfdPlumeGradient" cx="0.08" cy="0.5" r="0.92">
-                <stop offset="0%" stopColor="#f97316" stopOpacity="0.58" />
-                <stop offset="45%" stopColor="#38bdf8" stopOpacity="0.18" />
-                <stop offset="100%" stopColor="#38bdf8" stopOpacity="0" />
-              </radialGradient>
-              <linearGradient id="nozzlePressureField" x1="0" x2="1">
-                <stop offset="0%" stopColor="#ef4444" stopOpacity="0.38" />
-                <stop offset="42%" stopColor="#f97316" stopOpacity="0.28" />
-                <stop offset="58%" stopColor="#fef3c7" stopOpacity="0.2" />
-                <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.18" />
-              </linearGradient>
-              <linearGradient id="nozzleVelocityField" x1="0" x2="1">
-                <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.18" />
-                <stop offset="52%" stopColor="#f97316" stopOpacity="0.62" />
-                <stop offset="100%" stopColor="#fde68a" stopOpacity="0.5" />
-              </linearGradient>
               <clipPath id="nozzleInternalCfdClip">
                 <path d={`M${inletX} ${convergingStartTop} H${chamberEndX} L${throatX} ${throatTop} L${exitX} ${exitTop} L${exitX} ${exitBottom} L${throatX} ${throatBottom} L${chamberEndX} ${convergingStartBottom} H${inletX} Z`} />
-              </clipPath>
-              <clipPath id="nozzleExternalPlumeClip">
-                <path d={`M${exitX} ${exitTop} C${exitX + 44} ${exitTop - 18}, ${exitX + 118} 50, 740 34 L740 266 C${exitX + 120} 250, ${exitX + 44} ${exitBottom + 18}, ${exitX} ${exitBottom} Z`} />
               </clipPath>
             </defs>
             {cfdDisplayActive ? (
@@ -2344,6 +2317,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
                 chamberRadius={visualChamberRadius}
                 throatRadius={visualThroatRadius}
                 exitRadius={visualExitRadius}
+                fieldName={cfdFieldName}
               />
             ) : null}
             {!cfdDisplayActive ? <line x1="48" x2="712" y1={visualCenterY} y2={visualCenterY} stroke="#f8fafc" strokeOpacity="0.32" strokeDasharray="7 8" /> : null}
@@ -2366,7 +2340,9 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
               strokeLinejoin="miter"
             />
             <line x1={inletX} x2={inletX} y1={convergingStartTop} y2={convergingStartBottom} stroke="#f8fafc" strokeOpacity="0.7" strokeWidth="3" />
-            <line x1={exitX} x2={exitX} y1={exitTop} y2={exitBottom} stroke="#f8fafc" strokeOpacity="0.82" strokeWidth="3" />
+            {!cfdDisplayActive ? (
+              <line x1={exitX} x2={exitX} y1={exitTop} y2={exitBottom} stroke="#f8fafc" strokeOpacity="0.82" strokeWidth="3" />
+            ) : null}
             {!cfdDisplayActive ? (
               <>
                 <path d={`M${throatX - convergenceArcRadius} ${visualCenterY} A${convergenceArcRadius} ${convergenceArcRadius} 0 0 0 ${convergenceArcX} ${convergenceArcY}`} fill="none" stroke="#86efac" strokeWidth="2" strokeOpacity="0.85" />
@@ -2387,11 +2363,11 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
                 <text x={throatX + divergenceArcRadius + 4} y={visualCenterY - 18} fill="#fecdd3" fontSize="13">{divergenceAngle} deg</text>
                 <text x={chamberEndX + 28} y="258" fill="#bfdbfe" fontSize="13">convergence</text>
                 <text x={throatX + 54} y="285" fill="#bfdbfe" fontSize="13">divergence</text>
-                <text x="68" y="306" fill="#94a3b8" fontSize="12">Geometry mode. Press Run CFD to replace annotations with solved velocity contours.</text>
+                <text x="68" y="306" fill="#94a3b8" fontSize="12">Geometry mode. Run CFD uses one chamber-nozzle-ambient computational domain.</text>
               </>
             ) : null}
           </svg>
-          <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
             <label className="text-sm text-orange-50/65">Mesh density
               <select value={meshDensity} onChange={(event) => setMeshDensity(event.target.value as NozzleCfdInputs["meshDensity"])} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50">
                 <option value="coarse">Coarse validation mesh</option>
@@ -2400,9 +2376,33 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
                 <option value="research">Research-grade mesh</option>
               </select>
             </label>
+            <label className="text-sm text-orange-50/65">Field
+              <select value={cfdFieldName} onChange={(event) => setCfdFieldName(event.target.value as NozzleCfdField["name"])} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50">
+                <option value="mach">Mach</option>
+                <option value="pressure">Static pressure</option>
+                <option value="temperature">Static temperature</option>
+                <option value="density">Density</option>
+                <option value="velocity">Velocity magnitude</option>
+                <option value="faceFlux">Face flux magnitude</option>
+                <option value="totalPressure">Total pressure</option>
+                <option value="totalTemperature">Total temperature</option>
+              </select>
+            </label>
+            <label className="text-sm text-orange-50/65">Debug view
+              <select value={cfdDebugView} onChange={(event) => setCfdDebugView(event.target.value as CfdDebugView)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50">
+                <option value="mach">Mach contour</option>
+                <option value="pressure">Pressure contour</option>
+                <option value="density">Density contour</option>
+                <option value="temperature">Temperature contour</option>
+                <option value="velocity">Velocity contour</option>
+                <option value="faceFlux">Face flux view</option>
+                <option value="mesh">Mesh view</option>
+                <option value="residual">Residual view</option>
+              </select>
+            </label>
             <Button onClick={runCfd} disabled={cfdRunning}><Wind className="h-4 w-4" />{cfdRunning ? "Running CFD..." : "Run CFD"}</Button>
           </div>
-          <NozzleCfdViewer result={cfdResult} error={cfdError} running={cfdRunning} />
+          <NozzleCfdViewer result={cfdResult} error={cfdError} running={cfdRunning} fieldName={cfdFieldName} debugView={cfdDebugView} />
           <p className="mt-4 rounded-md border border-amber-200/20 bg-amber-200/8 p-3 text-xs leading-5 text-amber-50/82">Rocketry House records nozzle geometry for analysis and data comparison. It does not provide manufacturing certification or hazardous build instructions.</p>
           <div className="sticky bottom-0 -mx-5 mt-5 flex justify-end gap-2 border-t border-white/10 bg-[#111827]/95 px-5 py-4 backdrop-blur">
             <Button variant="ghost" onClick={onClose}>Close</Button>
@@ -2443,7 +2443,8 @@ function NozzleIntegratedCfdOverlay({
   centerY,
   chamberRadius,
   throatRadius,
-  exitRadius
+  exitRadius,
+  fieldName
 }: {
   result: NozzleCfdResult | null;
   running: boolean;
@@ -2455,114 +2456,187 @@ function NozzleIntegratedCfdOverlay({
   chamberRadius: number;
   throatRadius: number;
   exitRadius: number;
+  fieldName: NozzleCfdField["name"];
 }) {
-  const field = result?.status === "converged"
-    ? result.fields.find((item) => item.name === "velocity") ?? result.fields.find((item) => item.name === "mach") ?? null
-    : null;
-  const nozzleLength = Math.max(exitX - inletX, 1);
-  const radiusAt = (x: number) => {
-    if (x <= chamberEndX) return chamberRadius;
-    if (x <= throatX) {
-      const progress = (x - chamberEndX) / Math.max(throatX - chamberEndX, 1);
-      return chamberRadius + (throatRadius - chamberRadius) * progress;
-    }
-    const progress = (x - throatX) / Math.max(exitX - throatX, 1);
-    return throatRadius + (exitRadius - throatRadius) * progress;
-  };
+  const field = result?.fields.find((item) => item.name === fieldName) ?? result?.fields.find((item) => item.name === "mach") ?? null;
+  const viewportEndX = 740;
+  const domainLength = Math.max(viewportEndX - inletX, 1);
+  const displayedNozzleLength = Math.max(exitX - inletX, 1);
 
-  if (running || !field) {
+  if (running || !field || !result) {
     return (
       <g clipPath="url(#nozzleInternalCfdClip)">
-        <rect x={inletX} y={centerY - chamberRadius} width={nozzleLength} height={chamberRadius * 2} fill="#020617" opacity="0.72" />
+        <rect x={inletX} y={centerY - chamberRadius} width={displayedNozzleLength} height={chamberRadius * 2} fill="#020617" opacity="0.72" />
       </g>
     );
   }
 
-  const xStep = nozzleLength / 70;
+  const xKeys = Array.from(new Set(field.cells.map((cell) => cell.x.toFixed(5)))).sort((a, b) => Number(a) - Number(b));
+  const yKeys = Array.from(new Set(field.cells.map((cell) => (cell.physicalY ?? cell.y).toFixed(5)))).sort((a, b) => Number(a) - Number(b));
+  const xStep = domainLength / Math.max(xKeys.length, 1);
+  const yMax = Math.max(...field.cells.map((cell) => cell.physicalY ?? cell.y).filter(Number.isFinite), 1e-6);
+  const yStep = (132 / Math.max(yKeys.length, 1));
+  const yScale = 132 / yMax;
+  const exitProbeX = inletX + (result.continuityCheck?.exitX ?? result.mesh.nozzleExitX ?? 0.24) * domainLength;
+  const physicallyValid = result.validation?.checks?.physicallyValid ?? false;
+  const xIndex = new Map(xKeys.map((key, index) => [key, index]));
+  const yIndex = new Map(yKeys.map((key, index) => [key, index]));
 
   return (
     <g>
-      <g clipPath="url(#nozzleInternalCfdClip)">
+      <g shapeRendering="crispEdges">
         {field.cells.map((cell, index) => {
-          const x = inletX + cell.x * nozzleLength;
-          const radius = radiusAt(x);
-          const radial = Math.max(0, Math.min(1, cell.y / 0.46));
-          const yTop = centerY - radial * radius;
-          const yBottom = centerY + radial * radius;
-          const bandHeight = Math.max(3, radius / 16);
+          const xi = xIndex.get(cell.x.toFixed(5)) ?? 0;
+          const yi = yIndex.get((cell.physicalY ?? cell.y).toFixed(5)) ?? 0;
+          const x = inletX + xi * xStep;
+          const physicalY = cell.physicalY ?? cell.y;
+          const radialDistance = physicalY * yScale;
+          const yTop = centerY - radialDistance - yStep / 2;
+          const yBottom = centerY + radialDistance - yStep / 2;
           const color = contourColor(cell.value, field.min, field.max);
           return (
             <g key={`${field.name}-integrated-${index}`}>
-              <rect x={x - xStep * 0.58} y={yTop - bandHeight / 2} width={xStep * 1.25} height={bandHeight} fill={color} opacity="0.95" />
-              <rect x={x - xStep * 0.58} y={yBottom - bandHeight / 2} width={xStep * 1.25} height={bandHeight} fill={color} opacity="0.95" />
+              <rect x={x} y={yTop} width={Math.max(xStep, 0.8)} height={Math.max(yStep, 0.8)} fill={color} opacity="0.95" />
+              <rect x={x} y={yBottom} width={Math.max(xStep, 0.8)} height={Math.max(yStep, 0.8)} fill={color} opacity="0.95" />
             </g>
           );
         })}
       </g>
-      {result?.shocks.map((shock, index) => {
-        const x = inletX + shock.x * nozzleLength;
-        const radius = radiusAt(x);
-        return (
-          <path
-            key={index}
-            d={`M${x - 11} ${centerY - radius * 0.82} L${x + 12} ${centerY} L${x - 11} ${centerY + radius * 0.82}`}
-            fill="#f97316"
-            opacity={0.28 + shock.strength * 0.28}
-          />
-        );
-      })}
+      <rect x={inletX} y={centerY - 132} width={domainLength} height={264} fill="transparent" stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
+      <line x1={exitProbeX} x2={exitProbeX} y1="36" y2="294" stroke="#f8fafc" strokeWidth="1.6" strokeDasharray="6 6" opacity="0.75" />
+      <text x={exitProbeX + 8} y="50" fill="#e2e8f0" fontSize="12">exit probe</text>
+      {!physicallyValid ? (
+        <g>
+          <rect x={inletX + 10} y="262" width="278" height="26" rx="6" fill="#7f1d1d" opacity="0.86" />
+          <text x={inletX + 22} y="279" fill="#fee2e2" fontSize="12">validation failed: raw cells shown, not a plume prediction</text>
+        </g>
+      ) : null}
     </g>
   );
 }
 
-function CfdContour({ field, shocks }: { field: NozzleCfdField; shocks: NozzleCfdResult["shocks"] }) {
+function CfdContour({ field }: { field: NozzleCfdField }) {
   const width = 520;
-  const height = 160;
-  const cellSize = Math.max(3, Math.min(12, Math.round(240 / Math.sqrt(Math.max(field.cells.length, 1)))));
+  const height = 180;
+  const xKeys = Array.from(new Set(field.cells.map((cell) => cell.x.toFixed(5)))).sort((a, b) => Number(a) - Number(b));
+  const yValues = field.cells.map((cell) => cell.physicalY ?? cell.y).filter(Number.isFinite);
+  const xIndex = new Map(xKeys.map((key, index) => [key, index]));
+  const dx = width / Math.max(xKeys.length, 1);
+  const sortedPhysicalY = Array.from(new Set(yValues.map((value) => value.toFixed(5)))).sort((a, b) => Number(a) - Number(b)).map(Number);
+  const minDy = sortedPhysicalY.slice(1).reduce((min, value, index) => Math.min(min, value - sortedPhysicalY[index]), Number.POSITIVE_INFINITY);
+  const yMax = Math.max(...yValues, 1e-6);
+  const yScale = (height / 2 - 8) / yMax;
+  const cellDy = Math.max((Number.isFinite(minDy) ? minDy : yMax / 40) * yScale, 0.8);
+  const wallOutline = xKeys.map((key) => {
+    const column = field.cells.filter((cell) => cell.x.toFixed(5) === key);
+    const top = column.reduce((max, cell) => Math.max(max, cell.physicalY ?? cell.y), 0);
+    return { x: (xIndex.get(key) ?? 0) * dx + dx / 2, y: height / 2 - top * yScale };
+  });
   return (
     <div className="rounded-lg border border-white/10 bg-[#070a12] p-3">
       <div className="mb-2 flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-orange-50">{field.label}</p>
-          <p className="text-xs text-orange-50/45">{field.min.toFixed(3)} to {field.max.toFixed(3)} {field.unit}</p>
+          <p className="text-xs text-orange-50/45">{field.min.toFixed(3)} to {field.max.toFixed(3)} {field.unit} · raw cell-centered values</p>
         </div>
         <div className="h-3 w-28 rounded-full bg-gradient-to-r from-slate-950 via-cyan-400 via-lime-400 via-amber-400 to-red-600" />
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full rounded-md bg-slate-950" role="img" aria-label={`${field.label} solved CFD contour`}>
-        {field.cells.map((cell, index) => (
-          <rect
-            key={`${field.name}-${index}`}
-            x={cell.x * width}
-            y={(0.5 - cell.y) * height}
-            width={cellSize}
-            height={cellSize}
-            fill={contourColor(cell.value, field.min, field.max)}
-            opacity="0.92"
-          />
-        ))}
-        {shocks.map((shock, index) => (
-          <line key={index} x1={shock.x * width} x2={shock.x * width} y1="16" y2={height - 16} stroke="#fef2f2" strokeWidth="2" strokeDasharray="5 5" opacity={Math.min(0.9, Math.max(0.2, shock.strength))} />
-        ))}
+      <svg shapeRendering="crispEdges" viewBox={`0 0 ${width} ${height}`} className="h-auto w-full rounded-md bg-slate-950" role="img" aria-label={`${field.label} raw cell-centered CFD contour`}>
+        {field.cells.flatMap((cell, index) => {
+          const color = contourColor(cell.value, field.min, field.max);
+          const xi = xIndex.get(cell.x.toFixed(5)) ?? 0;
+          const x = xi * dx;
+          const physicalY = cell.physicalY ?? cell.y;
+          const topY = height / 2 - physicalY * yScale - cellDy / 2;
+          const bottomY = height / 2 + physicalY * yScale - cellDy / 2;
+          return [
+            <rect
+              key={`${field.name}-${index}-top`}
+              x={x}
+              y={topY}
+              width={Math.max(dx, 0.8)}
+              height={cellDy}
+              fill={color}
+            />,
+            <rect
+              key={`${field.name}-${index}-bottom`}
+              x={x}
+              y={bottomY}
+              width={Math.max(dx, 0.8)}
+              height={cellDy}
+              fill={color}
+            />
+          ];
+        })}
+        <polyline points={wallOutline.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="rgba(248,250,252,0.72)" strokeWidth="1.4" vectorEffect="non-scaling-stroke" />
+        <polyline points={wallOutline.map((point) => `${point.x},${height - point.y}`).join(" ")} fill="none" stroke="rgba(248,250,252,0.72)" strokeWidth="1.4" vectorEffect="non-scaling-stroke" />
+        <line x1="0" x2={width} y1={height / 2} y2={height / 2} stroke="rgba(255,255,255,0.22)" strokeDasharray="4 5" />
+      </svg>
+      <p className="mt-2 text-[11px] leading-4 text-orange-50/42">No interpolation, no smoothing, no plume shaping. Each rectangle maps one solved cell value.</p>
+    </div>
+  );
+}
+
+function CfdMeshDebug({ result }: { result: NozzleCfdResult }) {
+  const width = 520;
+  const height = 180;
+  const exitX = (result.mesh.nozzleExitX ?? 0.24) * width;
+  const meshCells = result.fields.find((field) => field.name === "mach")?.cells ?? [];
+  const xKeys = Array.from(new Set(meshCells.map((cell) => cell.x.toFixed(5)))).sort((a, b) => Number(a) - Number(b));
+  const yValues = meshCells.map((cell) => cell.physicalY ?? cell.y).filter(Number.isFinite);
+  const xIndex = new Map(xKeys.map((key, index) => [key, index]));
+  const dx = width / Math.max(xKeys.length, 1);
+  const sortedPhysicalY = Array.from(new Set(yValues.map((value) => value.toFixed(5)))).sort((a, b) => Number(a) - Number(b)).map(Number);
+  const minDy = sortedPhysicalY.slice(1).reduce((min, value, index) => Math.min(min, value - sortedPhysicalY[index]), Number.POSITIVE_INFINITY);
+  const yMax = Math.max(...yValues, 1e-6);
+  const yScale = (height / 2 - 8) / yMax;
+  const cellDy = Math.max((Number.isFinite(minDy) ? minDy : yMax / 40) * yScale, 0.8);
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-[#070a12] p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-orange-50">Continuous mesh domain</p>
+          <p className="text-xs text-orange-50/45">Nozzle exit is an internal probe plane, not an outlet boundary.</p>
+        </div>
+        <p className="rounded-md bg-white/[0.05] px-2 py-1 text-xs text-orange-50/60">{result.mesh.domainLengthRatio?.toFixed(2) ?? "?"}x nozzle length</p>
+      </div>
+      <svg shapeRendering="crispEdges" viewBox={`0 0 ${width} ${height}`} className="h-auto w-full rounded-md bg-slate-950" role="img" aria-label="Raw CFD computational mesh view">
+        {meshCells.flatMap((cell, index) => {
+          const xi = xIndex.get(cell.x.toFixed(5)) ?? 0;
+          const x = xi * dx;
+          const physicalY = cell.physicalY ?? cell.y;
+          const topY = height / 2 - physicalY * yScale - cellDy / 2;
+          const bottomY = height / 2 + physicalY * yScale - cellDy / 2;
+          return [
+            <rect key={`mesh-${index}-top`} x={x} y={topY} width={Math.max(dx, 0.8)} height={cellDy} fill="none" stroke="rgba(148,163,184,0.28)" strokeWidth="0.45" />,
+            <rect key={`mesh-${index}-bottom`} x={x} y={bottomY} width={Math.max(dx, 0.8)} height={cellDy} fill="none" stroke="rgba(148,163,184,0.28)" strokeWidth="0.45" />
+          ];
+        })}
+        <line x1={exitX} x2={exitX} y1="0" y2={height} stroke="#fb923c" strokeWidth="2" strokeDasharray="5 5" />
+        <text x={Math.min(exitX + 8, width - 120)} y="20" fill="#fed7aa" fontSize="12">exit probe</text>
+        <text x="14" y={height - 14} fill="#cbd5e1" fontSize="11">chamber / nozzle</text>
+        <text x={Math.min(exitX + 18, width - 170)} y={height - 14} fill="#cbd5e1" fontSize="11">external ambient domain</text>
       </svg>
     </div>
   );
 }
 
-function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult | null; error: string | null; running: boolean }) {
+function NozzleCfdViewer({ result, error, running, fieldName, debugView }: { result: NozzleCfdResult | null; error: string | null; running: boolean; fieldName: NozzleCfdField["name"]; debugView: CfdDebugView }) {
   if (running) {
     return (
       <div className="mt-4 rounded-lg border border-sky-200/20 bg-sky-200/8 p-4 text-sm text-sky-50/80">
-        Running the 2D axisymmetric finite-volume solver. The nozzle drawing above is held as the CFD viewport; labels stay hidden until computed cell fields return.
+        Running the continuous chamber-nozzle-ambient solver. Raw cell fields, residuals, and validation plots will appear below when the finite-volume run returns.
       </div>
     );
   }
 
-  if (error) {
+  if (error && !result) {
     return (
       <div className="mt-4 rounded-lg border border-amber-200/25 bg-amber-200/10 p-4 text-sm leading-6 text-amber-50/88">
-        <p className="font-semibold">CFD backend not available</p>
+        <p className="font-semibold">CFD error</p>
         <p className="mt-1">{error}</p>
-        <p className="mt-2 text-xs text-amber-50/65">No contour is rendered unless the internal finite-volume solver returns cell fields.</p>
+        <p className="mt-2 text-xs text-amber-50/65">No cell field has been returned yet. Once a run returns any conservative-state data, Rocketry House will show it even if validation fails.</p>
       </div>
     );
   }
@@ -2570,59 +2644,130 @@ function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult |
   if (!result) {
     return (
       <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-orange-50/62">
-        Press Run CFD to convert the nozzle drawing into a computed velocity contour view. The same geometry is used for structured mesh generation, finite-volume marching, residual monitoring, and shock marker detection.
+        Press Run CFD to convert the nozzle drawing into a continuous chamber, nozzle, and ambient-domain contour. The exit plane is debugged as a probe line, not used as a reset boundary.
       </div>
     );
   }
 
-  if (result.status !== "converged") {
-    const last = result.residuals.at(-1);
-    return (
-      <div className="mt-4 rounded-lg border border-amber-200/25 bg-amber-200/10 p-4 text-sm leading-6 text-amber-50/88">
-        <p className="font-semibold">CFD did not reach convergence target</p>
-        <p className="mt-1 text-amber-50/72">
-          The solver returned computed cells, but Rocketry House does not render contours before convergence. Try a coarser geometry change, lower expansion ratio, or coarse mesh for a quick validation run.
-        </p>
-        {last ? (
-          <p className="mt-2 text-xs text-amber-50/62">
-            Last residuals: continuity {last.continuity.toExponential(2)}, x-momentum {last.momentum.toExponential(2)}, y-momentum {(last.yMomentum ?? 0).toExponential(2)}, energy {last.energy.toExponential(2)}.
-          </p>
-        ) : null}
-        {result.validation ? (
-          <p className="mt-2 text-xs text-amber-50/62">
-            Validation check: throat M {result.validation.throatMach.toFixed(2)}, exit Mach error {result.validation.exitMachErrorPct.toFixed(1)}%, exit pressure error {result.validation.exitPressureErrorPct.toFixed(1)}%.
-          </p>
-        ) : null}
-      </div>
-    );
-  }
-
-  const velocityField = result.fields.find((field) => field.name === "velocity") ?? result.fields[0];
+  const debugFieldName = debugView === "mesh" || debugView === "residual" ? fieldName : debugView;
+  const displayField = result.fields.find((field) => field.name === debugFieldName) ?? result.fields.find((field) => field.name === fieldName) ?? result.fields.find((field) => field.name === "mach") ?? result.fields[0];
+  const machField = result.fields.find((field) => field.name === "mach") ?? result.fields[0];
+  const pressureField = result.fields.find((field) => field.name === "pressure") ?? result.fields[0];
+  const densityField = result.fields.find((field) => field.name === "density") ?? result.fields[0];
+  const temperatureField = result.fields.find((field) => field.name === "temperature") ?? result.fields[0];
+  const lastResidual = result.residuals.at(-1);
+  const isProvisional = result.status !== "converged";
+  const continuity = result.continuityCheck;
+  const probeData = continuity?.probe.map((point) => ({
+    x: point.x,
+    mach: point.mach,
+    pressureKPa: Number((point.pressurePa / 1000).toFixed(2)),
+    temperatureK: point.temperatureK,
+    density: point.densityKgM3,
+    axialVelocity: point.axialVelocityMS
+  })) ?? [];
+  const centerlineData = result.centerline.map((point) => ({
+    x: point.x,
+    mach: point.mach,
+    pressureKPa: Number((point.pressurePa / 1000).toFixed(2)),
+    density: point.densityKgM3,
+    temperatureK: point.temperatureK,
+    velocity: point.velocityMS
+  }));
+  const auditEntries = result.solverAudit ? Object.entries(result.solverAudit.numericalSteps) : [];
+  const solverIncomplete = !result.solverAudit || result.solverAudit.skippedSteps.length > 0 || auditEntries.some(([, called]) => !called);
 
   return (
     <div className="mt-4 space-y-4">
+      {error ? (
+        <div className="rounded-lg border border-rose-200/25 bg-rose-200/10 p-4 text-sm leading-6 text-rose-50/88">
+          <p className="font-semibold">CFD error retained with last available raw field</p>
+          <p className="mt-1">{error}</p>
+          <p className="mt-2 text-xs text-rose-50/62">The contours and residuals below are not hidden; they show the last finite-volume result returned by the solver.</p>
+        </div>
+      ) : null}
+      {isProvisional ? (
+        <div className="rounded-lg border border-amber-200/25 bg-amber-200/10 p-4 text-sm leading-6 text-amber-50/88">
+          <p className="font-semibold">CFD field returned before strict convergence</p>
+          <p className="mt-1 text-amber-50/72">
+            Contours below are rendered from the finite-volume conservative state, not from a synthetic plume. Treat this as a provisional engineering view until residuals and validation checks pass.
+          </p>
+          {lastResidual ? (
+            <p className="mt-2 text-xs text-amber-50/62">
+              Last residuals: continuity {lastResidual.continuity.toExponential(2)}, x-momentum {lastResidual.momentum.toExponential(2)}, y-momentum {(lastResidual.yMomentum ?? 0).toExponential(2)}, energy {lastResidual.energy.toExponential(2)}.
+            </p>
+          ) : null}
+          {result.validation ? (
+            <p className="mt-2 text-xs text-amber-50/62">
+              Validation: throat M {result.validation.throatMach.toFixed(2)}, exit Mach reference error {result.validation.exitMachErrorPct.toFixed(1)}%, exit pressure reference error {result.validation.exitPressureErrorPct.toFixed(1)}%.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {result.validation?.warnings?.length ? (
+        <div className="rounded-lg border border-rose-200/25 bg-rose-200/10 p-4 text-sm leading-6 text-rose-50/88">
+          <p className="font-semibold">Physical validation warnings</p>
+          <div className="mt-2 grid gap-1 text-xs text-rose-50/72">
+            {result.validation.warnings.map((warning) => <span key={warning}>- {warning}</span>)}
+          </div>
+        </div>
+      ) : null}
+      {solverIncomplete ? (
+        <div className="rounded-lg border border-rose-200/25 bg-rose-200/10 p-4 text-sm font-semibold text-rose-50">
+          CFD solver incomplete
+        </div>
+      ) : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="Exit Mach" value={`M ${result.metrics.exitMach.toFixed(2)}`} />
         <Metric label="Mass flow" value={`${result.metrics.massFlowKgS.toFixed(3)} kg/s`} />
         <Metric label="Isp" value={`${result.metrics.specificImpulseS.toFixed(1)} s`} />
         <Metric label="Cells" value={result.mesh.cells.toLocaleString()} />
       </div>
+      {result.solverAudit ? (
+        <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+          <p className="text-sm font-semibold text-orange-50">Solver audit</p>
+          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-4">
+            <Metric label="Number of cells" value={result.solverAudit.cells.toLocaleString()} />
+            <Metric label="Iterations" value={result.solverAudit.iterations.toLocaleString()} />
+            <Metric label="Final CFL" value={result.solverAudit.finalCfl.toFixed(3)} />
+            <Metric label="Continuity residual" value={result.solverAudit.finalResiduals ? result.solverAudit.finalResiduals.continuity.toExponential(2) : "n/a"} />
+            <Metric label="X momentum residual" value={result.solverAudit.finalResiduals ? result.solverAudit.finalResiduals.xMomentum.toExponential(2) : "n/a"} />
+            <Metric label="Y momentum residual" value={result.solverAudit.finalResiduals ? result.solverAudit.finalResiduals.yMomentum.toExponential(2) : "n/a"} />
+            <Metric label="Energy residual" value={result.solverAudit.finalResiduals ? result.solverAudit.finalResiduals.energy.toExponential(2) : "n/a"} />
+            <Metric label="Skipped steps" value={result.solverAudit.skippedSteps.length ? result.solverAudit.skippedSteps.join(", ") : "none"} />
+            <Metric label="Solver runtime" value={`${result.solverAudit.runtimeMs.toFixed(0)} ms`} />
+            <Metric label="Maximum CFL" value={result.solverAudit.maximumCfl.toFixed(3)} />
+            <Metric label="Minimum density" value={`${result.solverAudit.minimumDensityKgM3.toExponential(2)} kg/m3`} />
+            <Metric label="Minimum pressure" value={`${result.solverAudit.minimumPressurePa.toExponential(2)} Pa`} />
+            <Metric label="Conservation error" value={result.solverAudit.conservationError.toExponential(2)} />
+            <Metric label="Positivity abort" value={result.solverAudit.positivityAbort ? "YES" : "NO"} />
+            <Metric label="NaN detected" value={result.solverAudit.nanDetected ? "YES" : "NO"} />
+          </div>
+          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+            {auditEntries.map(([step, called]) => (
+              <span key={step} className={`rounded-md border px-2 py-1 ${called ? "border-emerald-200/25 bg-emerald-200/10 text-emerald-50" : "border-rose-200/25 bg-rose-200/10 text-rose-50"}`}>
+                {called ? "PASS" : "ABORT"} {step}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-orange-50">CFD viewport rendered in nozzle geometry</p>
-            <p className="mt-1 text-xs text-orange-50/50">
-              {velocityField?.label ?? "Velocity contour"} range: {velocityField?.min.toFixed(1)} to {velocityField?.max.toFixed(1)} {velocityField?.unit}
+          <p className="text-sm font-semibold text-orange-50">Raw CFD verification data</p>
+          <p className="mt-1 text-xs text-orange-50/50">
+            {displayField?.label ?? "Selected contour"} range: {displayField?.min.toFixed(3)} to {displayField?.max.toFixed(3)} {displayField?.unit}
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-orange-50/55">
-            <span>{velocityField?.min.toFixed(0)}</span>
+            <span>{displayField?.min.toFixed(2)}</span>
             <span className="h-3 w-32 rounded-full bg-gradient-to-r from-slate-950 via-blue-700 via-cyan-400 via-lime-400 via-amber-400 to-red-600" />
-            <span>{velocityField?.max.toFixed(0)} {velocityField?.unit}</span>
+            <span>{displayField?.max.toFixed(2)} {displayField?.unit}</span>
           </div>
         </div>
         <p className="mt-2 text-xs leading-5 text-orange-50/50">
-          Solver: {result.solver}. Expansion state: {result.metrics.expansionState}. Shock markers, if present, are detected from computed Mach/pressure gradients.
+          Solver: {result.solver}. Expansion state: {result.metrics.expansionState}. The outlet is downstream of the nozzle lip; ambient pressure is applied at far-field boundaries.
         </p>
         {result.validation ? (
           <div className="mt-3 grid gap-2 text-xs text-orange-50/58 sm:grid-cols-3">
@@ -2631,7 +2776,124 @@ function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult |
             <span>Exit p error {result.validation.exitPressureErrorPct.toFixed(1)}%</span>
           </div>
         ) : null}
+        {result.validation?.checks ? (
+          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-5">
+            {[
+              ["Throat choked", result.validation.checks.throatChoked],
+              ["Mach increases", result.validation.checks.centerlineMachIncreases],
+              ["Diverging Mach", result.validation.checks.divergingMachIncreases],
+              ["Pressure drops", result.validation.checks.pressureDropsThroughNozzle],
+              ["Density drops", result.validation.checks.densityDropsThroughNozzle],
+              ["Velocity increases", result.validation.checks.velocityIncreasesThroughNozzle],
+              ["Residual converged", result.validation.checks.residualConverged],
+              ["Exit Mach theory", result.validation.checks.exitMachWithin10Pct],
+              ["No checkerboard", result.validation.checks.checkerboardStable],
+              ["Exit continuous", result.validation.checks.exitContinuous],
+              ["Physically valid", result.validation.checks.physicallyValid]
+            ].map(([label, ok]) => (
+              <span key={String(label)} className={`rounded-md border px-2 py-1 ${ok ? "border-emerald-200/25 bg-emerald-200/10 text-emerald-50" : "border-rose-200/25 bg-rose-200/10 text-rose-50"}`}>
+                {ok ? "PASS" : "FAIL"} {label}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
+      {continuity ? (
+        <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-orange-50">Nozzle exit continuity check</p>
+              <p className="mt-1 text-xs leading-5 text-orange-50/52">Max relative jump from the last internal centerline cell to the first external centerline cell. Large values should correspond to a resolved shock marker, not a renderer split.</p>
+            </div>
+            <p className="rounded-md bg-white/[0.05] px-2 py-1 text-xs text-orange-50/58">exit x = {continuity.exitX.toFixed(4)}</p>
+          </div>
+          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-5">
+            <Metric label="Mach jump" value={`${(continuity.maxRelativeJump.mach * 100).toFixed(2)}%`} />
+            <Metric label="Pressure jump" value={`${(continuity.maxRelativeJump.staticPressure * 100).toFixed(2)}%`} />
+            <Metric label="Temperature jump" value={`${(continuity.maxRelativeJump.staticTemperature * 100).toFixed(2)}%`} />
+            <Metric label="Density jump" value={`${(continuity.maxRelativeJump.density * 100).toFixed(2)}%`} />
+            <Metric label="Velocity jump" value={`${(continuity.maxRelativeJump.axialVelocity * 100).toFixed(2)}%`} />
+          </div>
+        </div>
+      ) : null}
+      <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+        <p className="mb-2 text-sm font-semibold text-orange-50">Debug visualization</p>
+        {debugView === "mesh" ? (
+          <CfdMeshDebug result={result} />
+        ) : debugView === "residual" ? (
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={result.residuals}>
+                <CartesianGrid stroke="rgba(255,255,255,0.08)" />
+                <XAxis dataKey="iteration" stroke="rgba(255,247,237,0.48)" />
+                <YAxis scale="log" domain={["auto", "auto"]} stroke="rgba(255,247,237,0.48)" />
+                <Tooltip contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.12)", color: "#fff7ed" }} />
+                <Line type="linear" dataKey="continuity" stroke="#38bdf8" dot={false} />
+                <Line type="linear" dataKey="momentum" stroke="#f97316" dot={false} />
+                <Line type="linear" dataKey="yMomentum" stroke="#22c55e" dot={false} />
+                <Line type="linear" dataKey="energy" stroke="#a78bfa" dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <CfdContour field={displayField} />
+        )}
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <CfdContour field={machField} />
+        <CfdContour field={pressureField} />
+        <CfdContour field={densityField} />
+        <CfdContour field={temperatureField} />
+      </div>
+      <CfdMeshDebug result={result} />
+      <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+        <p className="mb-2 text-sm font-semibold text-orange-50">Physical validation mode: centerline properties vs X</p>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {[
+            ["Centerline Mach vs X", "mach", "#38bdf8", "M"],
+            ["Centerline Pressure vs X", "pressureKPa", "#f97316", "kPa"],
+            ["Centerline Density vs X", "density", "#22c55e", "kg/m3"],
+            ["Centerline Temperature vs X", "temperatureK", "#a78bfa", "K"]
+          ].map(([title, key, stroke, unit]) => (
+            <div key={title} className="rounded-lg border border-white/10 bg-[#070a12] p-3">
+              <p className="mb-2 text-xs font-semibold text-orange-50/80">{title} <span className="text-orange-50/38">({unit})</span></p>
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={centerlineData}>
+                    <CartesianGrid stroke="rgba(255,255,255,0.08)" />
+                    <XAxis dataKey="x" stroke="rgba(255,247,237,0.48)" />
+                    <YAxis stroke="rgba(255,247,237,0.48)" />
+                    <Tooltip contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.12)", color: "#fff7ed" }} />
+                    <Line type="linear" dataKey={key} stroke={stroke} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-orange-50/48">These four plots are sampled directly from solved centerline cells. They are the primary physics check; the contour should not be trusted when these trends fail.</p>
+      </div>
+      {probeData.length ? (
+        <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+          <p className="mb-2 text-sm font-semibold text-orange-50">Exit probe centerline trace</p>
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={probeData}>
+                <CartesianGrid stroke="rgba(255,255,255,0.08)" />
+                <XAxis dataKey="x" stroke="rgba(255,247,237,0.48)" />
+                <YAxis yAxisId="left" stroke="rgba(255,247,237,0.48)" />
+                <YAxis yAxisId="right" orientation="right" stroke="rgba(255,247,237,0.48)" />
+                <Tooltip contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.12)", color: "#fff7ed" }} />
+                <Line yAxisId="left" type="linear" dataKey="mach" stroke="#38bdf8" dot={false} />
+                <Line yAxisId="left" type="linear" dataKey="density" stroke="#22c55e" dot={false} />
+                <Line yAxisId="right" type="linear" dataKey="pressureKPa" stroke="#f97316" dot={false} />
+                <Line yAxisId="right" type="linear" dataKey="axialVelocity" stroke="#a78bfa" dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="mt-2 text-xs text-orange-50/48">Blue: Mach, green: density, orange: pressure kPa, purple: axial velocity m/s. The orange exit probe line in the CFD viewport should sit inside this continuous trace.</p>
+        </div>
+      ) : null}
       <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
         <p className="mb-2 text-sm font-semibold text-orange-50">Residual convergence</p>
         <div className="h-52">
@@ -2641,10 +2903,10 @@ function NozzleCfdViewer({ result, error, running }: { result: NozzleCfdResult |
               <XAxis dataKey="iteration" stroke="rgba(255,247,237,0.48)" />
               <YAxis scale="log" domain={["auto", "auto"]} stroke="rgba(255,247,237,0.48)" />
               <Tooltip contentStyle={{ background: "#111827", border: "1px solid rgba(255,255,255,0.12)", color: "#fff7ed" }} />
-              <Line type="monotone" dataKey="continuity" stroke="#38bdf8" dot={false} />
-              <Line type="monotone" dataKey="momentum" stroke="#f97316" dot={false} />
-              <Line type="monotone" dataKey="yMomentum" stroke="#22c55e" dot={false} />
-              <Line type="monotone" dataKey="energy" stroke="#a78bfa" dot={false} />
+              <Line type="linear" dataKey="continuity" stroke="#38bdf8" dot={false} />
+              <Line type="linear" dataKey="momentum" stroke="#f97316" dot={false} />
+              <Line type="linear" dataKey="yMomentum" stroke="#22c55e" dot={false} />
+              <Line type="linear" dataKey="energy" stroke="#a78bfa" dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>

@@ -101,7 +101,7 @@ export function ProfileAccount() {
           <Card className="p-8">
             <UserRoundCheck className="h-9 w-9 text-orange-300" />
             <h1 className="mt-4 text-4xl font-semibold">Sign in to open your workshop.</h1>
-            <p className="mt-3 max-w-2xl text-orange-50/68">Your saved motors, rocket CAD drafts, purchases, forks, and marketplace listings live under your Rocketry House account.</p>
+            <p className="mt-3 max-w-2xl text-orange-50/68">Your saved motors, rocket CAD drafts, forks, upload archives, and profile activity live under your Rocketry House account.</p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Button href="/auth/sign-in" asChild>Sign in</Button>
               <Button href="/auth/sign-up" asChild variant="outline">Create account</Button>
