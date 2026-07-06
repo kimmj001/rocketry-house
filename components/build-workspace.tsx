@@ -2134,7 +2134,7 @@ function MotorSaveModal(props: {
 }
 
 function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorParameters; update: <K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) => void; onClose: () => void }) {
-  const [meshDensity, setMeshDensity] = useState<NozzleCfdInputs["meshDensity"]>("standard");
+  const [meshDensity, setMeshDensity] = useState<NozzleCfdInputs["meshDensity"]>("coarse");
   const [cfdResult, setCfdResult] = useState<NozzleCfdResult | null>(null);
   const [cfdError, setCfdError] = useState<string | null>(null);
   const [cfdRunning, setCfdRunning] = useState(false);

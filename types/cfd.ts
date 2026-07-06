@@ -79,6 +79,7 @@ export type NozzleCfdResult = {
       physicalFluxX: boolean;
       physicalFluxY: boolean;
       computeFaceFluxes: boolean;
+      hllcFlux: boolean;
       rusanovFlux: boolean;
       computeCflDt: boolean;
       applyBoundaryConditions: boolean;

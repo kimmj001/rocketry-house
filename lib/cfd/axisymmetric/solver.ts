@@ -1,5 +1,12 @@
 import { nozzleWallSlope, type NozzleGeometry } from "@/lib/cfd/axisymmetric/geometry";
-import { cellIndex, isInside, type CfdMesh } from "@/lib/cfd/axisymmetric/mesh";
+import {
+  axialCellWidth,
+  axisymmetricCellVolume,
+  cellIndex,
+  isInside,
+  radialCellBounds,
+  type CfdMesh
+} from "@/lib/cfd/axisymmetric/mesh";
 import type { NozzleCfdInputs, NozzleCfdResidualPoint } from "@/types/cfd";
 
 const R_UNIVERSAL = 8314.462618;
@@ -47,6 +54,7 @@ export type SolverResult = {
     physicalFluxX: boolean;
     physicalFluxY: boolean;
     computeFaceFluxes: boolean;
+    hllcFlux: boolean;
     rusanovFlux: boolean;
     computeCflDt: boolean;
     applyBoundaryConditions: boolean;
@@ -151,6 +159,90 @@ export function rusanovFlux(leftState: Conserved, rightState: Conserved, normal:
   ];
 }
 
+export function hllcFlux(leftState: Conserved, rightState: Conserved, normal: Normal, gamma: number, rGas: number): Flux {
+  const left = computePrimitiveFromConserved(leftState, gamma, rGas);
+  const right = computePrimitiveFromConserved(rightState, gamma, rGas);
+  const leftFlux = fluxDotNormal(leftState, normal, gamma, rGas);
+  const rightFlux = fluxDotNormal(rightState, normal, gamma, rGas);
+  const vnLeft = left.u * normal.x + left.v * normal.y;
+  const vnRight = right.u * normal.x + right.v * normal.y;
+  const vtLeft = -left.u * normal.y + left.v * normal.x;
+  const vtRight = -right.u * normal.y + right.v * normal.x;
+  const sLeft = Math.min(vnLeft - left.a, vnRight - right.a);
+  const sRight = Math.max(vnLeft + left.a, vnRight + right.a);
+  if (sLeft >= 0) return leftFlux;
+  if (sRight <= 0) return rightFlux;
+
+  const denominator = left.rho * (sLeft - vnLeft) - right.rho * (sRight - vnRight);
+  if (Math.abs(denominator) < 1e-10) return rusanovFlux(leftState, rightState, normal, gamma, rGas);
+  const sMiddle = (
+    right.p - left.p +
+    left.rho * vnLeft * (sLeft - vnLeft) -
+    right.rho * vnRight * (sRight - vnRight)
+  ) / denominator;
+
+  const starState = (state: Conserved, primitive: Primitive, vn: number, vt: number, wave: number): Conserved => {
+    const waveGap = wave - sMiddle;
+    const upstreamGap = wave - vn;
+    if (Math.abs(waveGap) < 1e-10 || Math.abs(upstreamGap) < 1e-10) return state;
+    const rhoStar = primitive.rho * upstreamGap / waveGap;
+    const normalMomentum = rhoStar * sMiddle;
+    const tangentMomentum = rhoStar * vt;
+    const energyStar = rhoStar * (
+      state[3] / primitive.rho +
+      (sMiddle - vn) * (sMiddle + primitive.p / (primitive.rho * upstreamGap))
+    );
+    return [
+      rhoStar,
+      normalMomentum * normal.x - tangentMomentum * normal.y,
+      normalMomentum * normal.y + tangentMomentum * normal.x,
+      energyStar
+    ];
+  };
+
+  if (sMiddle >= 0) {
+    const star = starState(leftState, left, vnLeft, vtLeft, sLeft);
+    if (!admissible(star, gamma)) return rusanovFlux(leftState, rightState, normal, gamma, rGas);
+    return leftFlux.map((value, component) => value + sLeft * (star[component] - leftState[component])) as Flux;
+  }
+  const star = starState(rightState, right, vnRight, vtRight, sRight);
+  if (!admissible(star, gamma)) return rusanovFlux(leftState, rightState, normal, gamma, rGas);
+  return rightFlux.map((value, component) => value + sRight * (star[component] - rightState[component])) as Flux;
+}
+
+function minmod(a: number, b: number) {
+  if (a * b <= 0) return 0;
+  return Math.sign(a) * Math.min(Math.abs(a), Math.abs(b));
+}
+
+function admissible(conserved: Conserved, gamma: number) {
+  if (!Number.isFinite(conserved[0]) || conserved[0] <= RHO_MIN) return false;
+  const kinetic = 0.5 * (conserved[1] * conserved[1] + conserved[2] * conserved[2]) / conserved[0];
+  return Number.isFinite(conserved[3]) && (gamma - 1) * (conserved[3] - kinetic) > PRESSURE_MIN;
+}
+
+// Piecewise-linear MUSCL reconstruction with a TVD minmod limiter. The
+// reconstruction changes face states only; the finite-volume update remains
+// strictly conservative because each shared face still has one numerical flux.
+function musclFaceStates(
+  outerLeft: Conserved,
+  left: Conserved,
+  right: Conserved,
+  outerRight: Conserved,
+  gamma: number
+): [Conserved, Conserved] {
+  const reconstructedLeft = left.map((value, component) =>
+    value + 0.5 * minmod(value - outerLeft[component], right[component] - value)
+  ) as Conserved;
+  const reconstructedRight = right.map((value, component) =>
+    value - 0.5 * minmod(value - left[component], outerRight[component] - value)
+  ) as Conserved;
+  return [
+    admissible(reconstructedLeft, gamma) ? reconstructedLeft : left,
+    admissible(reconstructedRight, gamma) ? reconstructedRight : right
+  ];
+}
+
 function reservoirPrimitive(inputs: NozzleCfdInputs, gamma: number, rGas: number): Primitive {
   const mach = 0.26;
   const totalFactor = 1 + ((gamma - 1) / 2) * mach * mach;
@@ -229,12 +321,9 @@ function initializeConservativeState(inputs: NozzleCfdInputs, geometry: NozzleGe
         primitive = ambient;
       }
 
-      const wall = Math.max(mesh.wallRadius[i], mesh.dy);
-      const radial = clamp(mesh.y[j] / wall, 0, 1);
-      const wallDamping = x <= exitX ? 1 - 0.025 * radial * radial : 1;
       writeConservative(state, index, conservativeFromPrimitive({
         ...primitive,
-        u: primitive.u * wallDamping,
+        u: primitive.u,
         v: reservoir.v
       }, gamma));
     }
@@ -260,15 +349,36 @@ function reflectedStateAcrossNormal(conserved: Conserved, normal: Normal, gamma:
 
 function pressureOutletState(current: Conserved, inputs: NozzleCfdInputs, gamma: number, rGas: number): Conserved {
   const primitive = computePrimitiveFromConserved(current, gamma, rGas);
-  if (primitive.u > 0) return current;
+  if (primitive.u >= primitive.a) return current;
   const p = Math.max(inputs.ambientPressurePa, PRESSURE_MIN);
+  // Subsonic outlet: extrapolate velocity and entropy while prescribing one
+  // incoming characteristic through the ambient static pressure.
+  const entropyRatio = primitive.p / Math.pow(Math.max(primitive.rho, RHO_MIN), gamma);
+  const rho = Math.pow(p / Math.max(entropyRatio, 1e-12), 1 / gamma);
   const adjusted = {
     ...primitive,
     p,
-    rho: p / (rGas * primitive.t)
+    rho,
+    t: p / (rho * rGas)
   };
   adjusted.e = adjusted.p / ((gamma - 1) * adjusted.rho) + 0.5 * (adjusted.u * adjusted.u + adjusted.v * adjusted.v);
   return conservativeFromPrimitive(adjusted, gamma);
+}
+
+function pressureFarfieldState(current: Conserved, normal: Normal, inputs: NozzleCfdInputs, gamma: number, rGas: number): Conserved {
+  const primitive = computePrimitiveFromConserved(current, gamma, rGas);
+  const normalVelocity = primitive.u * normal.x + primitive.v * normal.y;
+  if (normalVelocity >= primitive.a) return current;
+  if (normalVelocity <= 0) return farfieldState(inputs, gamma, rGas);
+  const p = Math.max(inputs.ambientPressurePa, PRESSURE_MIN);
+  const entropyRatio = primitive.p / Math.pow(Math.max(primitive.rho, RHO_MIN), gamma);
+  const rho = Math.pow(p / Math.max(entropyRatio, 1e-12), 1 / gamma);
+  return conservativeFromPrimitive({
+    ...primitive,
+    p,
+    rho,
+    t: p / (rho * rGas)
+  }, gamma);
 }
 
 function farfieldState(inputs: NozzleCfdInputs, gamma: number, rGas: number): Conserved {
@@ -307,20 +417,18 @@ function neighborConserved(
     return reflectedStateAcrossNormal(current, { x: -slope, y: 1 }, gamma, rGas);
   }
 
-  return farfieldState(inputs, gamma, rGas);
+  return pressureFarfieldState(current, { x: 0, y: 1 }, inputs, gamma, rGas);
 }
 
 export function applyBoundaryConditions(state: ConservativeState, mesh: CfdMesh, inputs: NozzleCfdInputs, geometry: NozzleGeometry, gamma: number, rGas: number) {
   const inlet = inletState(inputs, gamma, rGas);
-  const ambient = farfieldState(inputs, gamma, rGas);
   for (let j = 0; j < mesh.ny; j += 1) {
     const leftIndex = cellIndex(0, j, mesh);
     if (mesh.inside[leftIndex]) writeConservative(state, leftIndex, inlet);
     const rightIndex = cellIndex(mesh.nx - 1, j, mesh);
     if (mesh.inside[rightIndex]) {
       const current = conservativeAt(state, rightIndex);
-      const primitive = computePrimitiveFromConserved(current, gamma, rGas);
-      writeConservative(state, rightIndex, primitive.u > primitive.a ? current : ambient);
+      writeConservative(state, rightIndex, pressureOutletState(current, inputs, gamma, rGas));
     }
   }
 }
@@ -350,9 +458,10 @@ export function computeResidualsFromFluxImbalance(
   rGas: number
 ): ConservativeState {
   const residual = emptyResidual(state.rho.length);
-  const faceY = mesh.dy;
-  const faceX = mesh.dx;
-
+  const ringArea = (inner: number, outer: number, radius: number) => {
+    const clippedOuter = Math.min(outer, radius);
+    return clippedOuter > inner ? 0.5 * (clippedOuter * clippedOuter - inner * inner) : 0;
+  };
   for (let j = 0; j < mesh.ny; j += 1) {
     for (let i = 0; i < mesh.nx; i += 1) {
       const index = cellIndex(i, j, mesh);
@@ -363,16 +472,45 @@ export function computeResidualsFromFluxImbalance(
       const left = neighborConserved(state, mesh, geometry, inputs, i, j, -1, 0, gamma, rGas);
       const top = neighborConserved(state, mesh, geometry, inputs, i, j, 0, 1, gamma, rGas);
       const bottom = neighborConserved(state, mesh, geometry, inputs, i, j, 0, -1, gamma, rGas);
+      const right2 = neighborConserved(state, mesh, geometry, inputs, i, j, 2, 0, gamma, rGas);
+      const left2 = neighborConserved(state, mesh, geometry, inputs, i, j, -2, 0, gamma, rGas);
+      const top2 = neighborConserved(state, mesh, geometry, inputs, i, j, 0, 2, gamma, rGas);
+      const bottom2 = neighborConserved(state, mesh, geometry, inputs, i, j, 0, -2, gamma, rGas);
 
-      const fRight = rusanovFlux(center, right, { x: 1, y: 0 }, gamma, rGas);
-      const fLeft = rusanovFlux(left, center, { x: 1, y: 0 }, gamma, rGas);
-      const gTop = rusanovFlux(center, top, { x: 0, y: 1 }, gamma, rGas);
-      const gBottom = rusanovFlux(bottom, center, { x: 0, y: 1 }, gamma, rGas);
+      const [fRightLeft, fRightRight] = musclFaceStates(left, center, right, right2, gamma);
+      const [fLeftLeft, fLeftRight] = musclFaceStates(left2, left, center, right, gamma);
+      const [gTopBottom, gTopTop] = musclFaceStates(bottom, center, top, top2, gamma);
+      const [gBottomBottom, gBottomTop] = musclFaceStates(bottom2, bottom, center, top, gamma);
+      const fRight = hllcFlux(fRightLeft, fRightRight, { x: 1, y: 0 }, gamma, rGas);
+      const fLeft = hllcFlux(fLeftLeft, fLeftRight, { x: 1, y: 0 }, gamma, rGas);
+      const gTop = hllcFlux(gTopBottom, gTopTop, { x: 0, y: 1 }, gamma, rGas);
+      const gBottom = hllcFlux(gBottomBottom, gBottomTop, { x: 0, y: 1 }, gamma, rGas);
+      const { inner, outer } = radialCellBounds(j, mesh);
+      const dx = axialCellWidth(i, mesh);
+      const leftWall = i > 0 ? Math.min(mesh.wallRadius[i - 1], mesh.wallRadius[i]) : mesh.wallRadius[i];
+      const rightWall = i < mesh.nx - 1 ? Math.min(mesh.wallRadius[i], mesh.wallRadius[i + 1]) : mesh.wallRadius[i];
+      const leftAxialArea = ringArea(inner, outer, leftWall);
+      const rightAxialArea = ringArea(inner, outer, rightWall);
+      const topIsFluid = isInside(i, j + 1, mesh);
+      const topArea = topIsFluid ? outer * dx : 0;
+      const bottomArea = inner * dx;
+      const fluidOuter = Math.min(outer, mesh.wallRadius[i]);
+      const sourceArea = Math.max(fluidOuter - inner, 0) * dx;
+      const primitive = computePrimitiveFromConserved(center, gamma, rGas);
+      let wallXMomentum = 0;
+      let wallYMomentum = 0;
+      if (!topIsFluid && mesh.x[i] <= geometry.nozzleLengthM + mesh.dx * 0.2) {
+        const slope = nozzleWallSlope(mesh.x[i], geometry);
+        const normalScale = Math.sqrt(1 + slope * slope);
+        const wallArea = mesh.wallRadius[i] * dx * normalScale;
+        wallXMomentum = primitive.p * (-slope / normalScale) * wallArea;
+        wallYMomentum = primitive.p * (1 / normalScale) * wallArea;
+      }
 
-      residual.rho[index] = faceY * (fRight[0] - fLeft[0]) + faceX * (gTop[0] - gBottom[0]);
-      residual.rhoU[index] = faceY * (fRight[1] - fLeft[1]) + faceX * (gTop[1] - gBottom[1]);
-      residual.rhoV[index] = faceY * (fRight[2] - fLeft[2]) + faceX * (gTop[2] - gBottom[2]);
-      residual.rhoE[index] = faceY * (fRight[3] - fLeft[3]) + faceX * (gTop[3] - gBottom[3]);
+      residual.rho[index] = rightAxialArea * fRight[0] - leftAxialArea * fLeft[0] + topArea * gTop[0] - bottomArea * gBottom[0];
+      residual.rhoU[index] = rightAxialArea * fRight[1] - leftAxialArea * fLeft[1] + topArea * gTop[1] - bottomArea * gBottom[1] + wallXMomentum;
+      residual.rhoV[index] = rightAxialArea * fRight[2] - leftAxialArea * fLeft[2] + topArea * gTop[2] - bottomArea * gBottom[2] + wallYMomentum - primitive.p * sourceArea;
+      residual.rhoE[index] = rightAxialArea * fRight[3] - leftAxialArea * fLeft[3] + topArea * gTop[3] - bottomArea * gBottom[3];
     }
   }
 
@@ -385,9 +523,11 @@ function residualPoint(iteration: number, residual: ConservativeState, state: Co
   let yMomentum = 0;
   let energy = 0;
   let active = 0;
-  const volumeScale = dt / Math.max(mesh.dx * mesh.dy, 1e-18);
   for (let index = 0; index < residual.rho.length; index += 1) {
     if (!mesh.inside[index]) continue;
+    const i = index % mesh.nx;
+    const j = Math.floor(index / mesh.nx);
+    const volumeScale = dt / Math.max(axisymmetricCellVolume(i, j, mesh), 1e-18);
     continuity += volumeScale * Math.abs(residual.rho[index]) / Math.max(Math.abs(state.rho[index]), RHO_MIN);
     momentum += volumeScale * Math.abs(residual.rhoU[index]) / Math.max(Math.abs(state.rhoU[index]), 1);
     yMomentum += volumeScale * Math.abs(residual.rhoV[index]) / Math.max(Math.abs(state.rhoV[index]), 1);
@@ -429,11 +569,13 @@ export function updateConservativeStateByFluxDivergence(
   gamma: number,
   rGas: number
 ) {
-  const volume = mesh.dx * mesh.dy;
   const next = makeState(state.rho.length);
 
   for (let index = 0; index < state.rho.length; index += 1) {
     if (!mesh.inside[index]) continue;
+    const i = index % mesh.nx;
+    const j = Math.floor(index / mesh.nx);
+    const volume = axisymmetricCellVolume(i, j, mesh);
     next.rho[index] = state.rho[index] - (dt / volume) * residual.rho[index];
     next.rhoU[index] = state.rhoU[index] - (dt / volume) * residual.rhoU[index];
     next.rhoV[index] = state.rhoV[index] - (dt / volume) * residual.rhoV[index];
@@ -446,12 +588,7 @@ export function updateConservativeStateByFluxDivergence(
 
 function hasConverged(point: NozzleCfdResidualPoint, first: NozzleCfdResidualPoint | undefined) {
   if (!first) return false;
-  const absolute = point.continuity < 1e-5 && point.momentum < 1e-5 && (point.yMomentum ?? 0) < 1e-5 && point.energy < 1e-5;
-  const relative = point.continuity < first.continuity * 0.08 &&
-    point.momentum < first.momentum * 0.08 &&
-    (point.yMomentum ?? 0) < (first.yMomentum ?? 1) * 0.08 &&
-    point.energy < first.energy * 0.08;
-  return absolute || relative;
+  return point.continuity < 1e-5 && point.momentum < 1e-5 && (point.yMomentum ?? 0) < 1e-5 && point.energy < 1e-5;
 }
 
 function numericalHealth(state: ConservativeState, mesh: CfdMesh, gamma: number, rGas: number) {
@@ -490,8 +627,12 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   const rGas = gasConstant(inputs);
   let state = initializeConservativeState(inputs, geometry, mesh, gamma, rGas);
   const residuals: NozzleCfdResidualPoint[] = [];
-  const iterationBudget = inputs.meshDensity === "research" ? 1800 : inputs.meshDensity === "fine" ? 1300 : inputs.meshDensity === "coarse" ? 900 : 1100;
-  const cfl = inputs.meshDensity === "research" ? 0.18 : inputs.meshDensity === "fine" ? 0.2 : inputs.meshDensity === "coarse" ? 0.24 : 0.22;
+  // A chamber-to-ambient initialization launches a real start-up wave. The
+  // previous budget stopped while that wave was still inside the far field,
+  // which produced the misleading balloon-shaped contour. These budgets allow
+  // several acoustic transits of the complete nozzle/plume domain.
+  const iterationBudget = inputs.meshDensity === "research" ? 3600 : inputs.meshDensity === "fine" ? 2600 : inputs.meshDensity === "coarse" ? 1600 : 1900;
+  const cfl = inputs.meshDensity === "research" ? 0.24 : inputs.meshDensity === "fine" ? 0.28 : inputs.meshDensity === "coarse" ? 0.36 : 0.32;
   let converged = false;
   let lastDt = 0;
   let maximumCfl = 0;
@@ -503,6 +644,7 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
     physicalFluxX: false,
     physicalFluxY: false,
     computeFaceFluxes: false,
+    hllcFlux: false,
     rusanovFlux: false,
     computeCflDt: false,
     applyBoundaryConditions: false,
@@ -528,6 +670,7 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
     audit.computeFaceFluxes = true;
     audit.physicalFluxX = true;
     audit.physicalFluxY = true;
+    audit.hllcFlux = true;
     audit.rusanovFlux = true;
     audit.computeResiduals = true;
     conservationError = conservationErrorFromResidual(fluxImbalance, state, mesh);

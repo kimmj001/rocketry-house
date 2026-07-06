@@ -19,11 +19,33 @@ export type CfdMesh = {
   refinementRatio: number;
 };
 
+export function axialCellWidth(i: number, mesh: CfdMesh) {
+  const left = i === 0 ? 0 : 0.5 * (mesh.x[i - 1] + mesh.x[i]);
+  const right = i === mesh.nx - 1 ? mesh.x.at(-1)! + mesh.dx * 0.5 : 0.5 * (mesh.x[i] + mesh.x[i + 1]);
+  return Math.max(right - left, mesh.dx * 0.1);
+}
+
+export function radialCellBounds(j: number, mesh: CfdMesh) {
+  return {
+    inner: Math.max(0, mesh.y[j] - mesh.dy * 0.5),
+    outer: mesh.y[j] + mesh.dy * 0.5
+  };
+}
+
+// Axisymmetric finite-volume measures with the common 2*pi factor omitted.
+// The factor cancels from the conservative update while preserving the r weighting.
+export function axisymmetricCellVolume(i: number, j: number, mesh: CfdMesh) {
+  const { inner, outer } = radialCellBounds(j, mesh);
+  const fluidOuter = Math.min(outer, mesh.wallRadius[i]);
+  if (fluidOuter <= inner) return 0;
+  return axialCellWidth(i, mesh) * 0.5 * (fluidOuter * fluidOuter - inner * inner);
+}
+
 export function meshDimensions(density: MeshDensity) {
-  if (density === "research") return { nx: 380, ny: 152, refinementRatio: 10 };
-  if (density === "fine") return { nx: 276, ny: 108, refinementRatio: 7 };
+  if (density === "research") return { nx: 300, ny: 120, refinementRatio: 10 };
+  if (density === "fine") return { nx: 200, ny: 80, refinementRatio: 7 };
   if (density === "coarse") return { nx: 100, ny: 40, refinementRatio: 3 };
-  return { nx: 180, ny: 72, refinementRatio: 5 };
+  return { nx: 128, ny: 52, refinementRatio: 5 };
 }
 
 export function generateStructuredMesh(geometry: NozzleGeometry, density: MeshDensity): CfdMesh {
@@ -31,8 +53,8 @@ export function generateStructuredMesh(geometry: NozzleGeometry, density: MeshDe
   const nx = dimensions.nx;
   const ny = dimensions.ny;
   const uniformDx = geometry.totalLengthM / Math.max(nx - 1, 1);
-  const dy = geometry.maxRadiusM / Math.max(ny - 1, 1);
-  const x = Array.from({ length: nx }, (_, i) => i * uniformDx);
+  const dy = geometry.maxRadiusM / Math.max(ny, 1);
+  const x = Array.from({ length: nx }, (_, i) => (i + 0.5) * uniformDx);
   const throatIndex = x.reduce((best, value, index) =>
     Math.abs(value - geometry.convergenceLengthM) < Math.abs(x[best] - geometry.convergenceLengthM) ? index : best,
   0);
@@ -45,7 +67,7 @@ export function generateStructuredMesh(geometry: NozzleGeometry, density: MeshDe
     if (x[i] <= x[i - 1]) x[i] = x[i - 1] + uniformDx * 0.2;
   }
   const dx = x.slice(1).reduce((min, value, index) => Math.min(min, value - x[index]), uniformDx);
-  const y = Array.from({ length: ny }, (_, j) => j * dy);
+  const y = Array.from({ length: ny }, (_, j) => (j + 0.5) * dy);
   const wallRadius = x.map((xM) => nozzleWallRadius(xM, geometry));
   const fluid = Array.from({ length: nx * ny }, (_, index) => {
     const i = index % nx;
