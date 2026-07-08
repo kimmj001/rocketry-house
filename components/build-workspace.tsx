@@ -2156,7 +2156,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   const expansionRatio = exitAreaMm2 / Math.max(throatAreaMm2, 1);
   const modalSimulation = useMemo(() => simulateMotor(parameters), [parameters]);
   const nozzleFlow = useMemo(
-    () => analyzeNozzleFlow(parameters, modalSimulation.averagePressureMPa || modalSimulation.maxPressureMPa || 2.5),
+    () => analyzeNozzleFlow(parameters, modalSimulation.maxPressureMPa || modalSimulation.averagePressureMPa || 2.5),
     [parameters, modalSimulation.averagePressureMPa, modalSimulation.maxPressureMPa]
   );
   const expansionTone =
@@ -2317,7 +2317,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
           <p className="mt-3 text-xs leading-5 text-orange-50/55">
             CFD verification mode renders raw finite-volume cells and reports validation failures openly. Treat non-converged fields as numerical diagnostics, not certified plume predictions.
           </p>
-          <p className={`mt-2 text-xs font-semibold ${expansionTone}`}>{expansionCopy} · Pe/Pa {nozzleFlow.pressureRatio.toFixed(2)} · Cf {nozzleFlow.thrustCoefficient.toFixed(2)}</p>
+          <p className={`mt-2 text-xs font-semibold ${expansionTone}`}>{expansionCopy} · peak chamber boundary {nozzleFlow.chamberPressureMPa.toFixed(2)} MPa · Pe/Pa {nozzleFlow.pressureRatio.toFixed(2)} · Cf {nozzleFlow.thrustCoefficient.toFixed(2)}</p>
           <svg viewBox="0 0 760 330" className="mt-5 h-auto w-full rounded-lg border border-white/10 bg-[#070a12]" role="img" aria-label="Nozzle convergence throat divergence and flow analysis diagram">
             <defs>
               <clipPath id="nozzleInternalCfdClip">
