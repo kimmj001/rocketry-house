@@ -2194,7 +2194,13 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   useEffect(() => {
     if (!cfdPlaying || cfdFrames.length < 2) return;
     const timer = window.setInterval(() => {
-      setCfdFrameIndex((current) => (current + 1) % cfdFrames.length);
+      setCfdFrameIndex((current) => {
+        if (current >= cfdFrames.length - 1) {
+          setCfdPlaying(false);
+          return current;
+        }
+        return current + 1;
+      });
     }, 320);
     return () => window.clearInterval(timer);
   }, [cfdFrames.length, cfdPlaying]);
@@ -2385,9 +2391,16 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
           </svg>
           {cfdFrames.length > 1 ? (
             <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-white/10 bg-white/[0.035] px-3 py-2">
-              <Button variant="ghost" onClick={() => setCfdPlaying((current) => !current)} aria-label={cfdPlaying ? "Pause CFD playback" : "Play CFD playback"}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  if (!cfdPlaying && cfdFrameIndex >= cfdFrames.length - 1) setCfdFrameIndex(0);
+                  setCfdPlaying((current) => !current);
+                }}
+                aria-label={cfdPlaying ? "Pause CFD playback" : cfdFrameIndex >= cfdFrames.length - 1 ? "Replay CFD playback" : "Play CFD playback"}
+              >
                 {cfdPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                {cfdPlaying ? "Pause" : "Play"}
+                {cfdPlaying ? "Pause" : cfdFrameIndex >= cfdFrames.length - 1 ? "Replay" : "Play"}
               </Button>
               <input
                 type="range"
