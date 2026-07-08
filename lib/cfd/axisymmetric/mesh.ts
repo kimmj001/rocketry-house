@@ -42,10 +42,10 @@ export function axisymmetricCellVolume(i: number, j: number, mesh: CfdMesh) {
 }
 
 export function meshDimensions(density: MeshDensity) {
-  if (density === "research") return { nx: 96, ny: 40, refinementRatio: 10 };
-  if (density === "fine") return { nx: 72, ny: 30, refinementRatio: 7 };
-  if (density === "coarse") return { nx: 32, ny: 14, refinementRatio: 3 };
-  return { nx: 48, ny: 20, refinementRatio: 5 };
+  if (density === "research") return { nx: 136, ny: 60, refinementRatio: 13 };
+  if (density === "fine") return { nx: 104, ny: 44, refinementRatio: 10 };
+  if (density === "coarse") return { nx: 56, ny: 24, refinementRatio: 5 };
+  return { nx: 68, ny: 28, refinementRatio: 7 };
 }
 
 export function generateStructuredMesh(geometry: NozzleGeometry, density: MeshDensity): CfdMesh {

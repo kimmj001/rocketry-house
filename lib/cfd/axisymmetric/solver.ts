@@ -647,8 +647,8 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   // Keep the interactive web solve inside serverless runtime limits. Higher
   // fidelity belongs in a queued/offline solver; this path must always return
   // raw diagnostic cells to the browser instead of timing out.
-  const iterationBudget = inputs.meshDensity === "research" ? 1800 : inputs.meshDensity === "fine" ? 1100 : inputs.meshDensity === "coarse" ? 320 : 650;
-  const cfl = inputs.meshDensity === "research" ? 0.36 : inputs.meshDensity === "fine" ? 0.42 : inputs.meshDensity === "coarse" ? 0.55 : 0.48;
+  const iterationBudget = inputs.meshDensity === "research" ? 1100 : inputs.meshDensity === "fine" ? 760 : inputs.meshDensity === "coarse" ? 330 : 420;
+  const cfl = inputs.meshDensity === "research" ? 0.34 : inputs.meshDensity === "fine" ? 0.4 : inputs.meshDensity === "coarse" ? 0.52 : 0.46;
   let converged = false;
   let lastDt = 0;
   let maximumCfl = 0;
