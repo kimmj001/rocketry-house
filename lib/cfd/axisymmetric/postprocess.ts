@@ -62,6 +62,33 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
   const stride = sampleEvery(mesh);
   const gamma = Math.max(1.05, Math.min(1.67, inputs.gamma));
 
+  const transientFrames = solver.frames.map((frame) => {
+    const fields: NonNullable<NozzleCfdResult["transientFrames"]>[number]["fields"] = {
+      mach: [],
+      pressure: [],
+      temperature: [],
+      density: [],
+      velocity: []
+    };
+    for (let i = 0; i < mesh.nx; i += stride.x) {
+      for (let j = 0; j < mesh.ny; j += stride.y) {
+        const index = cellIndex(i, j, mesh);
+        if (!mesh.inside[index]) continue;
+        const primitive = primitiveCell(index, frame.state, inputs);
+        fields.mach!.push(Number(primitive.mach.toFixed(5)));
+        fields.pressure!.push(Number((primitive.p / 1000).toFixed(3)));
+        fields.temperature!.push(Number(primitive.t.toFixed(3)));
+        fields.density!.push(Number(primitive.rho.toFixed(6)));
+        fields.velocity!.push(Number(Math.hypot(primitive.u, primitive.v).toFixed(3)));
+      }
+    }
+    return {
+      iteration: frame.iteration,
+      physicalTimeS: Number(frame.physicalTimeS.toExponential(5)),
+      fields
+    };
+  });
+
   for (let i = 0; i < mesh.nx; i += stride.x) {
     for (let j = 0; j < mesh.ny; j += stride.y) {
       const index = cellIndex(i, j, mesh);
@@ -186,6 +213,7 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
       makeField("totalPressure", "Total pressure", "kPa", totalPressureCells),
       makeField("totalTemperature", "Total temperature", "K", totalTemperatureCells)
     ],
+    transientFrames,
     centerline,
     shocks: detectShockRegions(centerline),
     metrics: {

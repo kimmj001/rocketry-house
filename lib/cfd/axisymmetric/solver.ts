@@ -38,6 +38,11 @@ export type Primitive = {
 
 export type SolverResult = {
   state: ConservativeState;
+  frames: Array<{
+    iteration: number;
+    physicalTimeS: number;
+    state: ConservativeState;
+  }>;
   residuals: NozzleCfdResidualPoint[];
   iterations: number;
   converged: boolean;
@@ -62,6 +67,15 @@ export type SolverResult = {
     computeResiduals: boolean;
   };
 };
+
+function cloneState(state: ConservativeState): ConservativeState {
+  return {
+    rho: state.rho.slice(),
+    rhoU: state.rhoU.slice(),
+    rhoV: state.rhoV.slice(),
+    rhoE: state.rhoE.slice()
+  };
+}
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -627,6 +641,7 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   const rGas = gasConstant(inputs);
   let state = initializeConservativeState(inputs, geometry, mesh, gamma, rGas);
   const residuals: NozzleCfdResidualPoint[] = [];
+  const frames: SolverResult["frames"] = [];
   // A chamber-to-ambient initialization launches a real start-up wave. The
   // previous budget stopped while that wave was still inside the far field,
   // which produced the misleading balloon-shaped contour. These budgets allow
@@ -639,6 +654,8 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   let conservationError = Number.POSITIVE_INFINITY;
   let positivityAbort = false;
   let nanDetected = false;
+  let physicalTimeS = 0;
+  const frameInterval = Math.max(1, Math.floor(iterationBudget / 11));
   const audit = {
     computePrimitive: false,
     physicalFluxX: false,
@@ -659,6 +676,7 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
     audit.computePrimitive = true;
     audit.computeCflDt = true;
     lastDt = dt;
+    physicalTimeS += dt;
     maximumCfl = Math.max(maximumCfl, dt * maxWaveSpeed(state, mesh, gamma, rGas) / Math.min(mesh.dx, mesh.dy));
     const healthBefore = numericalHealth(state, mesh, gamma, rGas);
     if (healthBefore.nanDetected || healthBefore.minimumDensityKgM3 <= 0 || healthBefore.minimumPressurePa <= 0) {
@@ -684,6 +702,13 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
     }
     state = updateConservativeStateByFluxDivergence(state, fluxImbalance, mesh, dt, gamma, rGas);
     audit.updateConservativeStateByFluxDivergence = true;
+    if (iteration === 1 || iteration % frameInterval === 0 || iteration === iterationBudget) {
+      frames.push({ iteration, physicalTimeS, state: cloneState(state) });
+    }
+  }
+
+  if (!frames.length || frames.at(-1)!.iteration !== (residuals.at(-1)?.iteration ?? iterationBudget)) {
+    frames.push({ iteration: residuals.at(-1)?.iteration ?? iterationBudget, physicalTimeS, state: cloneState(state) });
   }
 
   const finalCfl = lastDt > 0 ? lastDt * maxWaveSpeed(state, mesh, gamma, rGas) / Math.min(mesh.dx, mesh.dy) : cfl;
@@ -692,6 +717,7 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   positivityAbort = positivityAbort || finalHealth.minimumDensityKgM3 <= 0 || finalHealth.minimumPressurePa <= 0;
   return {
     state,
+    frames,
     residuals,
     iterations: residuals.at(-1)?.iteration ?? iterationBudget,
     converged,

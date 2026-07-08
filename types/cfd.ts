@@ -97,6 +97,11 @@ export type NozzleCfdResult = {
   };
   residuals: NozzleCfdResidualPoint[];
   fields: NozzleCfdField[];
+  transientFrames?: Array<{
+    iteration: number;
+    physicalTimeS: number;
+    fields: Partial<Record<NozzleCfdFieldName, number[]>>;
+  }>;
   centerline: NozzleCfdCenterlinePoint[];
   shocks: Array<{ x: number; strength: number; note: string }>;
   metrics: {

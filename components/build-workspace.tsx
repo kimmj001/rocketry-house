@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Archive, Boxes, Calculator, Check, ChevronRight, Cpu, Crosshair, Download, Eye, FileUp, Flame, Gauge, Layers, Library, PackagePlus, Play, Rocket, Ruler, Save, ShieldCheck, UploadCloud, Wind } from "lucide-react";
+import { Archive, Boxes, Calculator, Check, ChevronRight, Cpu, Crosshair, Download, Eye, FileUp, Flame, Gauge, Layers, Library, PackagePlus, Pause, Play, Rocket, Ruler, Save, ShieldCheck, UploadCloud, Wind } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { RocketViewer3D } from "@/components/rocket-viewer-3d";
@@ -2140,6 +2140,8 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   const [cfdRunning, setCfdRunning] = useState(false);
   const [cfdFieldName, setCfdFieldName] = useState<NozzleCfdField["name"]>("mach");
   const [cfdDebugView, setCfdDebugView] = useState<CfdDebugView>("mach");
+  const [cfdFrameIndex, setCfdFrameIndex] = useState(0);
+  const [cfdPlaying, setCfdPlaying] = useState(false);
   const convergenceAngle = Math.max(1, Math.min(89, parameters.convergenceAngleDeg ?? 60));
   const divergenceAngle = Math.max(1, Math.min(89, parameters.divergenceAngleDeg ?? 24));
   const chamberRadius = parameters.casingInnerDiameterMm / 2;
@@ -2187,6 +2189,15 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   const divergenceArcX = throatX + Math.cos((divergenceAngle * Math.PI) / 180) * divergenceArcRadius;
   const divergenceArcY = visualCenterY - Math.sin((divergenceAngle * Math.PI) / 180) * divergenceArcRadius;
   const cfdDisplayActive = cfdRunning || Boolean(cfdResult);
+  const cfdFrames = cfdResult?.transientFrames ?? [];
+  const activeCfdFrame = cfdFrames[Math.min(cfdFrameIndex, Math.max(cfdFrames.length - 1, 0))];
+  useEffect(() => {
+    if (!cfdPlaying || cfdFrames.length < 2) return;
+    const timer = window.setInterval(() => {
+      setCfdFrameIndex((current) => (current + 1) % cfdFrames.length);
+    }, 320);
+    return () => window.clearInterval(timer);
+  }, [cfdFrames.length, cfdPlaying]);
   const runCfd = async () => {
     const payload: NozzleCfdInputs = {
       chamberPressurePa: nozzleFlow.chamberPressureMPa * 1_000_000,
@@ -2223,6 +2234,8 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
         return;
       }
       setCfdResult(data as NozzleCfdResult);
+      setCfdFrameIndex(0);
+      setCfdPlaying(Boolean((data as NozzleCfdResult).transientFrames?.length));
     } catch (error) {
       setCfdError(error instanceof Error ? error.message : "CFD request failed.");
     } finally {
@@ -2318,6 +2331,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
                 throatRadius={visualThroatRadius}
                 exitRadius={visualExitRadius}
                 fieldName={cfdFieldName}
+                frameValues={activeCfdFrame?.fields[cfdFieldName]}
               />
             ) : null}
             {!cfdDisplayActive ? <line x1="48" x2="712" y1={visualCenterY} y2={visualCenterY} stroke="#f8fafc" strokeOpacity="0.32" strokeDasharray="7 8" /> : null}
@@ -2369,6 +2383,29 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
               </>
             ) : null}
           </svg>
+          {cfdFrames.length > 1 ? (
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-white/10 bg-white/[0.035] px-3 py-2">
+              <Button variant="ghost" onClick={() => setCfdPlaying((current) => !current)} aria-label={cfdPlaying ? "Pause CFD playback" : "Play CFD playback"}>
+                {cfdPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                {cfdPlaying ? "Pause" : "Play"}
+              </Button>
+              <input
+                type="range"
+                min="0"
+                max={cfdFrames.length - 1}
+                value={cfdFrameIndex}
+                onChange={(event) => {
+                  setCfdPlaying(false);
+                  setCfdFrameIndex(Number(event.target.value));
+                }}
+                className="min-w-44 flex-1 accent-orange-400"
+                aria-label="CFD iteration frame"
+              />
+              <p className="min-w-44 text-right text-xs tabular-nums text-orange-50/58">
+                iteration {activeCfdFrame?.iteration ?? 0} · t={(activeCfdFrame?.physicalTimeS ?? 0).toExponential(2)} s
+              </p>
+            </div>
+          ) : null}
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
             <label className="text-sm text-orange-50/65">Mesh density
               <select value={meshDensity} onChange={(event) => setMeshDensity(event.target.value as NozzleCfdInputs["meshDensity"])} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50">
@@ -2446,7 +2483,8 @@ function NozzleIntegratedCfdOverlay({
   chamberRadius,
   throatRadius,
   exitRadius,
-  fieldName
+  fieldName,
+  frameValues
 }: {
   result: NozzleCfdResult | null;
   running: boolean;
@@ -2459,6 +2497,7 @@ function NozzleIntegratedCfdOverlay({
   throatRadius: number;
   exitRadius: number;
   fieldName: NozzleCfdField["name"];
+  frameValues?: number[];
 }) {
   const field = result?.fields.find((item) => item.name === fieldName) ?? result?.fields.find((item) => item.name === "mach") ?? null;
   const viewportEndX = 740;
@@ -2505,7 +2544,7 @@ function NozzleIntegratedCfdOverlay({
           const radialDistance = physicalY * yScale;
           const yTop = centerY - radialDistance - yStep / 2;
           const yBottom = centerY + radialDistance - yStep / 2;
-          const color = contourColor(cell.value, field.min, field.max);
+          const color = contourColor(frameValues?.[index] ?? cell.value, field.min, field.max);
           return (
             <g key={`${field.name}-integrated-${index}`}>
               <rect x={x} y={yTop} width={Math.max(xStep, 0.8)} height={Math.max(yStep, 0.8)} fill={color} opacity="0.95" />
