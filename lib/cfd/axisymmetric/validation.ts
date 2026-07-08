@@ -41,10 +41,11 @@ export function validateAgainstIsentropicTheory(inputs: NozzleCfdInputs, result:
   const referenceExitPressure = inputs.chamberPressurePa /
     Math.pow(1 + ((gamma - 1) / 2) * referenceExitMach * referenceExitMach, gamma / (gamma - 1));
   const nozzleLength = inputs.convergenceLengthMm + inputs.divergenceLengthMm;
+  const chamberLength = Math.max((inputs.chamberDiameterMm / 2) * 3, inputs.convergenceLengthMm * 1.5);
   const externalLength = Math.max(nozzleLength * 4.5, (inputs.exitDiameterMm / 2) * 16, (inputs.chamberDiameterMm / 2) * 5);
-  const totalLength = nozzleLength + externalLength;
-  const throatX = inputs.convergenceLengthMm / Math.max(totalLength, 1);
-  const exitX = nozzleLength / Math.max(totalLength, 1);
+  const totalLength = chamberLength + nozzleLength + externalLength;
+  const throatX = (chamberLength + inputs.convergenceLengthMm) / Math.max(totalLength, 1);
+  const exitX = (chamberLength + nozzleLength) / Math.max(totalLength, 1);
   const throatWindowHalfWidth = Math.max(0.018, (inputs.throatDiameterMm / 2) / Math.max(totalLength, 1) * 3.2);
   const throatCandidates = result.centerline.filter((point) => Math.abs(point.x - throatX) <= throatWindowHalfWidth);
   const throatPoint = (throatCandidates.length ? throatCandidates : result.centerline).reduce((best, point) => {

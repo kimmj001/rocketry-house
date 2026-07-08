@@ -2321,25 +2321,27 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
               />
             ) : null}
             {!cfdDisplayActive ? <line x1="48" x2="712" y1={visualCenterY} y2={visualCenterY} stroke="#f8fafc" strokeOpacity="0.32" strokeDasharray="7 8" /> : null}
-            <path
-              d={`M${inletX} ${convergingStartTop} H${chamberEndX} L${throatX} ${throatTop} L${exitX} ${exitTop}`}
-              fill="none"
-              stroke="#f8fafc"
-              strokeWidth={cfdDisplayActive ? "3" : "5"}
-              strokeOpacity={cfdDisplayActive ? "0.92" : "1"}
-              strokeLinecap="square"
-              strokeLinejoin="miter"
-            />
-            <path
-              d={`M${inletX} ${convergingStartBottom} H${chamberEndX} L${throatX} ${throatBottom} L${exitX} ${exitBottom}`}
-              fill="none"
-              stroke="#f8fafc"
-              strokeWidth={cfdDisplayActive ? "3" : "5"}
-              strokeOpacity={cfdDisplayActive ? "0.92" : "1"}
-              strokeLinecap="square"
-              strokeLinejoin="miter"
-            />
-            <line x1={inletX} x2={inletX} y1={convergingStartTop} y2={convergingStartBottom} stroke="#f8fafc" strokeOpacity="0.7" strokeWidth="3" />
+            {!cfdDisplayActive ? (
+              <>
+                <path
+                  d={`M${inletX} ${convergingStartTop} H${chamberEndX} L${throatX} ${throatTop} L${exitX} ${exitTop}`}
+                  fill="none"
+                  stroke="#f8fafc"
+                  strokeWidth="5"
+                  strokeLinecap="square"
+                  strokeLinejoin="miter"
+                />
+                <path
+                  d={`M${inletX} ${convergingStartBottom} H${chamberEndX} L${throatX} ${throatBottom} L${exitX} ${exitBottom}`}
+                  fill="none"
+                  stroke="#f8fafc"
+                  strokeWidth="5"
+                  strokeLinecap="square"
+                  strokeLinejoin="miter"
+                />
+                <line x1={inletX} x2={inletX} y1={convergingStartTop} y2={convergingStartBottom} stroke="#f8fafc" strokeOpacity="0.7" strokeWidth="3" />
+              </>
+            ) : null}
             {!cfdDisplayActive ? (
               <line x1={exitX} x2={exitX} y1={exitTop} y2={exitBottom} stroke="#f8fafc" strokeOpacity="0.82" strokeWidth="3" />
             ) : null}
@@ -2481,6 +2483,16 @@ function NozzleIntegratedCfdOverlay({
   const physicallyValid = result.validation?.checks?.physicallyValid ?? false;
   const xIndex = new Map(xKeys.map((key, index) => [key, index]));
   const yIndex = new Map(yKeys.map((key, index) => [key, index]));
+  const solvedWall = xKeys.flatMap((key) => {
+    const column = field.cells.filter((cell) => cell.x.toFixed(5) === key && cell.inNozzle);
+    if (!column.length) return [];
+    const radialEdge = Math.max(...column.map((cell) => cell.physicalY ?? cell.y)) * yScale + yStep / 2;
+    const x = inletX + (xIndex.get(key) ?? 0) * xStep + xStep / 2;
+    return [{ x, radialEdge }];
+  });
+  const topWall = solvedWall.map((point) => `${point.x},${centerY - point.radialEdge}`).join(" ");
+  const bottomWall = solvedWall.map((point) => `${point.x},${centerY + point.radialEdge}`).join(" ");
+  const inletWall = solvedWall[0];
 
   return (
     <g>
@@ -2502,6 +2514,13 @@ function NozzleIntegratedCfdOverlay({
           );
         })}
       </g>
+      {solvedWall.length > 1 ? (
+        <g fill="none" stroke="#f8fafc" strokeWidth="2.4" strokeLinejoin="round" vectorEffect="non-scaling-stroke">
+          <polyline points={topWall} />
+          <polyline points={bottomWall} />
+          {inletWall ? <line x1={inletWall.x} x2={inletWall.x} y1={centerY - inletWall.radialEdge} y2={centerY + inletWall.radialEdge} /> : null}
+        </g>
+      ) : null}
       <rect x={inletX} y={centerY - 132} width={domainLength} height={264} fill="transparent" stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
       <line x1={exitProbeX} x2={exitProbeX} y1="36" y2="294" stroke="#f8fafc" strokeWidth="1.6" strokeDasharray="6 6" opacity="0.75" />
       <text x={exitProbeX + 8} y="50" fill="#e2e8f0" fontSize="12">exit probe</text>

@@ -299,7 +299,7 @@ function initializeConservativeState(inputs: NozzleCfdInputs, geometry: NozzleGe
   const state = makeState(mesh.nx * mesh.ny);
   const reservoir = reservoirPrimitive(inputs, gamma, rGas);
   const ambient = ambientPrimitive(inputs, gamma, rGas);
-  const throatX = geometry.convergenceLengthM;
+  const throatX = geometry.throatXM;
   const exitX = geometry.nozzleLengthM;
   const throatArea = Math.PI * geometry.throatRadiusM * geometry.throatRadiusM;
 
