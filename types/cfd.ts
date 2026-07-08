@@ -33,7 +33,7 @@ export type NozzleCfdCell = {
   value: number;
 };
 
-export type NozzleCfdFieldName = "mach" | "pressure" | "temperature" | "density" | "velocity" | "faceFlux" | "totalPressure" | "totalTemperature";
+export type NozzleCfdFieldName = "mach" | "pressure" | "temperature" | "density" | "velocity" | "schlieren" | "faceFlux" | "totalPressure" | "totalTemperature";
 
 export type NozzleCfdField = {
   name: NozzleCfdFieldName;
@@ -87,6 +87,8 @@ export type NozzleCfdResult = {
       computeResiduals: boolean;
     };
     runtimeMs: number;
+    physicalTimeS?: number;
+    flowThroughTimes?: number;
     maximumCfl: number;
     minimumDensityKgM3: number;
     minimumPressurePa: number;

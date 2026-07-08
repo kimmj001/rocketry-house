@@ -2138,7 +2138,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   const [cfdResult, setCfdResult] = useState<NozzleCfdResult | null>(null);
   const [cfdError, setCfdError] = useState<string | null>(null);
   const [cfdRunning, setCfdRunning] = useState(false);
-  const [cfdFieldName, setCfdFieldName] = useState<NozzleCfdField["name"]>("mach");
+  const [cfdFieldName, setCfdFieldName] = useState<NozzleCfdField["name"]>("schlieren");
   const [cfdDebugView, setCfdDebugView] = useState<CfdDebugView>("mach");
   const [cfdFrameIndex, setCfdFrameIndex] = useState(0);
   const [cfdPlaying, setCfdPlaying] = useState(false);
@@ -2435,6 +2435,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
                 <option value="temperature">Static temperature</option>
                 <option value="density">Density</option>
                 <option value="velocity">Velocity magnitude</option>
+                <option value="schlieren">Schlieren / shock structure</option>
                 <option value="faceFlux">Face flux magnitude</option>
                 <option value="totalPressure">Total pressure</option>
                 <option value="totalTemperature">Total temperature</option>

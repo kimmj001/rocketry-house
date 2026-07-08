@@ -48,6 +48,8 @@ export type SolverResult = {
   converged: boolean;
   finalCfl: number;
   runtimeMs: number;
+  physicalTimeS: number;
+  flowThroughTimes: number;
   maximumCfl: number;
   minimumDensityKgM3: number;
   minimumPressurePa: number;
@@ -646,7 +648,7 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   // previous budget stopped while that wave was still inside the far field,
   // which produced the misleading balloon-shaped contour. These budgets allow
   // several acoustic transits of the complete nozzle/plume domain.
-  const iterationBudget = inputs.meshDensity === "research" ? 3600 : inputs.meshDensity === "fine" ? 2600 : inputs.meshDensity === "coarse" ? 1600 : 1900;
+  const iterationBudget = inputs.meshDensity === "research" ? 4200 : inputs.meshDensity === "fine" ? 3400 : inputs.meshDensity === "coarse" ? 3000 : 3200;
   const cfl = inputs.meshDensity === "research" ? 0.24 : inputs.meshDensity === "fine" ? 0.28 : inputs.meshDensity === "coarse" ? 0.36 : 0.32;
   let converged = false;
   let lastDt = 0;
@@ -655,6 +657,12 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   let positivityAbort = false;
   let nanDetected = false;
   let physicalTimeS = 0;
+  const exitAreaRatio = Math.max((geometry.exitRadiusM / geometry.throatRadiusM) ** 2, 1.000001);
+  const estimatedExitMach = solveAreaMach(exitAreaRatio, gamma, true);
+  const exitTemperatureK = inputs.chamberTemperatureK / (1 + ((gamma - 1) / 2) * estimatedExitMach * estimatedExitMach);
+  const estimatedExitVelocityMS = estimatedExitMach * Math.sqrt(gamma * rGas * exitTemperatureK);
+  const externalFlowThroughS = geometry.externalLengthM / Math.max(estimatedExitVelocityMS, 1);
+  const targetPhysicalTimeS = externalFlowThroughS * 4;
   const frameInterval = Math.max(1, Math.floor(iterationBudget / 11));
   const audit = {
     computePrimitive: false,
@@ -698,7 +706,7 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
     if (point) {
       residuals.push(point);
       converged = hasConverged(point, residuals[0]);
-      if (converged && iteration > 40) break;
+      if (converged && physicalTimeS >= targetPhysicalTimeS && iteration > 40) break;
     }
     state = updateConservativeStateByFluxDivergence(state, fluxImbalance, mesh, dt, gamma, rGas);
     audit.updateConservativeStateByFluxDivergence = true;
@@ -723,6 +731,8 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
     converged,
     finalCfl: Number(finalCfl.toFixed(4)),
     runtimeMs: Math.round(performance.now() - startedAt),
+    physicalTimeS: Number(physicalTimeS.toExponential(6)),
+    flowThroughTimes: Number((physicalTimeS / Math.max(externalFlowThroughS, 1e-9)).toFixed(2)),
     maximumCfl: Number(Math.max(maximumCfl, finalCfl).toFixed(4)),
     minimumDensityKgM3: finalHealth.minimumDensityKgM3,
     minimumPressurePa: finalHealth.minimumPressurePa,

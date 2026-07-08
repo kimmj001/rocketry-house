@@ -1,5 +1,5 @@
-import { cellIndex, type CfdMesh } from "@/lib/cfd/axisymmetric/mesh";
-import { primitiveCell, type SolverResult } from "@/lib/cfd/axisymmetric/solver";
+import { cellIndex, isInside, type CfdMesh } from "@/lib/cfd/axisymmetric/mesh";
+import { primitiveCell, type ConservativeState, type SolverResult } from "@/lib/cfd/axisymmetric/solver";
 import type { NozzleCfdCell, NozzleCfdField, NozzleCfdInputs, NozzleCfdResult } from "@/types/cfd";
 
 const G0 = 9.80665;
@@ -50,12 +50,27 @@ function sampleEvery(mesh: CfdMesh) {
   return { x: 1, y: 1 };
 }
 
+function densityGradientAt(i: number, j: number, state: ConservativeState, mesh: CfdMesh, inputs: NozzleCfdInputs) {
+  const current = primitiveCell(cellIndex(i, j, mesh), state, inputs).rho;
+  const density = (sampleI: number, sampleJ: number) => isInside(sampleI, sampleJ, mesh)
+    ? primitiveCell(cellIndex(sampleI, sampleJ, mesh), state, inputs).rho
+    : current;
+  const leftI = Math.max(0, i - 1);
+  const rightI = Math.min(mesh.nx - 1, i + 1);
+  const dx = Math.max(mesh.x[rightI] - mesh.x[leftI], mesh.dx);
+  const dy = Math.max((j === 0 || j === mesh.ny - 1 ? 1 : 2) * mesh.dy, mesh.dy);
+  const dRhoDx = (density(rightI, j) - density(leftI, j)) / dx;
+  const dRhoDy = (density(i, Math.min(mesh.ny - 1, j + 1)) - density(i, Math.max(0, j - 1))) / dy;
+  return Math.log1p(Math.hypot(dRhoDx, dRhoDy));
+}
+
 export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh, solver: SolverResult): NozzleCfdResult {
   const machCells: NozzleCfdCell[] = [];
   const pressureCells: NozzleCfdCell[] = [];
   const temperatureCells: NozzleCfdCell[] = [];
   const densityCells: NozzleCfdCell[] = [];
   const velocityCells: NozzleCfdCell[] = [];
+  const schlierenCells: NozzleCfdCell[] = [];
   const faceFluxCells: NozzleCfdCell[] = [];
   const totalPressureCells: NozzleCfdCell[] = [];
   const totalTemperatureCells: NozzleCfdCell[] = [];
@@ -68,7 +83,8 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
       pressure: [],
       temperature: [],
       density: [],
-      velocity: []
+      velocity: [],
+      schlieren: []
     };
     for (let i = 0; i < mesh.nx; i += stride.x) {
       for (let j = 0; j < mesh.ny; j += stride.y) {
@@ -80,6 +96,7 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
         fields.temperature!.push(Number(primitive.t.toFixed(3)));
         fields.density!.push(Number(primitive.rho.toFixed(6)));
         fields.velocity!.push(Number(Math.hypot(primitive.u, primitive.v).toFixed(3)));
+        fields.schlieren!.push(Number(densityGradientAt(i, j, frame.state, mesh, inputs).toFixed(5)));
       }
     }
     return {
@@ -99,6 +116,7 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
       const physicalY = mesh.y[j] / Math.max(mesh.y[mesh.ny - 1], mesh.dy);
       const wallY = mesh.y[j] / localWall;
       const vMag = Math.sqrt(primitive.u * primitive.u + primitive.v * primitive.v);
+      const densityGradient = densityGradientAt(i, j, solver.state, mesh, inputs);
       const totalFactor = 1 + ((gamma - 1) / 2) * primitive.mach * primitive.mach;
       const cellGeometry = {
         x,
@@ -112,6 +130,7 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
       temperatureCells.push({ ...cellGeometry, value: primitive.t });
       densityCells.push({ ...cellGeometry, value: primitive.rho });
       velocityCells.push({ ...cellGeometry, value: vMag });
+      schlierenCells.push({ ...cellGeometry, value: densityGradient });
       faceFluxCells.push({ ...cellGeometry, value: primitive.rho * vMag });
       totalPressureCells.push({ ...cellGeometry, value: primitive.p * Math.pow(totalFactor, gamma / (gamma - 1)) / 1000 });
       totalTemperatureCells.push({ ...cellGeometry, value: primitive.t * totalFactor });
@@ -194,6 +213,8 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
       } : undefined,
       numericalSteps: solver.audit,
       runtimeMs: solver.runtimeMs,
+      physicalTimeS: solver.physicalTimeS,
+      flowThroughTimes: solver.flowThroughTimes,
       maximumCfl: solver.maximumCfl,
       minimumDensityKgM3: solver.minimumDensityKgM3,
       minimumPressurePa: solver.minimumPressurePa,
@@ -209,6 +230,7 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
       makeField("temperature", "Static temperature", "K", temperatureCells),
       makeField("density", "Density", "kg/m3", densityCells),
       makeField("velocity", "Velocity magnitude", "m/s", velocityCells),
+      makeField("schlieren", "Schlieren density gradient", "log(1+kg/m4)", schlierenCells),
       makeField("faceFlux", "Face flux magnitude", "kg/(m2 s)", faceFluxCells),
       makeField("totalPressure", "Total pressure", "kPa", totalPressureCells),
       makeField("totalTemperature", "Total temperature", "K", totalTemperatureCells)
