@@ -2363,9 +2363,6 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
               </>
             ) : null}
             {!cfdDisplayActive ? (
-              <line x1={exitX} x2={exitX} y1={exitTop} y2={exitBottom} stroke="#f8fafc" strokeOpacity="0.82" strokeWidth="3" />
-            ) : null}
-            {!cfdDisplayActive ? (
               <>
                 <path d={`M${throatX - convergenceArcRadius} ${visualCenterY} A${convergenceArcRadius} ${convergenceArcRadius} 0 0 0 ${convergenceArcX} ${convergenceArcY}`} fill="none" stroke="#86efac" strokeWidth="2" strokeOpacity="0.85" />
                 <path d={`M${throatX + divergenceArcRadius} ${visualCenterY} A${divergenceArcRadius} ${divergenceArcRadius} 0 0 0 ${divergenceArcX} ${divergenceArcY}`} fill="none" stroke="#fecdd3" strokeWidth="2" strokeOpacity="0.85" />
@@ -2599,10 +2596,11 @@ function CfdContour({ field }: { field: NozzleCfdField }) {
   const yMax = Math.max(...yValues, 1e-6);
   const yScale = (height / 2 - 8) / yMax;
   const cellDy = Math.max((Number.isFinite(minDy) ? minDy : yMax / 40) * yScale, 0.8);
-  const wallOutline = xKeys.map((key) => {
-    const column = field.cells.filter((cell) => cell.x.toFixed(5) === key);
+  const wallOutline = xKeys.flatMap((key) => {
+    const column = field.cells.filter((cell) => cell.x.toFixed(5) === key && cell.inNozzle);
+    if (!column.length) return [];
     const top = column.reduce((max, cell) => Math.max(max, cell.physicalY ?? cell.y), 0);
-    return { x: (xIndex.get(key) ?? 0) * dx + dx / 2, y: height / 2 - top * yScale };
+    return [{ x: (xIndex.get(key) ?? 0) * dx + dx / 2, y: height / 2 - top * yScale }];
   });
   return (
     <div className="rounded-lg border border-white/10 bg-[#070a12] p-3">
