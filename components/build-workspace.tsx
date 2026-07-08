@@ -2138,6 +2138,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   const [cfdResult, setCfdResult] = useState<NozzleCfdResult | null>(null);
   const [cfdError, setCfdError] = useState<string | null>(null);
   const [cfdRunning, setCfdRunning] = useState(false);
+  const [cfdElapsedSeconds, setCfdElapsedSeconds] = useState(0);
   const [cfdFieldName, setCfdFieldName] = useState<NozzleCfdField["name"]>("schlieren");
   const [cfdDebugView, setCfdDebugView] = useState<CfdDebugView>("mach");
   const [cfdFrameIndex, setCfdFrameIndex] = useState(0);
@@ -2204,6 +2205,15 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
     }, 320);
     return () => window.clearInterval(timer);
   }, [cfdFrames.length, cfdPlaying]);
+  useEffect(() => {
+    if (!cfdRunning) return;
+    const startedAt = Date.now();
+    setCfdElapsedSeconds(0);
+    const timer = window.setInterval(() => {
+      setCfdElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [cfdRunning]);
   const runCfd = async () => {
     const payload: NozzleCfdInputs = {
       chamberPressurePa: nozzleFlow.chamberPressureMPa * 1_000_000,
@@ -2338,6 +2348,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
                 exitRadius={visualExitRadius}
                 fieldName={cfdFieldName}
                 frameValues={activeCfdFrame?.fields[cfdFieldName]}
+                elapsedSeconds={cfdElapsedSeconds}
               />
             ) : null}
             {!cfdDisplayActive ? <line x1="48" x2="712" y1={visualCenterY} y2={visualCenterY} stroke="#f8fafc" strokeOpacity="0.32" strokeDasharray="7 8" /> : null}
@@ -2450,7 +2461,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
                 <option value="residual">Residual view</option>
               </select>
             </label>
-            <Button onClick={runCfd} disabled={cfdRunning}><Wind className="h-4 w-4" />{cfdRunning ? "Running CFD..." : "Run CFD"}</Button>
+            <Button onClick={runCfd} disabled={cfdRunning}><Wind className="h-4 w-4" />{cfdRunning ? `Solving... ${cfdElapsedSeconds}s` : "Run CFD"}</Button>
           </div>
           <NozzleCfdViewer result={cfdResult} error={cfdError} running={cfdRunning} fieldName={cfdFieldName} debugView={cfdDebugView} />
           <p className="mt-4 rounded-md border border-amber-200/20 bg-amber-200/8 p-3 text-xs leading-5 text-amber-50/82">Rocketry House records nozzle geometry for analysis and data comparison. It does not provide manufacturing certification or hazardous build instructions.</p>
@@ -2495,7 +2506,8 @@ function NozzleIntegratedCfdOverlay({
   throatRadius,
   exitRadius,
   fieldName,
-  frameValues
+  frameValues,
+  elapsedSeconds
 }: {
   result: NozzleCfdResult | null;
   running: boolean;
@@ -2509,19 +2521,29 @@ function NozzleIntegratedCfdOverlay({
   exitRadius: number;
   fieldName: NozzleCfdField["name"];
   frameValues?: number[];
+  elapsedSeconds: number;
 }) {
   const field = result?.fields.find((item) => item.name === fieldName) ?? result?.fields.find((item) => item.name === "mach") ?? null;
   const viewportEndX = 740;
   const domainLength = Math.max(viewportEndX - inletX, 1);
   const displayedNozzleLength = Math.max(exitX - inletX, 1);
 
-  if (running || !field || !result) {
+  if (running) {
     return (
-      <g clipPath="url(#nozzleInternalCfdClip)">
-        <rect x={inletX} y={centerY - chamberRadius} width={displayedNozzleLength} height={chamberRadius * 2} fill="#020617" opacity="0.72" />
+      <g>
+        <rect x={inletX} y={centerY - chamberRadius} width={displayedNozzleLength} height={chamberRadius * 2} fill="#020617" opacity="0.72" clipPath="url(#nozzleInternalCfdClip)" />
+        <path d={`M${inletX} ${centerY - chamberRadius} H${chamberEndX} L${throatX} ${centerY - throatRadius} L${exitX} ${centerY - exitRadius}`} fill="none" stroke="#f8fafc" strokeWidth="2.4" opacity="0.72" />
+        <path d={`M${inletX} ${centerY + chamberRadius} H${chamberEndX} L${throatX} ${centerY + throatRadius} L${exitX} ${centerY + exitRadius}`} fill="none" stroke="#f8fafc" strokeWidth="2.4" opacity="0.72" />
+        <circle cx="500" cy="132" r="18" fill="none" stroke="rgba(255,255,255,0.16)" strokeWidth="4" />
+        <circle cx="500" cy="132" r="18" fill="none" stroke="#fb923c" strokeWidth="4" strokeLinecap="round" strokeDasharray="28 86" className="animate-spin" style={{ transformOrigin: "500px 132px" }} />
+        <text x="500" y="170" textAnchor="middle" fill="#fff7ed" fontSize="15" fontWeight="600">Solving finite-volume flow</text>
+        <text x="500" y="192" textAnchor="middle" fill="#fdba74" fontSize="13">{elapsedSeconds}s elapsed · typically 3–8s</text>
+        <text x="500" y="214" textAnchor="middle" fill="#94a3b8" fontSize="11">Building flow-through diagnostics and shock-structure frames</text>
       </g>
     );
   }
+
+  if (!field || !result) return null;
 
   const xKeys = Array.from(new Set(field.cells.map((cell) => cell.x.toFixed(5)))).sort((a, b) => Number(a) - Number(b));
   const yKeys = Array.from(new Set(field.cells.map((cell) => (cell.physicalY ?? cell.y).toFixed(5)))).sort((a, b) => Number(a) - Number(b));

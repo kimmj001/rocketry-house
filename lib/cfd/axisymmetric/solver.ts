@@ -644,12 +644,11 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   let state = initializeConservativeState(inputs, geometry, mesh, gamma, rGas);
   const residuals: NozzleCfdResidualPoint[] = [];
   const frames: SolverResult["frames"] = [];
-  // A chamber-to-ambient initialization launches a real start-up wave. The
-  // previous budget stopped while that wave was still inside the far field,
-  // which produced the misleading balloon-shaped contour. These budgets allow
-  // several acoustic transits of the complete nozzle/plume domain.
-  const iterationBudget = inputs.meshDensity === "research" ? 8400 : inputs.meshDensity === "fine" ? 6800 : inputs.meshDensity === "coarse" ? 6000 : 6400;
-  const cfl = inputs.meshDensity === "research" ? 0.24 : inputs.meshDensity === "fine" ? 0.28 : inputs.meshDensity === "coarse" ? 0.36 : 0.32;
+  // Keep the interactive web solve inside serverless runtime limits. Higher
+  // fidelity belongs in a queued/offline solver; this path must always return
+  // raw diagnostic cells to the browser instead of timing out.
+  const iterationBudget = inputs.meshDensity === "research" ? 1800 : inputs.meshDensity === "fine" ? 1100 : inputs.meshDensity === "coarse" ? 320 : 650;
+  const cfl = inputs.meshDensity === "research" ? 0.36 : inputs.meshDensity === "fine" ? 0.42 : inputs.meshDensity === "coarse" ? 0.55 : 0.48;
   let converged = false;
   let lastDt = 0;
   let maximumCfl = 0;
@@ -662,8 +661,8 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   const exitTemperatureK = inputs.chamberTemperatureK / (1 + ((gamma - 1) / 2) * estimatedExitMach * estimatedExitMach);
   const estimatedExitVelocityMS = estimatedExitMach * Math.sqrt(gamma * rGas * exitTemperatureK);
   const externalFlowThroughS = geometry.externalLengthM / Math.max(estimatedExitVelocityMS, 1);
-  const targetPhysicalTimeS = externalFlowThroughS * 8;
-  const frameInterval = Math.max(1, Math.floor(iterationBudget / 11));
+  const targetPhysicalTimeS = externalFlowThroughS * 1.6;
+  const frameInterval = Math.max(1, Math.floor(iterationBudget / 4));
   const audit = {
     computePrimitive: false,
     physicalFluxX: false,
