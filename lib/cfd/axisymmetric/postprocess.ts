@@ -195,6 +195,8 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
     status: solver.converged ? "converged" : "failed",
     solver: "Rocketry House 2D axisymmetric finite-volume CFD",
     mesh: {
+      nx: mesh.nx,
+      ny: mesh.ny,
       cells: mesh.cells,
       throatRefinementRatio: mesh.refinementRatio,
       yPlusEstimate: inputs.meshDensity === "research" ? 0.9 : inputs.meshDensity === "fine" ? 1.8 : inputs.meshDensity === "standard" ? 3.8 : 9.5,

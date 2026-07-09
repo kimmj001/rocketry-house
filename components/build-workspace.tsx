@@ -2537,8 +2537,8 @@ function NozzleIntegratedCfdOverlay({
         <circle cx="500" cy="132" r="18" fill="none" stroke="rgba(255,255,255,0.16)" strokeWidth="4" />
         <circle cx="500" cy="132" r="18" fill="none" stroke="#fb923c" strokeWidth="4" strokeLinecap="round" strokeDasharray="28 86" className="animate-spin" style={{ transformOrigin: "500px 132px" }} />
         <text x="500" y="170" textAnchor="middle" fill="#fff7ed" fontSize="15" fontWeight="600">Solving finite-volume flow</text>
-        <text x="500" y="192" textAnchor="middle" fill="#fdba74" fontSize="13">{elapsedSeconds}s elapsed · typically 3–8s</text>
-        <text x="500" y="214" textAnchor="middle" fill="#94a3b8" fontSize="11">Building flow-through diagnostics and shock-structure frames</text>
+        <text x="500" y="192" textAnchor="middle" fill="#fdba74" fontSize="13">{elapsedSeconds}s elapsed · high-resolution run can take up to a minute</text>
+        <text x="500" y="214" textAnchor="middle" fill="#94a3b8" fontSize="11">Solving 136 x 56 cells and recording a longer transient sequence</text>
       </g>
     );
   }

@@ -644,11 +644,11 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   let state = initializeConservativeState(inputs, geometry, mesh, gamma, rGas);
   const residuals: NozzleCfdResidualPoint[] = [];
   const frames: SolverResult["frames"] = [];
-  // Keep the interactive web solve inside serverless runtime limits. Higher
-  // fidelity belongs in a queued/offline solver; this path must always return
-  // raw diagnostic cells to the browser instead of timing out.
-  const iterationBudget = inputs.meshDensity === "research" ? 1100 : inputs.meshDensity === "fine" ? 760 : inputs.meshDensity === "coarse" ? 330 : 420;
-  const cfl = inputs.meshDensity === "research" ? 0.34 : inputs.meshDensity === "fine" ? 0.4 : inputs.meshDensity === "coarse" ? 0.52 : 0.46;
+  // Higher-fidelity interactive solve. Standard now uses a 136 x 56 grid and
+  // stores a longer transient sequence, so budget enough iterations for the
+  // plume to convect through the downstream domain without hiding raw cells.
+  const iterationBudget = inputs.meshDensity === "research" ? 1400 : inputs.meshDensity === "fine" ? 1000 : inputs.meshDensity === "coarse" ? 420 : 620;
+  const cfl = inputs.meshDensity === "research" ? 0.3 : inputs.meshDensity === "fine" ? 0.34 : inputs.meshDensity === "coarse" ? 0.5 : 0.38;
   let converged = false;
   let lastDt = 0;
   let maximumCfl = 0;
@@ -661,8 +661,8 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   const exitTemperatureK = inputs.chamberTemperatureK / (1 + ((gamma - 1) / 2) * estimatedExitMach * estimatedExitMach);
   const estimatedExitVelocityMS = estimatedExitMach * Math.sqrt(gamma * rGas * exitTemperatureK);
   const externalFlowThroughS = geometry.externalLengthM / Math.max(estimatedExitVelocityMS, 1);
-  const targetPhysicalTimeS = externalFlowThroughS * 1.6;
-  const frameInterval = Math.max(1, Math.floor(iterationBudget / 4));
+  const targetPhysicalTimeS = externalFlowThroughS * 8;
+  const frameInterval = Math.max(1, Math.floor(iterationBudget / 24));
   const audit = {
     computePrimitive: false,
     physicalFluxX: false,

@@ -58,6 +58,8 @@ export type NozzleCfdResult = {
   status: "queued" | "running" | "converged" | "failed";
   solver: "Rocketry House 2D axisymmetric finite-volume CFD" | "Rocketry House internal density-based nozzle CFD" | "OpenFOAM rhoCentralFoam";
   mesh: {
+    nx?: number;
+    ny?: number;
     cells: number;
     throatRefinementRatio: number;
     yPlusEstimate?: number;
