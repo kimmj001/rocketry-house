@@ -2545,6 +2545,8 @@ function NozzleIntegratedCfdOverlay({
 
   if (!field || !result) return null;
 
+  const machField = result.fields.find((item) => item.name === "mach");
+  const velocityField = result.fields.find((item) => item.name === "velocity");
   const xKeys = Array.from(new Set(field.cells.map((cell) => cell.x.toFixed(5)))).sort((a, b) => Number(a) - Number(b));
   const yKeys = Array.from(new Set(field.cells.map((cell) => (cell.physicalY ?? cell.y).toFixed(5)))).sort((a, b) => Number(a) - Number(b));
   const xStep = domainLength / Math.max(xKeys.length, 1);
@@ -2577,11 +2579,20 @@ function NozzleIntegratedCfdOverlay({
           const radialDistance = physicalY * yScale;
           const yTop = centerY - radialDistance - yStep / 2;
           const yBottom = centerY + radialDistance - yStep / 2;
-          const color = contourColor(frameValues?.[index] ?? cell.value, field.min, field.max);
+          const selectedValue = frameValues?.[index] ?? cell.value;
+          const color = contourColor(selectedValue, field.min, field.max);
+          const machValue = machField?.cells[index]?.value ?? (field.name === "mach" ? selectedValue : 0);
+          const velocityValue = velocityField?.cells[index]?.value ?? (field.name === "velocity" ? selectedValue : 0);
+          const flowActivity = Math.max((machValue - 0.03) / 1.12, velocityValue / 760);
+          const outletFade = cell.inNozzle ? 1 : Math.max(0, Math.min(1, (0.985 - xi / Math.max(xKeys.length - 1, 1)) / 0.11));
+          const opacity = cell.inNozzle ? 0.95 : Math.max(0, Math.min(0.9, flowActivity)) * outletFade;
+
+          if (!cell.inNozzle && opacity < 0.06) return null;
+
           return (
             <g key={`${field.name}-integrated-${index}`}>
-              <rect x={x} y={yTop} width={Math.max(xStep, 0.8)} height={Math.max(yStep, 0.8)} fill={color} opacity="0.95" />
-              <rect x={x} y={yBottom} width={Math.max(xStep, 0.8)} height={Math.max(yStep, 0.8)} fill={color} opacity="0.95" />
+              <rect x={x} y={yTop} width={Math.max(xStep, 0.8)} height={Math.max(yStep, 0.8)} fill={color} opacity={opacity} />
+              <rect x={x} y={yBottom} width={Math.max(xStep, 0.8)} height={Math.max(yStep, 0.8)} fill={color} opacity={opacity} />
             </g>
           );
         })}
@@ -2593,7 +2604,6 @@ function NozzleIntegratedCfdOverlay({
           {inletWall ? <line x1={inletWall.x} x2={inletWall.x} y1={centerY - inletWall.radialEdge} y2={centerY + inletWall.radialEdge} /> : null}
         </g>
       ) : null}
-      <rect x={inletX} y={centerY - 132} width={domainLength} height={264} fill="transparent" stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
       <line x1={exitProbeX} x2={exitProbeX} y1="36" y2="294" stroke="#f8fafc" strokeWidth="1.6" strokeDasharray="6 6" opacity="0.75" />
       <text x={exitProbeX + 8} y="50" fill="#e2e8f0" fontSize="12">exit probe</text>
       {!physicallyValid ? (
