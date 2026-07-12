@@ -6,9 +6,21 @@ const G0 = 9.80665;
 
 function fieldStats(cells: NozzleCfdCell[]) {
   const values = cells.map((cell) => cell.value).filter(Number.isFinite);
+  if (!values.length) {
+    return { min: 0, max: 1 };
+  }
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return { min: 0, max: 1 };
+  }
+  if (Math.abs(max - min) < 1e-9) {
+    const pad = Math.max(Math.abs(min) * 0.05, 1);
+    return { min: min - pad, max: max + pad };
+  }
   return {
-    min: Math.min(...values),
-    max: Math.max(...values)
+    min,
+    max
   };
 }
 

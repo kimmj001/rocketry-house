@@ -2474,8 +2474,18 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   );
 }
 
+function finiteNumberOrNull(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function contourColor(value: number, min: number, max: number) {
-  const t = Math.max(0, Math.min(1, (value - min) / Math.max(max - min, 1e-9)));
+  const safeValue = finiteNumberOrNull(value);
+  const safeMin = finiteNumberOrNull(min);
+  const safeMax = finiteNumberOrNull(max);
+  if (safeValue === null || safeMin === null || safeMax === null || safeMax <= safeMin) {
+    return "rgb(217, 70, 239)";
+  }
+  const t = Math.max(0, Math.min(1, (safeValue - safeMin) / Math.max(safeMax - safeMin, 1e-9)));
   const stops = [
     [15, 23, 42],
     [30, 64, 175],
@@ -2580,14 +2590,16 @@ function NozzleIntegratedCfdOverlay({
           const yTop = centerY - radialDistance - yStep / 2;
           const yBottom = centerY + radialDistance - yStep / 2;
           const selectedValue = frameValues?.[index] ?? cell.value;
+          const invalidSelected = finiteNumberOrNull(selectedValue) === null;
           const color = contourColor(selectedValue, field.min, field.max);
-          const machValue = machField?.cells[index]?.value ?? (field.name === "mach" ? selectedValue : 0);
-          const velocityValue = velocityField?.cells[index]?.value ?? (field.name === "velocity" ? selectedValue : 0);
+          const machValue = finiteNumberOrNull(machField?.cells[index]?.value) ?? (field.name === "mach" ? finiteNumberOrNull(selectedValue) ?? 0 : 0);
+          const velocityValue = finiteNumberOrNull(velocityField?.cells[index]?.value) ?? (field.name === "velocity" ? finiteNumberOrNull(selectedValue) ?? 0 : 0);
           const flowActivity = Math.max((machValue - 0.03) / 1.12, velocityValue / 760);
           const outletFade = cell.inNozzle ? 1 : Math.max(0, Math.min(1, (0.985 - xi / Math.max(xKeys.length - 1, 1)) / 0.11));
-          const opacity = cell.inNozzle ? 0.95 : Math.max(0, Math.min(0.9, flowActivity)) * outletFade;
+          const boundedActivity = Number.isFinite(flowActivity) ? Math.max(0, Math.min(0.9, flowActivity)) : 0;
+          const opacity = invalidSelected ? 0.92 : cell.inNozzle ? 0.95 : boundedActivity * outletFade;
 
-          if (!cell.inNozzle && opacity < 0.06) return null;
+          if (!cell.inNozzle && !invalidSelected && opacity < 0.06) return null;
 
           return (
             <g key={`${field.name}-integrated-${index}`}>

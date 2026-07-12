@@ -80,6 +80,7 @@ function cloneState(state: ConservativeState): ConservativeState {
 }
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const finiteOr = (value: number, fallback: number) => Number.isFinite(value) ? value : fallback;
 
 export function gasConstant(inputs: NozzleCfdInputs) {
   return R_UNIVERSAL / Math.max(inputs.molecularWeightKgPerKmol, 1);
@@ -106,21 +107,28 @@ function writeConservative(state: ConservativeState, index: number, conserved: C
 }
 
 function conservativeFromPrimitive(primitive: Primitive, gamma: number): Conserved {
-  const rho = Math.max(primitive.rho, RHO_MIN);
-  const rhoE = primitive.p / (gamma - 1) + 0.5 * rho * (primitive.u * primitive.u + primitive.v * primitive.v);
-  return [rho, rho * primitive.u, rho * primitive.v, rhoE];
+  const rho = Math.max(finiteOr(primitive.rho, RHO_MIN), RHO_MIN);
+  const u = clamp(finiteOr(primitive.u, 0), -4800, 4800);
+  const v = clamp(finiteOr(primitive.v, 0), -4800, 4800);
+  const p = Math.max(finiteOr(primitive.p, PRESSURE_MIN), PRESSURE_MIN);
+  const rhoE = p / (gamma - 1) + 0.5 * rho * (u * u + v * v);
+  return [rho, rho * u, rho * v, rhoE];
 }
 
 export function computePrimitiveFromConserved(conserved: Conserved, gamma: number, rGas: number): Primitive {
-  const rho = Math.max(conserved[0], RHO_MIN);
-  const u = conserved[1] / rho;
-  const v = conserved[2] / rho;
+  const rho = Math.max(finiteOr(conserved[0], RHO_MIN), RHO_MIN);
+  const rhoU = finiteOr(conserved[1], 0);
+  const rhoV = finiteOr(conserved[2], 0);
+  const rhoE = finiteOr(conserved[3], PRESSURE_MIN / (gamma - 1));
+  const u = clamp(finiteOr(rhoU / rho, 0), -4800, 4800);
+  const v = clamp(finiteOr(rhoV / rho, 0), -4800, 4800);
   const kinetic = 0.5 * rho * (u * u + v * v);
-  const p = Math.max((gamma - 1) * (conserved[3] - kinetic), PRESSURE_MIN);
-  const t = Math.max(p / (rho * rGas), TEMP_MIN);
-  const a = Math.sqrt(Math.max(gamma * rGas * t, 1));
-  const mach = Math.sqrt(u * u + v * v) / a;
-  return { rho, u, v, p, t, a, mach, e: conserved[3] / rho };
+  const p = Math.max(finiteOr((gamma - 1) * (rhoE - kinetic), PRESSURE_MIN), PRESSURE_MIN);
+  const t = Math.max(finiteOr(p / (rho * rGas), TEMP_MIN), TEMP_MIN);
+  const a = Math.sqrt(Math.max(finiteOr(gamma * rGas * t, 1), 1));
+  const mach = finiteOr(Math.sqrt(u * u + v * v) / a, 0);
+  const fallbackEnergy = p / ((gamma - 1) * rho) + 0.5 * (u * u + v * v);
+  return { rho, u, v, p, t, a, mach, e: finiteOr(rhoE / rho, fallbackEnergy) };
 }
 
 export function computePrimitive(state: ConservativeState, index: number, gamma: number, rGas: number): Primitive {
