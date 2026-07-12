@@ -652,10 +652,12 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   let state = initializeConservativeState(inputs, geometry, mesh, gamma, rGas);
   const residuals: NozzleCfdResidualPoint[] = [];
   const frames: SolverResult["frames"] = [];
-  // Higher-fidelity interactive solve. Standard uses a 136 x 56 grid and now
-  // records roughly three times more downstream evolution so the transient can
-  // reach later plume/shock-cell behavior instead of ending at startup.
-  const iterationBudget = inputs.meshDensity === "research" ? 4200 : inputs.meshDensity === "fine" ? 3000 : inputs.meshDensity === "coarse" ? 1260 : 1860;
+  // Higher-fidelity interactive solve. Standard uses a 136 x 56 grid. Keep the
+  // transient horizon and frame cadence tied to the flow-through estimate so
+  // later plume/shock-cell behavior is computed instead of visually stretched.
+  const transientHistoryMultiplier = 5;
+  const baseIterationBudget = inputs.meshDensity === "research" ? 4200 : inputs.meshDensity === "fine" ? 3000 : inputs.meshDensity === "coarse" ? 1260 : 1860;
+  const iterationBudget = baseIterationBudget * transientHistoryMultiplier;
   const cfl = inputs.meshDensity === "research" ? 0.3 : inputs.meshDensity === "fine" ? 0.34 : inputs.meshDensity === "coarse" ? 0.5 : 0.38;
   let converged = false;
   let lastDt = 0;
@@ -669,8 +671,8 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   const exitTemperatureK = inputs.chamberTemperatureK / (1 + ((gamma - 1) / 2) * estimatedExitMach * estimatedExitMach);
   const estimatedExitVelocityMS = estimatedExitMach * Math.sqrt(gamma * rGas * exitTemperatureK);
   const externalFlowThroughS = geometry.externalLengthM / Math.max(estimatedExitVelocityMS, 1);
-  const targetPhysicalTimeS = externalFlowThroughS * 24;
-  const frameInterval = Math.max(1, Math.floor(iterationBudget / 72));
+  const targetPhysicalTimeS = externalFlowThroughS * 24 * transientHistoryMultiplier;
+  const frameInterval = Math.max(1, Math.floor(iterationBudget / (72 * transientHistoryMultiplier)));
   const audit = {
     computePrimitive: false,
     physicalFluxX: false,

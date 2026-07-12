@@ -2202,7 +2202,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
         }
         return current + 1;
       });
-    }, 320);
+    }, 107);
     return () => window.clearInterval(timer);
   }, [cfdFrames.length, cfdPlaying]);
   useEffect(() => {
@@ -2548,7 +2548,7 @@ function NozzleIntegratedCfdOverlay({
         <circle cx="500" cy="132" r="18" fill="none" stroke="#fb923c" strokeWidth="4" strokeLinecap="round" strokeDasharray="28 86" className="animate-spin" style={{ transformOrigin: "500px 132px" }} />
         <text x="500" y="170" textAnchor="middle" fill="#fff7ed" fontSize="15" fontWeight="600">Solving finite-volume flow</text>
         <text x="500" y="192" textAnchor="middle" fill="#fdba74" fontSize="13">{elapsedSeconds}s elapsed · extended transient run can take a few minutes</text>
-        <text x="500" y="214" textAnchor="middle" fill="#94a3b8" fontSize="11">Solving 136 x 56 cells and recording 3x more downstream flow evolution</text>
+        <text x="500" y="214" textAnchor="middle" fill="#94a3b8" fontSize="11">Solving 136 x 56 cells and recording 5x longer downstream flow evolution</text>
       </g>
     );
   }
