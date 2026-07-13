@@ -2485,15 +2485,20 @@ function contourColor(value: number, min: number, max: number) {
   if (safeValue === null || safeMin === null || safeMax === null || safeMax <= safeMin) {
     return "rgb(217, 70, 239)";
   }
-  const t = Math.max(0, Math.min(1, (safeValue - safeMin) / Math.max(safeMax - safeMin, 1e-9)));
+  const normalized = Math.max(0, Math.min(1, (safeValue - safeMin) / Math.max(safeMax - safeMin, 1e-9)));
+  const highContrast = Math.max(0, Math.min(1, (normalized - 0.5) * 1.55 + 0.5));
+  const t = Math.pow(highContrast, 0.78);
   const stops = [
-    [15, 23, 42],
-    [30, 64, 175],
+    [24, 29, 115],
+    [29, 78, 216],
+    [14, 165, 233],
     [6, 182, 212],
-    [132, 204, 22],
+    [34, 197, 94],
     [250, 204, 21],
     [249, 115, 22],
-    [220, 38, 38]
+    [239, 68, 68],
+    [190, 24, 93],
+    [248, 250, 252]
   ];
   const scaled = t * (stops.length - 1);
   const index = Math.min(stops.length - 2, Math.floor(scaled));
@@ -2595,11 +2600,8 @@ function NozzleIntegratedCfdOverlay({
           const machValue = finiteNumberOrNull(machField?.cells[index]?.value) ?? (field.name === "mach" ? finiteNumberOrNull(selectedValue) ?? 0 : 0);
           const velocityValue = finiteNumberOrNull(velocityField?.cells[index]?.value) ?? (field.name === "velocity" ? finiteNumberOrNull(selectedValue) ?? 0 : 0);
           const flowActivity = Math.max((machValue - 0.03) / 1.12, velocityValue / 760);
-          const outletFade = cell.inNozzle ? 1 : Math.max(0, Math.min(1, (0.985 - xi / Math.max(xKeys.length - 1, 1)) / 0.11));
           const boundedActivity = Number.isFinite(flowActivity) ? Math.max(0, Math.min(0.9, flowActivity)) : 0;
-          const opacity = invalidSelected ? 0.92 : cell.inNozzle ? 0.95 : boundedActivity * outletFade;
-
-          if (!cell.inNozzle && !invalidSelected && opacity < 0.06) return null;
+          const opacity = invalidSelected ? 0.96 : cell.inNozzle ? 0.95 : Math.max(0.72, 0.5 + boundedActivity * 0.45);
 
           return (
             <g key={`${field.name}-integrated-${index}`}>

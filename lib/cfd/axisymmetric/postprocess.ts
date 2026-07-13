@@ -4,13 +4,20 @@ import type { NozzleCfdCell, NozzleCfdField, NozzleCfdInputs, NozzleCfdResult } 
 
 const G0 = 9.80665;
 
+function finiteOr(value: number, fallback = 0) {
+  return Number.isFinite(value) ? value : fallback;
+}
+
 function fieldStats(cells: NozzleCfdCell[]) {
   const values = cells.map((cell) => cell.value).filter(Number.isFinite);
   if (!values.length) {
     return { min: 0, max: 1 };
   }
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const sorted = [...values].sort((a, b) => a - b);
+  const lowIndex = Math.floor((sorted.length - 1) * 0.005);
+  const highIndex = Math.ceil((sorted.length - 1) * 0.995);
+  const min = sorted[lowIndex] ?? Math.min(...values);
+  const max = sorted[highIndex] ?? Math.max(...values);
   if (!Number.isFinite(min) || !Number.isFinite(max)) {
     return { min: 0, max: 1 };
   }
@@ -63,9 +70,9 @@ function sampleEvery(mesh: CfdMesh) {
 }
 
 function densityGradientAt(i: number, j: number, state: ConservativeState, mesh: CfdMesh, inputs: NozzleCfdInputs) {
-  const current = primitiveCell(cellIndex(i, j, mesh), state, inputs).rho;
+  const current = finiteOr(primitiveCell(cellIndex(i, j, mesh), state, inputs).rho);
   const density = (sampleI: number, sampleJ: number) => isInside(sampleI, sampleJ, mesh)
-    ? primitiveCell(cellIndex(sampleI, sampleJ, mesh), state, inputs).rho
+    ? finiteOr(primitiveCell(cellIndex(sampleI, sampleJ, mesh), state, inputs).rho, current)
     : current;
   const leftI = Math.max(0, i - 1);
   const rightI = Math.min(mesh.nx - 1, i + 1);
@@ -73,7 +80,7 @@ function densityGradientAt(i: number, j: number, state: ConservativeState, mesh:
   const dy = Math.max((j === 0 || j === mesh.ny - 1 ? 1 : 2) * mesh.dy, mesh.dy);
   const dRhoDx = (density(rightI, j) - density(leftI, j)) / dx;
   const dRhoDy = (density(i, Math.min(mesh.ny - 1, j + 1)) - density(i, Math.max(0, j - 1))) / dy;
-  return Math.log1p(Math.hypot(dRhoDx, dRhoDy));
+  return finiteOr(Math.log1p(Math.hypot(dRhoDx, dRhoDy)));
 }
 
 export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh, solver: SolverResult): NozzleCfdResult {
@@ -103,12 +110,12 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
         const index = cellIndex(i, j, mesh);
         if (!mesh.inside[index]) continue;
         const primitive = primitiveCell(index, frame.state, inputs);
-        fields.mach!.push(Number(primitive.mach.toFixed(5)));
-        fields.pressure!.push(Number((primitive.p / 1000).toFixed(3)));
-        fields.temperature!.push(Number(primitive.t.toFixed(3)));
-        fields.density!.push(Number(primitive.rho.toFixed(6)));
-        fields.velocity!.push(Number(Math.hypot(primitive.u, primitive.v).toFixed(3)));
-        fields.schlieren!.push(Number(densityGradientAt(i, j, frame.state, mesh, inputs).toFixed(5)));
+        fields.mach!.push(Number(finiteOr(primitive.mach).toFixed(5)));
+        fields.pressure!.push(Number(finiteOr(primitive.p / 1000).toFixed(3)));
+        fields.temperature!.push(Number(finiteOr(primitive.t).toFixed(3)));
+        fields.density!.push(Number(finiteOr(primitive.rho).toFixed(6)));
+        fields.velocity!.push(Number(finiteOr(Math.hypot(primitive.u, primitive.v)).toFixed(3)));
+        fields.schlieren!.push(Number(finiteOr(densityGradientAt(i, j, frame.state, mesh, inputs)).toFixed(5)));
       }
     }
     return {
@@ -127,9 +134,13 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
       const localWall = Math.max(mesh.wallRadius[i], mesh.dy);
       const physicalY = mesh.y[j] / Math.max(mesh.y[mesh.ny - 1], mesh.dy);
       const wallY = mesh.y[j] / localWall;
-      const vMag = Math.sqrt(primitive.u * primitive.u + primitive.v * primitive.v);
-      const densityGradient = densityGradientAt(i, j, solver.state, mesh, inputs);
-      const totalFactor = 1 + ((gamma - 1) / 2) * primitive.mach * primitive.mach;
+      const mach = finiteOr(primitive.mach);
+      const pressureKpa = finiteOr(primitive.p / 1000);
+      const temperature = finiteOr(primitive.t);
+      const density = finiteOr(primitive.rho);
+      const vMag = finiteOr(Math.sqrt(primitive.u * primitive.u + primitive.v * primitive.v));
+      const densityGradient = finiteOr(densityGradientAt(i, j, solver.state, mesh, inputs));
+      const totalFactor = finiteOr(1 + ((gamma - 1) / 2) * mach * mach, 1);
       const cellGeometry = {
         x,
         y: physicalY,
@@ -137,15 +148,15 @@ export function postProcessNozzleSolution(inputs: NozzleCfdInputs, mesh: CfdMesh
         physicalY,
         inNozzle: mesh.x[i] <= mesh.x[mesh.nozzleExitIndex]
       };
-      machCells.push({ ...cellGeometry, value: primitive.mach });
-      pressureCells.push({ ...cellGeometry, value: primitive.p / 1000 });
-      temperatureCells.push({ ...cellGeometry, value: primitive.t });
-      densityCells.push({ ...cellGeometry, value: primitive.rho });
+      machCells.push({ ...cellGeometry, value: mach });
+      pressureCells.push({ ...cellGeometry, value: pressureKpa });
+      temperatureCells.push({ ...cellGeometry, value: temperature });
+      densityCells.push({ ...cellGeometry, value: density });
       velocityCells.push({ ...cellGeometry, value: vMag });
       schlierenCells.push({ ...cellGeometry, value: densityGradient });
-      faceFluxCells.push({ ...cellGeometry, value: primitive.rho * vMag });
-      totalPressureCells.push({ ...cellGeometry, value: primitive.p * Math.pow(totalFactor, gamma / (gamma - 1)) / 1000 });
-      totalTemperatureCells.push({ ...cellGeometry, value: primitive.t * totalFactor });
+      faceFluxCells.push({ ...cellGeometry, value: finiteOr(density * vMag) });
+      totalPressureCells.push({ ...cellGeometry, value: finiteOr(pressureKpa * Math.pow(totalFactor, gamma / (gamma - 1)), pressureKpa) });
+      totalTemperatureCells.push({ ...cellGeometry, value: finiteOr(temperature * totalFactor, temperature) });
     }
   }
 
