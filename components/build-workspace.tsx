@@ -2202,7 +2202,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
         }
         return current + 1;
       });
-    }, 107);
+    }, 27);
     return () => window.clearInterval(timer);
   }, [cfdFrames.length, cfdPlaying]);
   useEffect(() => {
