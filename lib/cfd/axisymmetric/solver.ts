@@ -13,6 +13,7 @@ const R_UNIVERSAL = 8314.462618;
 const RHO_MIN = 1e-6;
 const PRESSURE_MIN = 20;
 const TEMP_MIN = 30;
+const TRANSIENT_FRAME_LIMIT = 96;
 
 type Conserved = [number, number, number, number];
 type Flux = [number, number, number, number];
@@ -672,7 +673,10 @@ export function runFiniteVolumeSolver(inputs: NozzleCfdInputs, geometry: NozzleG
   const estimatedExitVelocityMS = estimatedExitMach * Math.sqrt(gamma * rGas * exitTemperatureK);
   const externalFlowThroughS = geometry.externalLengthM / Math.max(estimatedExitVelocityMS, 1);
   const targetPhysicalTimeS = externalFlowThroughS * 24 * transientHistoryMultiplier;
-  const frameInterval = Math.max(1, Math.floor(iterationBudget / (72 * transientHistoryMultiplier)));
+  // Keep the solved field fidelity, but cap stored animation snapshots. Cloning
+  // the full conservative state hundreds of times is the main interactive cost.
+  const targetFrameCount = inputs.meshDensity === "coarse" ? 64 : TRANSIENT_FRAME_LIMIT;
+  const frameInterval = Math.max(1, Math.ceil(iterationBudget / targetFrameCount));
   const audit = {
     computePrimitive: false,
     physicalFluxX: false,

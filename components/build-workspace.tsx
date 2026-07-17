@@ -2287,12 +2287,12 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
 
   return (
     <div className="fixed inset-0 z-[90] grid place-items-center bg-black/70 px-4 py-4">
-      <Card className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden p-0">
+      <Card className="flex h-[92vh] w-full max-w-3xl flex-col overflow-hidden p-0">
         <div className="shrink-0 border-b border-white/10 bg-white/[0.04] px-5 py-4">
           <h2 className="text-xl font-semibold">Nozzle analysis tool</h2>
           <p className="mt-1 text-sm text-orange-50/55">Converging throat and diverging exit geometry for simulation review only.</p>
         </div>
-        <div className="min-h-0 overflow-y-auto p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="text-sm text-orange-50/65">Throat diameter
               <input type="number" min="1" value={parameters.nozzleThroatMm} onChange={(event) => updateThroat(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
@@ -2465,7 +2465,9 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
           </div>
           <NozzleCfdViewer result={cfdResult} error={cfdError} running={cfdRunning} fieldName={cfdFieldName} debugView={cfdDebugView} />
           <p className="mt-4 rounded-md border border-amber-200/20 bg-amber-200/8 p-3 text-xs leading-5 text-amber-50/82">Rocketry House records nozzle geometry for analysis and data comparison. It does not provide manufacturing certification or hazardous build instructions.</p>
-          <div className="sticky bottom-0 -mx-5 mt-5 flex justify-end gap-2 border-t border-white/10 bg-[#111827]/95 px-5 py-4 backdrop-blur">
+        </div>
+        <div className="shrink-0 border-t border-white/10 bg-[#111827]/95 px-5 py-4 backdrop-blur">
+          <div className="flex justify-end">
             <Button variant="ghost" onClick={onClose}>Close</Button>
           </div>
         </div>
