@@ -1,32 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import {
   Bell,
   Bookmark,
-  ImagePlus,
-  ChevronDown,
   ChevronRight,
   Eye,
   Flag,
+  ImagePlus,
   MessageSquare,
   PenLine,
   Search,
-  ShieldCheck,
-  SlidersHorizontal,
-  Star,
   ThumbsUp,
   UserRound,
-  UsersRound
+  UsersRound,
+  X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
   CommunityPost,
   communityTopics,
-  guestCommunityUser,
-  getCommunityAuthorFromAuth
+  getCommunityAuthorFromAuth,
+  guestCommunityUser
 } from "@/lib/community-data";
 import { readMockUser, restoreAuthUserFromCloud, type AuthUser } from "@/lib/auth";
 import { loadPersistentSet, savePersistentSet } from "@/lib/cloud-persistence";
@@ -37,6 +33,8 @@ const LIKED_POSTS_KEY = "rocketry-house-community-liked-posts";
 const BOOKMARKED_POSTS_KEY = "rocketry-house-community-bookmarked-posts";
 const REPORTED_POSTS_KEY = "rocketry-house-community-reported-posts";
 const memoryStore = new Map<string, string>();
+
+type SortMode = "Newest" | "Best" | "Most viewed";
 
 function getStoredItem(key: string) {
   if (typeof window === "undefined" || !window.localStorage) return memoryStore.get(key) ?? null;
@@ -49,12 +47,10 @@ function setStoredItem(key: string, value: string) {
     try {
       window.localStorage.setItem(key, value);
     } catch {
-      // IndexedDB archive still stores community posts when localStorage is full.
+      // IndexedDB and cloud archives still protect posts when localStorage is full.
     }
   }
 }
-
-type SortMode = "Newest" | "Best" | "Most viewed";
 
 function readStoredPosts() {
   if (typeof window === "undefined") return [];
@@ -80,520 +76,198 @@ function storeSet(key: string, value: Set<string>) {
 }
 
 function slugify(value: string) {
-  const base = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const base = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+
   return `${base || "community-post"}-${Date.now().toString(36)}`;
 }
 
 function viewNumber(value: string) {
-  return Number(value.replace(/,/g, "")) || 0;
+  const cleaned = value.replace(/,/g, "").trim();
+  if (cleaned.endsWith("k")) return Number.parseFloat(cleaned) * 1000;
+  return Number.parseFloat(cleaned) || 0;
+}
+
+function formatMetric(value: number | string) {
+  const number = typeof value === "number" ? value : viewNumber(value);
+  return new Intl.NumberFormat("en", { maximumFractionDigits: 0 }).format(number);
 }
 
 function postScore(post: CommunityPost) {
-  return post.likes + post.comments * 2 + Number(Boolean(post.best)) * 500;
+  return viewNumber(post.views) * 0.08 + post.likes * 4 + post.comments * 8;
 }
 
 function postFreshness(post: CommunityPost) {
-  if (post.createdAt) return new Date(post.createdAt).getTime();
-  const slugTime = post.slug.split("-").at(-1);
-  if (slugTime) {
-    const parsed = Number.parseInt(slugTime, 36);
-    if (Number.isFinite(parsed) && parsed > 1_000_000_000_000) return parsed;
-  }
-  return 0;
+  if (!post.createdAt) return 0;
+  return new Date(post.createdAt).getTime();
 }
 
-export function CommunityBoard() {
-  const [localPosts, setLocalPosts] = useState<CommunityPost[]>([]);
-  const [activeTopic, setActiveTopic] = useState("All topics");
-  const [query, setQuery] = useState("");
-  const [sortMode, setSortMode] = useState<SortMode>("Newest");
-  const [composerOpen, setComposerOpen] = useState(false);
-  const [liked, setLiked] = useState<Set<string>>(new Set());
-  const [bookmarked, setBookmarked] = useState<Set<string>>(new Set());
-  const [reported, setReported] = useState<Set<string>>(new Set());
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [author, setAuthor] = useState(guestCommunityUser);
-  const [teamOnly, setTeamOnly] = useState(false);
-  const [archiveStatus, setArchiveStatus] = useState("");
-  const [draft, setDraft] = useState({
-    topic: "CAD review",
-    title: "",
-    body: "",
-    linkedProject: "",
-    evidenceLinks: "",
-    images: [] as string[]
-  });
-
-  useEffect(() => {
-    setLocalPosts(readStoredPosts());
-    setLiked(readStoredSet(LIKED_POSTS_KEY));
-    setBookmarked(readStoredSet(BOOKMARKED_POSTS_KEY));
-    setReported(readStoredSet(REPORTED_POSTS_KEY));
-    void loadCommunityPostsArchive().then((posts) => setLocalPosts(posts));
-    void loadPersistentSet("community_state", LIKED_POSTS_KEY).then((value) => value.size && setLiked(value));
-    void loadPersistentSet("community_state", BOOKMARKED_POSTS_KEY).then((value) => value.size && setBookmarked(value));
-    void loadPersistentSet("community_state", REPORTED_POSTS_KEY).then((value) => value.size && setReported(value));
-    const syncAuthor = () => {
-      const nextUser = readMockUser();
-      setUser(nextUser);
-      setAuthor(getCommunityAuthorFromAuth(nextUser));
-      if (!nextUser) {
-        setComposerOpen(false);
-        setTeamOnly(false);
-      }
-    };
-    syncAuthor();
-    void restoreAuthUserFromCloud().then((cloudUser) => {
-      setUser(cloudUser);
-      setAuthor(getCommunityAuthorFromAuth(cloudUser));
-      if (!cloudUser) {
-        setComposerOpen(false);
-        setTeamOnly(false);
-      }
-    });
-    window.addEventListener("rocketry-auth-change", syncAuthor);
-    return () => window.removeEventListener("rocketry-auth-change", syncAuthor);
-  }, []);
-
-  const isSignedIn = Boolean(user);
-  const posts = useMemo(() => localPosts, [localPosts]);
-  const visiblePosts = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    const filtered = posts.filter((post) => {
-      const matchesTopic = activeTopic === "All topics" || post.topic === activeTopic;
-      const matchesTeam = !teamOnly || (isSignedIn && post.author.team === author.team);
-      const haystack = [post.title, post.preview, post.topic, post.author.name, post.author.team, post.linkedProject, ...post.evidenceLinks].join(" ").toLowerCase();
-      return matchesTopic && matchesTeam && (!normalizedQuery || haystack.includes(normalizedQuery));
-    });
-
-    return filtered.sort((a, b) => {
-      if (sortMode === "Newest") return postFreshness(b) - postFreshness(a);
-      if (sortMode === "Most viewed") return viewNumber(b.views) - viewNumber(a.views);
-      return postScore(b) - postScore(a);
-    });
-  }, [activeTopic, author.team, isSignedIn, posts, query, sortMode, teamOnly]);
-
-  const bestPosts = visiblePosts.filter((post) => post.best || post.likes > 150).sort((a, b) => postScore(b) - postScore(a)).slice(0, 3);
-  const recommendedPosts = visiblePosts.filter((post) => post.recommended || bookmarked.has(post.slug)).slice(0, 5);
-
-  function toggleSet(slug: string, key: string, setter: (value: Set<string>) => void, current: Set<string>) {
-    if (!isSignedIn) {
-      setArchiveStatus("Sign in or create an account to interact with community posts.");
-      return;
-    }
-    const next = new Set(current);
-    if (next.has(slug)) next.delete(slug);
-    else next.add(slug);
-    setter(next);
-    storeSet(key, next);
-  }
-
-  async function submitPost() {
-    if (!user) {
-      setArchiveStatus("Sign in or create an account to write a community post.");
-      setComposerOpen(false);
-      return;
-    }
-    const title = draft.title.trim();
-    const body = draft.body.trim();
-    if (!title || !body) return;
-    setArchiveStatus("Saving post to community archive...");
-
-    const paragraphs = body.split(/\n{2,}/).map((paragraph) => paragraph.trim()).filter(Boolean);
-    const post: CommunityPost = {
-      slug: slugify(title),
-      topic: draft.topic,
-      title,
-      preview: paragraphs[0]?.slice(0, 180) ?? body.slice(0, 180),
-      body: paragraphs.length ? paragraphs : [body],
-      author,
-      time: "just now",
-      views: "0",
-      likes: 0,
-      comments: 0,
-      evidenceLinks: draft.evidenceLinks.split(",").map((item) => item.trim()).filter(Boolean),
-      images: draft.images,
-      linkedProject: draft.linkedProject.trim() || undefined,
-      createdAt: new Date().toISOString(),
-      createdLocally: true,
-      commentList: []
-    };
-
-    const next = [post, ...localPosts];
-    setLocalPosts(next);
-    setStoredItem(LOCAL_POSTS_KEY, JSON.stringify(next));
-    const result = await saveCommunityPostArchive(post, localPosts);
-    setLocalPosts(result.posts);
-    setDraft({ topic: "CAD review", title: "", body: "", linkedProject: "", evidenceLinks: "", images: [] });
-    setComposerOpen(false);
-    setArchiveStatus(result.cloudOk ? "Post archived to Supabase and local cache." : result.idbOk ? "Post saved to browser archive. Supabase table is not installed yet." : "Post is visible for this session, but browser storage could not archive it.");
-  }
-
-  function attachImages(files: FileList | null) {
-    if (!files?.length) return;
-    Array.from(files).slice(0, 4).forEach((file) => {
-      if (!file.type.startsWith("image/")) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const value = typeof reader.result === "string" ? reader.result : "";
-        if (!value) return;
-        void compressImageDataUrl(value).then((compressed) => {
-          setDraft((current) => ({ ...current, images: [...current.images, compressed].slice(0, 4) }));
-        });
+function compressImageDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Image read failed."));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error("Image decode failed."));
+      image.onload = () => {
+        const maxEdge = 1400;
+        const scale = Math.min(1, maxEdge / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) {
+          reject(new Error("Canvas unavailable."));
+          return;
+        }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
       };
-      reader.readAsDataURL(file);
-    });
+      image.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function AuthorAvatar({ post }: { post: CommunityPost }) {
+  const initial = post.author.name.trim().charAt(0).toUpperCase() || "R";
+
+  if (post.author.avatarUrl) {
+    return (
+      <img
+        src={post.author.avatarUrl}
+        alt=""
+        className="h-11 w-11 rounded-full border border-slate-200 object-cover"
+      />
+    );
   }
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#f5f4f0] px-4 pb-16 pt-20 text-slate-950 sm:px-6 sm:py-24">
-      <div className="mx-auto max-w-[1440px]">
-        <section className="grid gap-6 lg:grid-cols-[1fr_360px]">
-          <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500 sm:text-sm sm:tracking-[0.22em]">Community</p>
-              <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-700">Real-name only</span>
-              <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">No anonymous posting</span>
-            </div>
-            <h1 className="mt-4 max-w-4xl text-[2rem] font-semibold leading-tight tracking-tight sm:text-4xl md:text-5xl">
-              Practical discussions for rocket builders, teams, and organizations.
-            </h1>
-            <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-600 sm:text-base sm:leading-7">
-              Ask for CAD review, compare flight data, publish build notes, and keep every reply tied to a visible engineering identity.
-            </p>
-          </div>
-
-          <Card className="border-slate-200 bg-white p-4 text-slate-950 shadow-sm sm:p-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">My community</h2>
-              <div className="flex gap-2 text-slate-500">
-                <Search className="h-5 w-5" />
-                <UserRound className="h-5 w-5" />
-                <Bell className="h-5 w-5" />
-              </div>
-            </div>
-            <div className="mt-4 flex items-center gap-3">
-              <Avatar name={author.name} avatarUrl={author.avatarUrl} />
-              <div>
-                <p className="font-semibold">{author.name}</p>
-                <p className="text-sm text-slate-500">{author.role}</p>
-              </div>
-            </div>
-            {isSignedIn ? (
-              <>
-                <div className="mt-5 grid gap-3">
-                  <Button className="h-12 bg-orange-500 text-white hover:bg-orange-400" onClick={() => setComposerOpen(true)}>
-                    <PenLine className="h-4 w-4" />
-                    Write post
-                  </Button>
-                  <Button variant="outline" onClick={() => setTeamOnly((value) => !value)} className="h-12 border-slate-200 bg-white text-slate-800 hover:bg-slate-50">
-                    <UsersRound className="h-4 w-4" />
-                    {teamOnly ? "Showing my team" : "My team discussions"}
-                  </Button>
-                </div>
-                <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
-                  Posts and replies display real name, role, profile type, and team or organization.
-                </p>
-              </>
-            ) : (
-              <>
-                <div className="mt-5 grid grid-cols-2 gap-3">
-                  <Button asChild className="h-12 bg-orange-500 text-white hover:bg-orange-400">
-                    <Link href="/auth/sign-in">Sign in</Link>
-                  </Button>
-                  <Button asChild variant="outline" className="h-12 border-slate-200 bg-white text-slate-800 hover:bg-slate-50">
-                    <Link href="/auth/sign-up">Sign up</Link>
-                  </Button>
-                </div>
-                <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
-                  Community is readable to everyone. Writing, replies, likes, saves, and reports require a real account.
-                </p>
-              </>
-            )}
-          </Card>
-        </section>
-
-        {composerOpen && isSignedIn ? (
-          <section className="mt-6 rounded-2xl border border-orange-200 bg-white p-4 shadow-lg sm:p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold sm:text-xl">Write with verified profile</h2>
-                <p className="mt-1 text-sm text-slate-500">Visible author: {author.name}, {author.team}</p>
-              </div>
-              <button className="shrink-0 text-sm font-semibold text-slate-500 hover:text-slate-900" onClick={() => setComposerOpen(false)}>Close</button>
-            </div>
-            <div className="mt-4 grid gap-3 lg:grid-cols-[220px_1fr]">
-              <label className="text-sm font-medium text-slate-600">
-                Topic
-                <select value={draft.topic} onChange={(event) => setDraft({ ...draft, topic: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-slate-900 outline-none focus:border-orange-300">
-                  {communityTopics.filter((topic) => topic !== "All topics").map((topic) => <option key={topic}>{topic}</option>)}
-                </select>
-              </label>
-              <label className="text-sm font-medium text-slate-600">
-                Title
-                <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-slate-900 outline-none focus:border-orange-300" placeholder="What do you want other builders to review?" />
-              </label>
-              <label className="text-sm font-medium text-slate-600 lg:col-span-2">
-                Body
-                <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} className="mt-1 min-h-40 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-slate-900 outline-none focus:border-orange-300" placeholder="Write the situation, assumptions, data attached, and the decision you need help with." />
-              </label>
-              <label className="text-sm font-medium text-slate-600">
-                Linked project
-                <input value={draft.linkedProject} onChange={(event) => setDraft({ ...draft, linkedProject: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-slate-900 outline-none focus:border-orange-300" placeholder="Optional project name" />
-              </label>
-              <label className="text-sm font-medium text-slate-600">
-                Evidence links
-                <input value={draft.evidenceLinks} onChange={(event) => setDraft({ ...draft, evidenceLinks: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-slate-900 outline-none focus:border-orange-300" placeholder="CSV, CAD version, photo set" />
-              </label>
-              <div className="min-w-0 lg:col-span-2">
-                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-600 transition hover:border-orange-300 hover:bg-orange-50">
-                  <ImagePlus className="h-5 w-5" />
-                  <span className="text-center">Attach photos for evidence or build context</span>
-                  <input type="file" accept="image/*" multiple className="hidden" onChange={(event) => attachImages(event.target.files)} />
-                </label>
-                {draft.images.length ? (
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {draft.images.map((image, index) => (
-                      <div key={image} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white">
-                        <img src={image} alt={`Attached community image ${index + 1}`} className="max-h-48 w-full object-contain p-2" />
-                        <button
-                          type="button"
-                          onClick={() => setDraft((current) => ({ ...current, images: current.images.filter((_, itemIndex) => itemIndex !== index) }))}
-                          className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-xs font-semibold text-white"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-              <p className="text-sm text-slate-500">Safety note: do not post harmful payloads, targeting workflows, or propellant manufacturing instructions.</p>
-              <Button className="h-12 bg-orange-500 text-white hover:bg-orange-400 sm:h-10" onClick={submitPost}>Publish post</Button>
-            </div>
-          </section>
-        ) : null}
-        {archiveStatus ? (
-          <p className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600 shadow-sm">
-            {archiveStatus}
-          </p>
-        ) : null}
-
-        <section className="mt-6 grid gap-5 lg:mt-8 lg:grid-cols-[260px_1fr_330px]">
-          <aside className="space-y-5 lg:order-none">
-            <Card className="border-slate-200 bg-white p-4 text-slate-950 shadow-sm sm:p-5">
-              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
-                <Search className="h-4 w-4" />
-                <input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent outline-none" placeholder="Search posts" />
-              </label>
-              <h2 className="mt-5 font-semibold">Topics</h2>
-              <div className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1 lg:mx-0 lg:block lg:space-y-2 lg:overflow-visible lg:px-0 lg:pb-0">
-                {communityTopics.map((topic) => (
-                  <button
-                    key={topic}
-                    onClick={() => setActiveTopic(topic)}
-                    className={`shrink-0 rounded-full border px-3 py-2 text-sm transition lg:flex lg:w-full lg:items-center lg:justify-between lg:rounded-lg ${
-                      topic === activeTopic
-                        ? "border-orange-200 bg-orange-50 font-semibold text-orange-700"
-                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    <span>{topic}</span>
-                    {topic === activeTopic ? <ChevronRight className="hidden h-4 w-4 lg:block" /> : null}
-                  </button>
-                ))}
-              </div>
-            </Card>
-
-            <Card className="hidden border-slate-200 bg-white p-5 text-slate-950 shadow-sm sm:block">
-              <h2 className="flex items-center gap-2 font-semibold">
-                <ShieldCheck className="h-5 w-5 text-emerald-600" />
-                Trust model
-              </h2>
-              <div className="mt-4 space-y-3 text-sm text-slate-600">
-                <p>Real name and role are shown on every post and reply.</p>
-                <p>Teams and organizations can verify members.</p>
-                <p>Unsafe or unlawful content can be reported for review.</p>
-              </div>
-            </Card>
-          </aside>
-
-          <div className="space-y-5">
-            <section className="rounded-2xl bg-slate-100 p-4 sm:p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-xl font-semibold sm:text-2xl">Best posts</h2>
-                <button onClick={() => setSortMode("Best")} className="flex items-center gap-1 text-sm text-slate-500">
-                  View ranked
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {bestPosts.length ? bestPosts.map((post) => (
-                  <PostCard
-                    key={post.slug}
-                    post={post}
-                    liked={liked.has(post.slug)}
-                    bookmarked={bookmarked.has(post.slug)}
-                    reported={reported.has(post.slug)}
-                    toggleLike={() => toggleSet(post.slug, LIKED_POSTS_KEY, setLiked, liked)}
-                    toggleBookmark={() => toggleSet(post.slug, BOOKMARKED_POSTS_KEY, setBookmarked, bookmarked)}
-                    toggleReport={() => toggleSet(post.slug, REPORTED_POSTS_KEY, setReported, reported)}
-                    compact
-                  />
-                )) : (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500 md:col-span-2 xl:col-span-3">
-                    No best posts yet. Rankings here will be based only on real community activity.
-                  </div>
-                )}
-              </div>
-            </section>
-
-            <section className="rounded-2xl bg-white shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4 sm:p-5">
-                <h2 className="text-xl font-semibold sm:text-2xl">Feed</h2>
-                <label className="flex items-center gap-2 text-sm text-slate-500">
-                  <SlidersHorizontal className="h-4 w-4" />
-                  <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="rounded-md border border-slate-200 bg-white px-2 py-2 text-slate-700">
-                    <option>Newest</option>
-                    <option>Best</option>
-                    <option>Most viewed</option>
-                  </select>
-                </label>
-              </div>
-              <div>
-                {visiblePosts.length ? visiblePosts.map((post) => (
-                  <PostCard
-                    key={post.slug}
-                    post={post}
-                    liked={liked.has(post.slug)}
-                    bookmarked={bookmarked.has(post.slug)}
-                    reported={reported.has(post.slug)}
-                    toggleLike={() => toggleSet(post.slug, LIKED_POSTS_KEY, setLiked, liked)}
-                    toggleBookmark={() => toggleSet(post.slug, BOOKMARKED_POSTS_KEY, setBookmarked, bookmarked)}
-                    toggleReport={() => toggleSet(post.slug, REPORTED_POSTS_KEY, setReported, reported)}
-                  />
-                )) : (
-                  <div className="p-6 text-center text-slate-500 sm:p-8">
-                    <p className="font-semibold text-slate-800">No community posts yet.</p>
-                    <p className="mt-1 text-sm">Real posts will appear here after signed-in users publish them.</p>
-                  </div>
-                )}
-              </div>
-            </section>
-          </div>
-
-          <aside className="space-y-5">
-            <Card className="border-slate-200 bg-white p-4 text-slate-950 shadow-sm sm:p-5">
-              <h2 className="font-semibold">Profile activity</h2>
-              <div className="mt-4 grid grid-cols-3 gap-2 text-center text-sm">
-                <ProfileStat label="Posts" value={String(localPosts.length)} />
-                <ProfileStat label="Likes" value={String(liked.size)} />
-                <ProfileStat label="Saved" value={String(bookmarked.size)} />
-              </div>
-            </Card>
-
-            <Card className="border-slate-200 bg-white p-4 text-slate-950 shadow-sm sm:p-5">
-              <h2 className="flex items-center gap-2 font-semibold">
-                <Star className="h-5 w-5 text-orange-500" />
-                Recommended posts
-              </h2>
-              <div className="mt-4 space-y-4">
-                {recommendedPosts.length ? recommendedPosts.map((post) => (
-                  <Link key={post.slug} href={`/community/${post.slug}`} className="block border-b border-slate-100 pb-4 last:border-b-0">
-                    <p className="text-sm text-slate-500">{post.topic}</p>
-                    <p className="mt-1 text-base font-semibold leading-snug text-slate-900">{post.title}</p>
-                    <PostStats views={post.views} likes={post.likes + Number(liked.has(post.slug))} comments={post.comments} compact />
-                  </Link>
-                )) : <p className="text-sm leading-6 text-slate-500">Recommendations will appear after real posts are saved or gain activity.</p>}
-              </div>
-            </Card>
-
-            <Card className="border-slate-200 bg-white p-4 text-slate-950 shadow-sm sm:p-5">
-              <h2 className="flex items-center gap-2 font-semibold">
-                <Flag className="h-5 w-5 text-slate-500" />
-                Moderation
-              </h2>
-              <p className="mt-3 text-sm leading-6 text-slate-600">
-                Reports mark posts for platform review. Rocketry House removes unsafe, unlawful, or weaponization-oriented content.
-              </p>
-              <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Reported this session: {reported.size}</p>
-            </Card>
-          </aside>
-        </section>
-      </div>
-    </main>
+    <div className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-sky-100 to-violet-200 text-sm font-bold text-slate-900">
+      {initial}
+    </div>
   );
 }
 
-function compressImageDataUrl(dataUrl: string) {
-  return new Promise<string>((resolve) => {
-    const image = new Image();
-    image.onload = () => {
-      const maxSide = 1600;
-      const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(image.width * scale));
-      canvas.height = Math.max(1, Math.round(image.height * scale));
-      const context = canvas.getContext("2d");
-      if (!context) {
-        resolve(dataUrl);
-        return;
-      }
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL("image/jpeg", 0.86));
-    };
-    image.onerror = () => resolve(dataUrl);
-    image.src = dataUrl;
-  });
+function PostMetrics({ post }: { post: CommunityPost }) {
+  return (
+    <div className="flex items-center gap-4 text-sm text-slate-400">
+      <span className="inline-flex items-center gap-1">
+        <Eye className="h-4 w-4" />
+        {formatMetric(post.views)}
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <ThumbsUp className="h-4 w-4" />
+        {formatMetric(post.likes)}
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <MessageSquare className="h-4 w-4" />
+        {formatMetric(post.comments)}
+      </span>
+    </div>
+  );
 }
 
-function PostCard({
+function CompactPostRow({ post }: { post: CommunityPost }) {
+  return (
+    <Link href={`/community/${post.slug}`} className="block border-b border-slate-100 px-4 py-3 last:border-b-0 hover:bg-slate-50">
+      <div className="line-clamp-1 text-sm font-semibold text-slate-800">{post.title}</div>
+      <div className="mt-1 flex items-center justify-between gap-3 text-xs text-slate-400">
+        <span>{post.topic}</span>
+        <PostMetrics post={post} />
+      </div>
+    </Link>
+  );
+}
+
+function FeedPost({
   post,
   liked,
   bookmarked,
   reported,
-  toggleLike,
-  toggleBookmark,
-  toggleReport,
-  compact = false
+  onLike,
+  onBookmark,
+  onReport
 }: {
   post: CommunityPost;
   liked: boolean;
   bookmarked: boolean;
   reported: boolean;
-  toggleLike: () => void;
-  toggleBookmark: () => void;
-  toggleReport: () => void;
-  compact?: boolean;
+  onLike: () => void;
+  onBookmark: () => void;
+  onReport: () => void;
 }) {
   return (
-    <article className={`${compact ? "rounded-xl border border-slate-200 bg-white p-4" : "border-b border-slate-200 p-4 last:border-b-0 sm:p-5"} transition hover:bg-slate-50`}>
-      <div className="flex items-start justify-between gap-4">
-        <Link href={`/community/${post.slug}`} className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-slate-500">{post.topic}</p>
-          <h3 className={`${compact ? "mt-2 text-base sm:text-lg" : "mt-2 text-xl sm:text-2xl"} break-words font-semibold leading-tight text-slate-950`}>
-            <span className="mr-2 text-orange-500">&bull;</span>
-            {post.title}
-          </h3>
-          {!compact ? <p className="mt-3 line-clamp-3 text-base leading-7 text-slate-500 sm:line-clamp-2 sm:text-lg sm:leading-8">{post.preview}</p> : null}
-        </Link>
-        <div className="flex shrink-0 gap-1 text-slate-400">
-          <IconButton active={bookmarked} label="Save post" onClick={toggleBookmark}><Bookmark className="h-4 w-4" /></IconButton>
-          <IconButton active={reported} label="Report post" onClick={toggleReport}><Flag className="h-4 w-4" /></IconButton>
+    <article className="border-b border-slate-100 bg-white px-5 py-5 last:border-b-0">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <span className="rounded-full bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-600">{post.topic}</span>
+        <div className="flex items-center gap-1 text-slate-400">
+          <button
+            type="button"
+            onClick={onBookmark}
+            className={`rounded-full p-1.5 hover:bg-slate-100 ${bookmarked ? "text-orange-600" : ""}`}
+            aria-label="Save post"
+          >
+            <Bookmark className="h-4 w-4" fill={bookmarked ? "currentColor" : "none"} />
+          </button>
+          <button
+            type="button"
+            onClick={onReport}
+            className={`rounded-full p-1.5 hover:bg-slate-100 ${reported ? "text-rose-600" : ""}`}
+            aria-label="Report post"
+          >
+            <Flag className="h-4 w-4" />
+          </button>
         </div>
       </div>
-      {!compact ? <AuthorBlock post={post} /> : null}
-      {post.images?.length ? <ImageStrip images={post.images} compact={compact} /> : null}
-      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <PostStats views={post.views} likes={post.likes + Number(liked)} comments={post.comments} compact={compact} />
-        <div className="grid grid-cols-2 gap-2 sm:flex">
-          <button onClick={toggleLike} className={`inline-flex items-center justify-center gap-1 rounded-full border px-3 py-2 text-sm font-semibold sm:py-1.5 ${liked ? "border-orange-200 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+
+      <Link href={`/community/${post.slug}`} className="group block">
+        <h3 className="text-xl font-bold leading-snug text-slate-950 group-hover:text-orange-600">{post.title}</h3>
+        <p className="mt-2 line-clamp-2 text-base leading-7 text-slate-500">{post.preview}</p>
+      </Link>
+
+      {post.images?.length ? (
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {post.images.slice(0, 2).map((image) => (
+            <img key={image} src={image} alt="" className="h-36 w-full rounded-sm object-cover" />
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <AuthorAvatar post={post} />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-slate-950">{post.author.name}</span>
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">{post.author.badge}</span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">{post.author.profileType}</span>
+          </div>
+          <div className="line-clamp-1 text-sm text-slate-500">
+            {post.author.role} / {post.author.team} / {post.time}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <PostMetrics post={post} />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onLike}
+            className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-semibold ${
+              liked ? "border-orange-200 bg-orange-50 text-orange-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"
+            }`}
+          >
             <ThumbsUp className="h-4 w-4" />
             Like
           </button>
-          <Link href={`/community/${post.slug}`} className="inline-flex items-center justify-center gap-1 rounded-full border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-50 sm:py-1.5">
+          <Link
+            href={`/community/${post.slug}`}
+            className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50"
+          >
             <MessageSquare className="h-4 w-4" />
             Reply
           </Link>
@@ -603,68 +277,435 @@ function PostCard({
   );
 }
 
-function ImageStrip({ images, compact }: { images: string[]; compact?: boolean }) {
-  return (
-    <div className={`mt-4 grid gap-2 ${compact ? "grid-cols-2" : "grid-cols-2 md:grid-cols-3"}`}>
-      {images.slice(0, compact ? 2 : 3).map((image, index) => (
-        <img key={`${image}-${index}`} src={image} alt={`Community attachment ${index + 1}`} className={`${compact ? "max-h-32" : "max-h-72"} w-full rounded-xl border border-slate-200 bg-white object-contain p-2`} />
-      ))}
-    </div>
-  );
-}
+export function CommunityBoard() {
+  const [localPosts, setLocalPosts] = useState<CommunityPost[]>([]);
+  const [activeTopic, setActiveTopic] = useState<string>("All topics");
+  const [query, setQuery] = useState("");
+  const [sortMode, setSortMode] = useState<SortMode>("Newest");
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [liked, setLiked] = useState<Set<string>>(new Set());
+  const [bookmarked, setBookmarked] = useState<Set<string>>(new Set());
+  const [reported, setReported] = useState<Set<string>>(new Set());
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [archiveStatus, setArchiveStatus] = useState("");
+  const [draft, setDraft] = useState({
+    title: "",
+    body: "",
+    topic: "Propulsion",
+    images: [] as string[]
+  });
 
-function AuthorBlock({ post }: { post: CommunityPost }) {
+  useEffect(() => {
+    let active = true;
+
+    setLocalPosts(readStoredPosts());
+    setLiked(readStoredSet(LIKED_POSTS_KEY));
+    setBookmarked(readStoredSet(BOOKMARKED_POSTS_KEY));
+    setReported(readStoredSet(REPORTED_POSTS_KEY));
+
+    async function hydrate() {
+      const restored = await restoreAuthUserFromCloud();
+      const nextUser = restored ?? readMockUser();
+      if (!active) return;
+      setUser(nextUser);
+
+      const [cloudPosts, cloudLiked, cloudBookmarked, cloudReported] = await Promise.all([
+        loadCommunityPostsArchive(),
+        loadPersistentSet("community_state", LIKED_POSTS_KEY),
+        loadPersistentSet("community_state", BOOKMARKED_POSTS_KEY),
+        loadPersistentSet("community_state", REPORTED_POSTS_KEY)
+      ]);
+
+      if (!active) return;
+
+      if (cloudPosts.length) {
+        const merged = new Map<string, CommunityPost>();
+        [...cloudPosts, ...readStoredPosts()].forEach((post) => merged.set(post.slug, post));
+        const nextPosts = Array.from(merged.values()).sort((a, b) => postFreshness(b) - postFreshness(a));
+        setLocalPosts(nextPosts);
+        setStoredItem(LOCAL_POSTS_KEY, JSON.stringify(nextPosts));
+        setArchiveStatus(`Synced ${nextPosts.length} archived community posts.`);
+      }
+
+      if (cloudLiked.size) setLiked(cloudLiked);
+      if (cloudBookmarked.size) setBookmarked(cloudBookmarked);
+      if (cloudReported.size) setReported(cloudReported);
+    }
+
+    void hydrate();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const author = useMemo(() => getCommunityAuthorFromAuth(user), [user]);
+  const isSignedIn = Boolean(user?.email);
+  const posts = useMemo(() => localPosts, [localPosts]);
+
+  const visiblePosts = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const filtered = posts.filter((post) => {
+      const topicMatch = activeTopic === "All topics" || post.topic === activeTopic;
+      const queryMatch =
+        !normalizedQuery ||
+        [post.title, post.preview, post.author.name, post.author.team, post.topic]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedQuery);
+      return topicMatch && queryMatch;
+    });
+
+    return filtered.sort((a, b) => {
+      if (sortMode === "Best") return postScore(b) - postScore(a);
+      if (sortMode === "Most viewed") return viewNumber(b.views) - viewNumber(a.views);
+      return postFreshness(b) - postFreshness(a);
+    });
+  }, [activeTopic, posts, query, sortMode]);
+
+  const bestPosts = useMemo(() => {
+    const candidates = visiblePosts.length ? visiblePosts : posts;
+    return candidates
+      .filter((post) => post.best || post.likes > 20 || post.comments > 5)
+      .sort((a, b) => postScore(b) - postScore(a))
+      .slice(0, 3);
+  }, [posts, visiblePosts]);
+
+  const recommendedPosts = useMemo(() => {
+    const candidates = visiblePosts.length ? visiblePosts : posts;
+    return candidates
+      .filter((post) => post.recommended || bookmarked.has(post.slug))
+      .concat(candidates)
+      .filter((post, index, array) => array.findIndex((item) => item.slug === post.slug) === index)
+      .slice(0, 7);
+  }, [bookmarked, posts, visiblePosts]);
+
+  function toggleSet(key: string, setter: (next: Set<string>) => void, value: Set<string>, slug: string) {
+    const next = new Set(value);
+    if (next.has(slug)) next.delete(slug);
+    else next.add(slug);
+    setter(next);
+    storeSet(key, next);
+  }
+
+  async function submitPost() {
+    if (!isSignedIn || !draft.title.trim() || !draft.body.trim()) return;
+
+    const now = new Date();
+    const post: CommunityPost = {
+      slug: slugify(draft.title),
+      topic: draft.topic,
+      title: draft.title.trim(),
+      preview: draft.body.trim(),
+      body: draft.body
+        .trim()
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph.trim())
+        .filter(Boolean),
+      author,
+      time: "Just now",
+      views: "0",
+      likes: 0,
+      comments: 0,
+      evidenceLinks: [],
+      images: draft.images,
+      createdAt: now.toISOString(),
+      createdLocally: true,
+      commentList: []
+    };
+
+    const nextPosts = [post, ...localPosts];
+    setLocalPosts(nextPosts);
+    setStoredItem(LOCAL_POSTS_KEY, JSON.stringify(nextPosts));
+    setDraft({ title: "", body: "", topic: "Propulsion", images: [] });
+    setComposerOpen(false);
+    setArchiveStatus("Saving post to the cloud archive...");
+
+    const result = await saveCommunityPostArchive(post, nextPosts);
+    setArchiveStatus(result.cloudOk ? "Post saved to the cloud archive." : "Post saved locally. Cloud sync will retry when configured.");
+  }
+
+  async function attachImages(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    if (!files.length) return;
+    const encoded = await Promise.all(files.slice(0, 4).map((file) => compressImageDataUrl(file)));
+    setDraft((current) => ({ ...current, images: [...current.images, ...encoded].slice(0, 4) }));
+    event.target.value = "";
+  }
+
   return (
-    <div className="mt-4 flex items-start gap-3">
-      <Avatar name={post.author.name} avatarUrl={post.author.avatarUrl} />
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="font-semibold">{post.author.name}</p>
-          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">{post.author.badge}</span>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{post.author.profileType}</span>
+    <main className="min-h-screen bg-[#f2f2f2] px-4 pb-20 pt-20 text-slate-950 sm:px-6">
+      <div className="mx-auto grid max-w-[1180px] gap-6 lg:grid-cols-[280px_minmax(0,620px)_280px]">
+        <aside className="space-y-5 lg:sticky lg:top-20">
+          <section className="bg-white p-4 shadow-sm">
+            <label className="flex items-center gap-3 rounded-sm bg-slate-50 px-4 py-3 text-slate-400">
+              <Search className="h-5 w-5" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search discussions"
+                className="w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
+              />
+            </label>
+          </section>
+
+          <section className="bg-white shadow-sm">
+            <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
+              <UsersRound className="h-5 w-5 text-orange-500" />
+              <h2 className="font-bold">My aerospace community</h2>
+            </div>
+            <div className="p-5">
+              {isSignedIn ? (
+                <div className="flex items-center gap-3">
+                  <AuthorAvatar
+                    post={{
+                      slug: "me",
+                      topic: "Profile",
+                      title: "",
+                      preview: "",
+                      body: [],
+                      author,
+                      time: "",
+                      views: "0",
+                      likes: 0,
+                      comments: 0,
+                      evidenceLinks: []
+                    }}
+                  />
+                  <div>
+                    <div className="font-bold">{author.name}</div>
+                    <div className="text-sm text-slate-500">{author.team}</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-sm border border-dashed border-slate-300 p-4">
+                  <p className="text-sm text-slate-500">Sign in to write posts, reply, save discussions, and sync your archive.</p>
+                  <Link
+                    href="/auth/sign-in"
+                    className="mt-3 inline-flex rounded-sm bg-black px-5 py-2 text-sm font-bold text-white hover:bg-slate-800"
+                  >
+                    Sign in
+                  </Link>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="bg-white shadow-sm">
+            <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
+              <UserRound className="h-5 w-5 text-emerald-600" />
+              <h2 className="font-bold">Topics</h2>
+            </div>
+            <div className="max-h-[420px] overflow-y-auto py-2">
+              {communityTopics.map((topic) => (
+                <button
+                  key={topic}
+                  type="button"
+                  onClick={() => setActiveTopic(topic)}
+                  className={`flex w-full items-center justify-between px-5 py-3 text-left text-sm font-semibold hover:bg-slate-50 ${
+                    activeTopic === topic ? "text-orange-600" : "text-slate-700"
+                  }`}
+                >
+                  <span>{topic}</span>
+                  <ChevronRight className="h-4 w-4 text-slate-400" />
+                </button>
+              ))}
+            </div>
+          </section>
+        </aside>
+
+        <section className="min-w-0 space-y-5">
+          <div className="flex items-center gap-3 bg-white px-5 py-4 shadow-sm">
+            <span className="rounded-sm bg-black px-3 py-1 text-xs font-bold text-white">Community update</span>
+            <p className="text-sm font-semibold text-slate-600">Share build evidence, flight notes, and engineering questions with real-name profiles.</p>
+          </div>
+
+          <section className="bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <ThumbsUp className="h-5 w-5 text-orange-500" />
+                <h2 className="font-bold">Best posts</h2>
+              </div>
+              <button type="button" onClick={() => setSortMode("Best")} className="text-sm font-semibold text-slate-500 underline underline-offset-4">
+                View all
+              </button>
+            </div>
+            {bestPosts.length ? (
+              bestPosts.map((post) => <CompactPostRow key={post.slug} post={post} />)
+            ) : (
+              <div className="px-5 py-6 text-sm text-slate-500">No ranked discussions yet. The first useful post will appear here.</div>
+            )}
+          </section>
+
+          <section className="bg-white p-4 shadow-sm">
+            {isSignedIn ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setComposerOpen(true)}
+                  className="flex w-full items-center gap-4 rounded-sm bg-slate-50 px-5 py-4 text-left text-slate-500 hover:bg-slate-100"
+                >
+                  <span className="grid h-11 w-11 place-items-center rounded-full bg-slate-200">
+                    <PenLine className="h-5 w-5" />
+                  </span>
+                  <span className="font-semibold">What engineering question or result do you want to share?</span>
+                </button>
+
+                {composerOpen ? (
+                  <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+                    <div className="grid gap-3 sm:grid-cols-[180px_1fr]">
+                      <select
+                        value={draft.topic}
+                        onChange={(event) => setDraft((current) => ({ ...current, topic: event.target.value }))}
+                        className="rounded-sm border border-slate-200 bg-white px-3 py-2 text-sm font-semibold outline-none focus:border-orange-400"
+                      >
+                        {communityTopics.filter((topic) => topic !== "All topics").map((topic) => (
+                          <option key={topic}>{topic}</option>
+                        ))}
+                      </select>
+                      <input
+                        value={draft.title}
+                        onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+                        placeholder="Post title"
+                        className="rounded-sm border border-slate-200 px-3 py-2 text-sm font-semibold outline-none focus:border-orange-400"
+                      />
+                    </div>
+                    <textarea
+                      value={draft.body}
+                      onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))}
+                      placeholder="Write with enough context for another builder to understand the design, test, data, or issue."
+                      className="min-h-32 w-full rounded-sm border border-slate-200 px-3 py-2 text-sm leading-6 outline-none focus:border-orange-400"
+                    />
+                    {draft.images.length ? (
+                      <div className="grid grid-cols-4 gap-2">
+                        {draft.images.map((image, index) => (
+                          <div key={`${image}-${index}`} className="relative">
+                            <img src={image} alt="" className="h-20 w-full rounded-sm object-cover" />
+                            <button
+                              type="button"
+                              onClick={() => setDraft((current) => ({ ...current, images: current.images.filter((_, itemIndex) => itemIndex !== index) }))}
+                              className="absolute right-1 top-1 rounded-full bg-black/70 p-1 text-white"
+                              aria-label="Remove image"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <label className="inline-flex cursor-pointer items-center gap-2 rounded-sm border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                        <ImagePlus className="h-4 w-4" />
+                        Attach images
+                        <input type="file" accept="image/*" multiple onChange={attachImages} className="hidden" />
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => setComposerOpen(false)} className="px-3 py-2 text-sm font-semibold text-slate-500">
+                          Cancel
+                        </button>
+                        <Button onClick={submitPost} disabled={!draft.title.trim() || !draft.body.trim()} className="rounded-sm bg-orange-500 px-5 text-white hover:bg-orange-600">
+                          Publish post
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="flex items-center justify-between gap-4 rounded-sm bg-slate-50 px-5 py-4">
+                <p className="font-semibold text-slate-600">Sign in to start a real-name engineering discussion.</p>
+                <Link href="/auth/sign-in" className="rounded-sm bg-orange-500 px-4 py-2 text-sm font-bold text-white hover:bg-orange-600">
+                  Sign in
+                </Link>
+              </div>
+            )}
+          </section>
+
+          <section className="bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <h2 className="font-bold">New feed</h2>
+              <select
+                value={sortMode}
+                onChange={(event) => setSortMode(event.target.value as SortMode)}
+                className="rounded-sm border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 outline-none"
+              >
+                <option>Newest</option>
+                <option>Best</option>
+                <option>Most viewed</option>
+              </select>
+            </div>
+            {visiblePosts.length ? (
+              visiblePosts.map((post) => (
+                <FeedPost
+                  key={post.slug}
+                  post={post}
+                  liked={liked.has(post.slug)}
+                  bookmarked={bookmarked.has(post.slug)}
+                  reported={reported.has(post.slug)}
+                  onLike={() => toggleSet(LIKED_POSTS_KEY, setLiked, liked, post.slug)}
+                  onBookmark={() => toggleSet(BOOKMARKED_POSTS_KEY, setBookmarked, bookmarked, post.slug)}
+                  onReport={() => toggleSet(REPORTED_POSTS_KEY, setReported, reported, post.slug)}
+                />
+              ))
+            ) : (
+              <div className="px-5 py-16 text-center">
+                <MessageSquare className="mx-auto h-10 w-10 text-slate-300" />
+                <h3 className="mt-4 text-lg font-bold">No community posts yet</h3>
+                <p className="mt-2 text-sm text-slate-500">Real posts from signed-in builders will appear here in newest-first order.</p>
+              </div>
+            )}
+          </section>
+        </section>
+
+        <aside className="space-y-5 lg:sticky lg:top-20">
+          <section className="bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <h2 className="font-bold">Recommended</h2>
+              <button type="button" onClick={() => setSortMode("Best")} className="text-sm font-semibold text-slate-500 underline underline-offset-4">
+                More
+              </button>
+            </div>
+            {recommendedPosts.length ? (
+              recommendedPosts.map((post) => <CompactPostRow key={post.slug} post={post} />)
+            ) : (
+              <div className="px-5 py-6 text-sm text-slate-500">Recommended posts will appear after builders publish discussions.</div>
+            )}
+          </section>
+
+          <section className="bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center gap-2">
+              <Bell className="h-5 w-5 text-orange-500" />
+              <h2 className="font-bold">Community rules</h2>
+            </div>
+            <div className="space-y-3 text-sm leading-6 text-slate-500">
+              <p>Use real identities. Share engineering context, not unsafe manufacturing instructions.</p>
+              <p>Attach evidence when discussing flight results, test data, or marketplace claims.</p>
+              <p>Report harmful payload, targeting, or weaponization content.</p>
+            </div>
+          </section>
+
+          {archiveStatus ? <p className="rounded-sm bg-white px-4 py-3 text-xs font-semibold text-slate-500 shadow-sm">{archiveStatus}</p> : null}
+        </aside>
+      </div>
+
+      {!isSignedIn ? (
+        <div className="fixed inset-x-0 bottom-0 z-40 bg-black/85 px-4 py-4 text-white backdrop-blur">
+          <div className="mx-auto flex max-w-[1180px] flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="font-bold">Join Rocketry House</div>
+              <div className="text-sm text-white/70">Sign in to publish posts, save discussions, and sync your engineering archive.</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link href="/auth/sign-in" className="rounded-sm border border-white/20 px-4 py-2 text-sm font-bold hover:bg-white/10">
+                Sign in
+              </Link>
+              <Link href="/auth/sign-up" className="rounded-sm bg-orange-500 px-4 py-2 text-sm font-bold text-white hover:bg-orange-600">
+                Create account
+              </Link>
+            </div>
+          </div>
         </div>
-        <p className="break-words text-sm text-slate-500">{post.author.role} / {post.author.team} / {post.time}</p>
-      </div>
-    </div>
+      ) : null}
+    </main>
   );
 }
-
-function Avatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
-  return (
-    avatarUrl ? (
-      <img src={avatarUrl} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover ring-1 ring-slate-200" />
-    ) : (
-      <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-cyan-200 to-violet-300 font-bold text-slate-900">
-        {name.trim()[0] ?? "R"}
-      </div>
-    )
-  );
-}
-
-function PostStats({ views, likes, comments, compact = false }: { views: string; likes: number; comments: number; compact?: boolean }) {
-  return (
-    <div className={`flex items-center gap-4 text-slate-500 ${compact ? "text-sm" : "text-base"}`}>
-      <span className="flex items-center gap-1"><Eye className="h-4 w-4" />{views}</span>
-      <span className="flex items-center gap-1"><ThumbsUp className="h-4 w-4" />{likes}</span>
-      <span className="flex items-center gap-1"><MessageSquare className="h-4 w-4" />{comments}</span>
-    </div>
-  );
-}
-
-function IconButton({ active, label, onClick, children }: { active: boolean; label: string; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button type="button" aria-label={label} onClick={onClick} className={`rounded-full p-2 transition ${active ? "bg-orange-50 text-orange-700" : "hover:bg-slate-100 hover:text-slate-700"}`}>
-      {children}
-    </button>
-  );
-}
-
-function ProfileStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg bg-slate-50 p-3">
-      <p className="font-semibold">{value}</p>
-      <p className="text-xs text-slate-500">{label}</p>
-    </div>
-  );
-}
-
