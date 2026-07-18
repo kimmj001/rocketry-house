@@ -75,10 +75,6 @@ html.rocket-cursor-enabled * {
   opacity: 1;
 }
 
-.rocket-cursor-mode-charging {
-  animation: rocket-cursor-charge-shake 86ms linear infinite;
-}
-
 .rocket-cursor-charge {
   position: fixed;
   width: 58px;
@@ -179,12 +175,6 @@ html.rocket-cursor-enabled * {
 body.rocket-cursor-impact main,
 body.rocket-cursor-impact [data-site-shell] {
   animation: rocket-cursor-shake 280ms ease-out both;
-}
-
-@keyframes rocket-cursor-charge-shake {
-  0% { margin-left: -0.8px; }
-  50% { margin-left: 0.8px; }
-  100% { margin-left: -0.8px; }
 }
 
 @keyframes rocket-parachute-open {

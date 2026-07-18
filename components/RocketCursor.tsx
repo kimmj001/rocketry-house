@@ -62,11 +62,11 @@ const ROCKET_CONFIG = {
   gravity: 1180,
   parachuteFallSpeed: 96,
   cursorSize: 42,
-  hotspotX: 21,
-  hotspotY: 6,
   crackThreshold: 0.9,
   followLerp: 0.2,
   defaultLaunchAngle: -125,
+  noseTipOffset: 21,
+  maxChargeParachuteCutoff: 0.98,
   quickClickCharge: 0.12,
   quickClickSpeedScale: 0.33,
   maxActiveLaunches: 4,
@@ -83,6 +83,16 @@ const ASSETS = {
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const lerp = (from: number, to: number, amount: number) => from + (to - from) * amount;
 const deg = (radians: number) => (radians * 180) / Math.PI;
+const cursorCenterFromPointer = (pointer: { x: number; y: number }, rotation: number, scale = 1) => {
+  const radians = (rotation * Math.PI) / 180;
+  const noseX = Math.sin(radians) * ROCKET_CONFIG.noseTipOffset * scale;
+  const noseY = -Math.cos(radians) * ROCKET_CONFIG.noseTipOffset * scale;
+
+  return {
+    x: pointer.x - noseX,
+    y: pointer.y - noseY,
+  };
+};
 
 let particleId = 0;
 let crackId = 0;
@@ -226,10 +236,13 @@ export default function RocketCursor() {
       chargeStartRef.current = performance.now();
       chargeRef.current = 0;
       pointerRef.current = { x: event.clientX, y: event.clientY };
+      const rotation = -35;
+      const center = cursorCenterFromPointer(pointerRef.current, rotation);
       viewRef.current = {
         ...current,
-        x: event.clientX - ROCKET_CONFIG.hotspotX + ROCKET_CONFIG.cursorSize / 2,
-        y: event.clientY - ROCKET_CONFIG.hotspotY + ROCKET_CONFIG.cursorSize / 2,
+        x: center.x,
+        y: center.y,
+        rotation,
         mode: "charging",
         showParachute: false,
       };
@@ -301,7 +314,7 @@ export default function RocketCursor() {
               return null;
             }
 
-            if (previousVy < 0 && vy >= 0) {
+            if (previousVy < 0 && vy >= 0 && rocket.charge < ROCKET_CONFIG.maxChargeParachuteCutoff) {
               return {
                 ...rocket,
                 x,
@@ -381,11 +394,13 @@ export default function RocketCursor() {
       const mode = modeRef.current;
 
       if (mode === "following") {
+        const rotation = -35;
+        const center = cursorCenterFromPointer(pointer, rotation);
         next = {
           ...current,
-          x: lerp(current.x, pointer.x - ROCKET_CONFIG.hotspotX + ROCKET_CONFIG.cursorSize / 2, ROCKET_CONFIG.followLerp),
-          y: lerp(current.y, pointer.y - ROCKET_CONFIG.hotspotY + ROCKET_CONFIG.cursorSize / 2, ROCKET_CONFIG.followLerp),
-          rotation: -35,
+          x: lerp(current.x, center.x, ROCKET_CONFIG.followLerp),
+          y: lerp(current.y, center.y, ROCKET_CONFIG.followLerp),
+          rotation,
           scale: 1,
           charge: 0,
           flame: 0,
@@ -396,21 +411,21 @@ export default function RocketCursor() {
 
       if (mode === "charging") {
         const charge = clamp((time - chargeStartRef.current) / ROCKET_CONFIG.maxChargeDuration, 0, 1);
-        const shake = charge > 0.8 ? 4.6 : 2.3;
-        const jitterX = Math.sin(time / 23) * shake * charge;
-        const jitterY = Math.cos(time / 29) * shake * charge;
         chargeRef.current = charge;
 
         if (Math.random() < 0.18 + charge * 0.34) {
           addParticle("energy", current.x, current.y + ROCKET_CONFIG.cursorSize * 0.5, charge);
         }
 
+        const rotation = -35 + Math.sin(time / 18) * charge * 3;
+        const scale = 1 + charge * 0.12;
+        const center = cursorCenterFromPointer(pointer, rotation, scale);
         next = {
           ...current,
-          x: pointer.x - ROCKET_CONFIG.hotspotX + ROCKET_CONFIG.cursorSize / 2 + jitterX,
-          y: pointer.y - ROCKET_CONFIG.hotspotY + ROCKET_CONFIG.cursorSize / 2 + jitterY,
-          rotation: -35 + Math.sin(time / 18) * charge * 3,
-          scale: 1 + charge * 0.12,
+          x: center.x,
+          y: center.y,
+          rotation,
+          scale,
           charge,
           flame: 0.24 + charge * 0.76,
           mode,
