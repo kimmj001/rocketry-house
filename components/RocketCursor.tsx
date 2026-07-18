@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 
-type CursorMode = "following" | "charging" | "flying" | "parachuting" | "landing" | "returning";
+type CursorMode = "following" | "charging";
+
+type FlightMode = "flying" | "parachuting" | "landing";
 
 type ParticleKind = "energy" | "smoke" | "dust";
 
@@ -38,6 +40,21 @@ type CursorView = {
   showParachute: boolean;
 };
 
+type LaunchedRocket = {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  previousVy: number;
+  rotation: number;
+  scale: number;
+  charge: number;
+  mode: FlightMode;
+  showParachute: boolean;
+  landingStartedAt: number | null;
+};
+
 const ROCKET_CONFIG = {
   maxChargeDuration: 2500,
   minLaunchSpeed: 560,
@@ -47,10 +64,12 @@ const ROCKET_CONFIG = {
   cursorSize: 42,
   hotspotX: 21,
   hotspotY: 6,
-  returnDuration: 450,
   crackThreshold: 0.9,
   followLerp: 0.2,
-  defaultLaunchAngle: -55,
+  defaultLaunchAngle: -125,
+  quickClickCharge: 0.12,
+  quickClickSpeedScale: 0.33,
+  maxActiveLaunches: 4,
 };
 
 const ASSETS = {
@@ -64,10 +83,10 @@ const ASSETS = {
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const lerp = (from: number, to: number, amount: number) => from + (to - from) * amount;
 const deg = (radians: number) => (radians * 180) / Math.PI;
-const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 
 let particleId = 0;
 let crackId = 0;
+let launchedRocketId = 0;
 
 export default function RocketCursor() {
   const [enabled, setEnabled] = useState(false);
@@ -83,18 +102,16 @@ export default function RocketCursor() {
   });
   const [particles, setParticles] = useState<Particle[]>([]);
   const [cracks, setCracks] = useState<Crack[]>([]);
+  const [launchedRockets, setLaunchedRockets] = useState<LaunchedRocket[]>([]);
 
   const viewRef = useRef(view);
   const pointerRef = useRef({ x: -100, y: -100 });
   const modeRef = useRef<CursorMode>("following");
   const chargeStartRef = useRef(0);
   const chargeRef = useRef(0);
-  const downRef = useRef({ x: 0, y: 0 });
-  const flightRef = useRef({ x: -100, y: -100, vx: 0, vy: 0, previousVy: 0, charge: 0 });
-  const landingRef = useRef({ startedAt: 0, x: 0, y: 0 });
-  const returnRef = useRef({ startedAt: 0, fromX: 0, fromY: 0 });
   const particlesRef = useRef<Particle[]>([]);
   const cracksRef = useRef<Crack[]>([]);
+  const launchedRocketsRef = useRef<LaunchedRocket[]>([]);
   const reducedMotionRef = useRef(false);
 
   useEffect(() => {
@@ -159,27 +176,39 @@ export default function RocketCursor() {
     };
 
     const launch = (charge: number) => {
-      const pointer = pointerRef.current;
-      const dragX = pointer.x - downRef.current.x;
-      const dragY = pointer.y - downRef.current.y;
-      const dragDistance = Math.hypot(dragX, dragY);
-      const launchAngle =
-        dragDistance > 14
-          ? Math.atan2(-dragY, -dragX)
-          : (ROCKET_CONFIG.defaultLaunchAngle * Math.PI) / 180;
+      const launchAngle = (ROCKET_CONFIG.defaultLaunchAngle * Math.PI) / 180;
       const motionScale = reducedMotionRef.current ? 0.34 : 1;
+      const quickClickScale = charge < ROCKET_CONFIG.quickClickCharge ? ROCKET_CONFIG.quickClickSpeedScale : 1;
       const speed =
         (ROCKET_CONFIG.minLaunchSpeed + (ROCKET_CONFIG.maxLaunchSpeed - ROCKET_CONFIG.minLaunchSpeed) * charge) *
+        quickClickScale *
         motionScale;
-
-      modeRef.current = "flying";
-      flightRef.current = {
+      const vx = Math.cos(launchAngle) * speed;
+      const vy = Math.sin(launchAngle) * speed;
+      const launchedRocket: LaunchedRocket = {
+        id: launchedRocketId++,
         x: viewRef.current.x,
         y: viewRef.current.y,
-        vx: Math.cos(launchAngle) * speed,
-        vy: Math.sin(launchAngle) * speed,
-        previousVy: Math.sin(launchAngle) * speed,
+        vx,
+        vy,
+        previousVy: vy,
+        rotation: deg(Math.atan2(vy, vx)) + 90,
+        scale: 1,
         charge,
+        mode: "flying",
+        showParachute: false,
+        landingStartedAt: null,
+      };
+
+      launchedRocketsRef.current = [...launchedRocketsRef.current, launchedRocket].slice(-ROCKET_CONFIG.maxActiveLaunches);
+      modeRef.current = "following";
+      chargeRef.current = 0;
+      viewRef.current = {
+        ...viewRef.current,
+        charge: 0,
+        flame: 0,
+        mode: "following",
+        showParachute: false,
       };
     };
 
@@ -196,7 +225,6 @@ export default function RocketCursor() {
       modeRef.current = "charging";
       chargeStartRef.current = performance.now();
       chargeRef.current = 0;
-      downRef.current = { x: event.clientX, y: event.clientY };
       pointerRef.current = { x: event.clientX, y: event.clientY };
       viewRef.current = {
         ...current,
@@ -212,13 +240,14 @@ export default function RocketCursor() {
         return;
       }
 
-      launch(clamp(Math.max(chargeRef.current, 0.08), 0, 1));
+      launch(clamp(chargeRef.current, 0, 1));
     };
 
     const resetToPointer = () => {
       modeRef.current = "following";
       chargeRef.current = 0;
       particlesRef.current = [];
+      launchedRocketsRef.current = [];
       viewRef.current = {
         ...viewRef.current,
         charge: 0,
@@ -242,6 +271,105 @@ export default function RocketCursor() {
         .slice(-90);
 
       cracksRef.current = cracksRef.current.filter((crack) => performance.now() - crack.createdAt < 1300);
+    };
+
+    const updateLaunchedRockets = (dt: number, time: number) => {
+      launchedRocketsRef.current = launchedRocketsRef.current
+        .map((rocket) => {
+          if (rocket.mode === "flying") {
+            const x = rocket.x + rocket.vx * dt;
+            const y = rocket.y + rocket.vy * dt;
+            const previousVy = rocket.vy;
+            const vy = rocket.vy + ROCKET_CONFIG.gravity * dt;
+            const rotation = deg(Math.atan2(vy, rocket.vx)) + 90;
+
+            if (Math.random() < 0.72) {
+              const tailAngle = Math.atan2(vy, rocket.vx);
+              addParticle("smoke", x - Math.cos(tailAngle) * 18, y - Math.sin(tailAngle) * 18, rocket.charge);
+            }
+
+            const offscreen =
+              x < -90 ||
+              x > window.innerWidth + 90 ||
+              y < -90 ||
+              y > window.innerHeight + 90;
+
+            if (offscreen && rocket.charge >= ROCKET_CONFIG.crackThreshold) {
+              const edgeX = clamp(x, 8, window.innerWidth - 8);
+              const edgeY = clamp(y, 8, window.innerHeight - 8);
+              addCrack(edgeX, edgeY, rotation);
+              return null;
+            }
+
+            if (previousVy < 0 && vy >= 0) {
+              return {
+                ...rocket,
+                x,
+                y,
+                vy,
+                previousVy,
+                rotation,
+                mode: "parachuting" as const,
+                showParachute: true,
+              };
+            }
+
+            return {
+              ...rocket,
+              x,
+              y,
+              vy,
+              previousVy,
+              rotation,
+              showParachute: false,
+            };
+          }
+
+          if (rocket.mode === "parachuting") {
+            const x = rocket.x + Math.sin(time / 380 + rocket.id) * 42 * dt;
+            const y = rocket.y + ROCKET_CONFIG.parachuteFallSpeed * dt;
+
+            if (y > window.innerHeight - 28) {
+              for (let i = 0; i < 9; i += 1) {
+                addParticle("dust", x, window.innerHeight - 20, 0);
+              }
+
+              return {
+                ...rocket,
+                x,
+                y: window.innerHeight - 28,
+                rotation: 0,
+                scale: 1,
+                mode: "landing" as const,
+                showParachute: false,
+                landingStartedAt: time,
+              };
+            }
+
+            return {
+              ...rocket,
+              x,
+              y,
+              rotation: Math.sin(time / 270 + rocket.id) * 7,
+              scale: 1,
+              showParachute: true,
+            };
+          }
+
+          const elapsed = rocket.landingStartedAt ? time - rocket.landingStartedAt : 0;
+          const squash = elapsed < 180 ? 1 - Math.sin((elapsed / 180) * Math.PI) * 0.14 : 1;
+
+          if (elapsed > 650) {
+            return null;
+          }
+
+          return {
+            ...rocket,
+            scale: squash,
+            showParachute: false,
+          };
+        })
+        .filter((rocket): rocket is LaunchedRocket => rocket !== null);
     };
 
     const tick = (time: number) => {
@@ -290,120 +418,11 @@ export default function RocketCursor() {
         };
       }
 
-      if (mode === "flying") {
-        const flight = flightRef.current;
-        flight.x += flight.vx * dt;
-        flight.y += flight.vy * dt;
-        flight.previousVy = flight.vy;
-        flight.vy += ROCKET_CONFIG.gravity * dt;
-
-        if (Math.random() < 0.72) {
-          addParticle("smoke", flight.x - Math.cos(Math.atan2(flight.vy, flight.vx)) * 18, flight.y - Math.sin(Math.atan2(flight.vy, flight.vx)) * 18, flight.charge);
-        }
-
-        const offscreen =
-          flight.x < -90 ||
-          flight.x > window.innerWidth + 90 ||
-          flight.y < -90 ||
-          flight.y > window.innerHeight + 90;
-
-        if (offscreen && flight.charge >= ROCKET_CONFIG.crackThreshold) {
-          const edgeX = clamp(flight.x, 8, window.innerWidth - 8);
-          const edgeY = clamp(flight.y, 8, window.innerHeight - 8);
-          addCrack(edgeX, edgeY, deg(Math.atan2(flight.vy, flight.vx)));
-          returnRef.current = { startedAt: time, fromX: edgeX, fromY: edgeY };
-          modeRef.current = "returning";
-        } else if (flight.previousVy < 0 && flight.vy >= 0) {
-          modeRef.current = "parachuting";
-        }
-
-        next = {
-          ...current,
-          x: flight.x,
-          y: flight.y,
-          rotation: deg(Math.atan2(flight.vy, flight.vx)) + 90,
-          scale: 1,
-          charge: flight.charge,
-          flame: modeRef.current === "flying" ? 0.56 : 0,
-          mode: modeRef.current,
-          showParachute: modeRef.current === "parachuting",
-        };
-      }
-
-      if (mode === "parachuting") {
-        const flight = flightRef.current;
-        flight.y += ROCKET_CONFIG.parachuteFallSpeed * dt;
-        flight.x += Math.sin(time / 380) * 42 * dt;
-
-        if (flight.y > window.innerHeight - 28) {
-          landingRef.current = { startedAt: time, x: flight.x, y: window.innerHeight - 28 };
-          for (let i = 0; i < 9; i += 1) {
-            addParticle("dust", flight.x, window.innerHeight - 20, 0);
-          }
-          modeRef.current = "landing";
-        }
-
-        next = {
-          ...current,
-          x: flight.x,
-          y: flight.y,
-          rotation: Math.sin(time / 270) * 7,
-          scale: 1,
-          charge: 0,
-          flame: 0,
-          mode: modeRef.current,
-          showParachute: modeRef.current !== "landing",
-        };
-      }
-
-      if (mode === "landing") {
-        const elapsed = time - landingRef.current.startedAt;
-        const squash = elapsed < 180 ? 1 - Math.sin((elapsed / 180) * Math.PI) * 0.14 : 1;
-        next = {
-          ...current,
-          x: landingRef.current.x,
-          y: landingRef.current.y,
-          rotation: 0,
-          scale: squash,
-          charge: 0,
-          flame: 0,
-          mode,
-          showParachute: elapsed < 360,
-        };
-
-        if (elapsed > 500) {
-          returnRef.current = { startedAt: time, fromX: landingRef.current.x, fromY: landingRef.current.y };
-          modeRef.current = "returning";
-        }
-      }
-
-      if (mode === "returning") {
-        const elapsed = time - returnRef.current.startedAt;
-        const progress = clamp(elapsed / ROCKET_CONFIG.returnDuration, 0, 1);
-        const eased = easeOutCubic(progress);
-        const targetX = pointer.x - ROCKET_CONFIG.hotspotX + ROCKET_CONFIG.cursorSize / 2;
-        const targetY = pointer.y - ROCKET_CONFIG.hotspotY + ROCKET_CONFIG.cursorSize / 2;
-
-        next = {
-          ...current,
-          x: lerp(returnRef.current.fromX, targetX, eased),
-          y: lerp(returnRef.current.fromY, targetY, eased),
-          rotation: lerp(current.rotation, -35, 0.18),
-          scale: 1,
-          charge: 0,
-          flame: 0,
-          mode,
-          showParachute: false,
-        };
-
-        if (progress >= 1) {
-          modeRef.current = "following";
-        }
-      }
-
+      updateLaunchedRockets(dt, time);
       updateParticles(dt);
       viewRef.current = next;
       setView(next);
+      setLaunchedRockets([...launchedRocketsRef.current]);
       setParticles([...particlesRef.current]);
       setCracks([...cracksRef.current]);
       rafId = requestAnimationFrame(tick);
@@ -467,20 +486,46 @@ export default function RocketCursor() {
         );
       })}
 
-      {view.showParachute && (
+      {launchedRockets.map((rocket) =>
+        rocket.showParachute ? (
+          <div
+            key={`parachute-${rocket.id}`}
+            className="rocket-cursor-parachute"
+            style={{
+              left: rocket.x,
+              top: rocket.y - 76,
+              transform: `translate(-50%, -50%) rotate(${-rocket.rotation * 0.45}deg)`,
+            }}
+          >
+            <img src={ASSETS.parachute} alt="" />
+            <span className="rocket-cursor-line rocket-cursor-line-left" />
+            <span className="rocket-cursor-line rocket-cursor-line-right" />
+          </div>
+        ) : null
+      )}
+
+      {launchedRockets.map((rocket) => (
         <div
-          className="rocket-cursor-parachute"
+          key={rocket.id}
+          className={`rocket-cursor-ship rocket-cursor-clone rocket-cursor-mode-${rocket.mode}`}
           style={{
-            left: view.x,
-            top: view.y - 76,
-            transform: `translate(-50%, -50%) rotate(${-view.rotation * 0.45}deg)`,
+            left: rocket.x,
+            top: rocket.y,
+            width: ROCKET_CONFIG.cursorSize,
+            height: ROCKET_CONFIG.cursorSize,
+            transform: `translate(-50%, -50%) rotate(${rocket.rotation}deg) scale(${rocket.scale})`,
           }}
         >
-          <img src={ASSETS.parachute} alt="" />
-          <span className="rocket-cursor-line rocket-cursor-line-left" />
-          <span className="rocket-cursor-line rocket-cursor-line-right" />
+          <span
+            className="rocket-cursor-flame"
+            style={{
+              opacity: rocket.mode === "flying" ? 0.56 : 0,
+              transform: `translateX(-50%) scaleY(${rocket.mode === "flying" ? 0.91 : 0.35})`,
+            }}
+          />
+          <img src={ASSETS.rocket} alt="" />
         </div>
-      )}
+      ))}
 
       {view.mode === "charging" && (
         <div className="rocket-cursor-charge" style={{ left: view.x, top: view.y + 34 }}>
