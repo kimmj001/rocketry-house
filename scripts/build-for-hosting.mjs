@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 const root = process.cwd();
 const appOutput = join(root, ".next", "server", "app");
 const distOutput = join(root, "dist");
+const clientOutput = join(distOutput, "client");
 
 function run(command, args) {
   const cliPath = {
@@ -44,9 +45,9 @@ function walkFiles(directory) {
 
 function routeOutputPath(htmlFile) {
   const route = relative(appOutput, htmlFile).replace(/\\/g, "/").replace(/\.html$/, "");
-  if (route === "index") return join(distOutput, "index.html");
-  if (route === "_not-found") return join(distOutput, "404.html");
-  return join(distOutput, ...route.split("/"), "index.html");
+  if (route === "index") return join(clientOutput, "index.html");
+  if (route === "_not-found") return join(clientOutput, "404.html");
+  return join(clientOutput, ...route.split("/"), "index.html");
 }
 
 function copyFile(source, destination) {
@@ -60,9 +61,11 @@ function prepareStaticDist() {
   }
   mkdirSync(distOutput, { recursive: true });
 
-  copyDirectory(join(root, ".next", "static"), join(distOutput, "_next", "static"));
+  mkdirSync(clientOutput, { recursive: true });
+
+  copyDirectory(join(root, ".next", "static"), join(clientOutput, "_next", "static"));
   if (existsSync(join(root, "public"))) {
-    cpSync(join(root, "public"), distOutput, { recursive: true });
+    cpSync(join(root, "public"), clientOutput, { recursive: true });
   }
   copyDirectory(join(root, ".openai"), join(distOutput, ".openai"));
 
