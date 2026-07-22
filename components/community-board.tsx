@@ -231,8 +231,10 @@ function FeedPost({
 
       {post.images?.length ? (
         <div className="mt-4 grid grid-cols-2 gap-2">
-          {post.images.slice(0, 2).map((image) => (
-            <img key={image} src={image} alt="" className="h-36 w-full rounded-sm object-cover" />
+          {post.images.slice(0, 2).map((image, index) => (
+            <figure key={`${image}-${index}`} className="relative aspect-video overflow-hidden rounded-sm border border-slate-200 bg-slate-50">
+              <img src={image} alt="" className="absolute inset-0 h-full w-full object-contain" />
+            </figure>
           ))}
         </div>
       ) : null}
@@ -580,7 +582,9 @@ export function CommunityBoard() {
                       <div className="grid grid-cols-4 gap-2">
                         {draft.images.map((image, index) => (
                           <div key={`${image}-${index}`} className="relative">
-                            <img src={image} alt="" className="h-20 w-full rounded-sm object-cover" />
+                            <figure className="relative aspect-video overflow-hidden rounded-sm border border-slate-200 bg-slate-50">
+                              <img src={image} alt="" className="absolute inset-0 h-full w-full object-contain" />
+                            </figure>
                             <button
                               type="button"
                               onClick={() => setDraft((current) => ({ ...current, images: current.images.filter((_, itemIndex) => itemIndex !== index) }))}

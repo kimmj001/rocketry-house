@@ -222,7 +222,9 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
             {post.images?.length ? (
               <div className="mt-8 grid gap-3 sm:grid-cols-2">
                 {post.images.map((image, index) => (
-                  <img key={`${image}-${index}`} src={image} alt={`Community attachment ${index + 1}`} className="max-h-[520px] w-full rounded-2xl border border-slate-200 bg-white object-contain p-2" />
+                  <figure key={`${image}-${index}`} className="grid min-h-48 place-items-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-2">
+                    <img src={image} alt={`Community attachment ${index + 1}`} className="max-h-[720px] max-w-full object-contain" />
+                  </figure>
                 ))}
               </div>
             ) : null}
