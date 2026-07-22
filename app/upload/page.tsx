@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import {
   BadgeCheck,
   Calculator,
@@ -20,6 +20,7 @@ import {
   RocketSideProfile,
   createRocketComponent,
 } from "@/components/build-workspace";
+import { FileUploadBox } from "@/components/file-upload-box";
 import { Button } from "@/components/ui/button";
 import { totalLength as calculateRocketLength } from "@/lib/cad/geometry";
 import { savePersistentRecord } from "@/lib/cloud-persistence";
@@ -124,13 +125,64 @@ const initialParts: RocketComponent[] = [
   },
 ];
 
-const evidence = [
-  "CAD: .ork, STEP, STL, JSON",
-  "Simulation: RASP, ENG, CSV",
-  "Telemetry: CSV, JSON, TXT",
-  "Media proof: images, video links",
-  "Inspection: failure notes, photos",
-  "Build package: BOM, guide, drawings",
+type EvidenceUploadItem = {
+  key: string;
+  title: string;
+  description: string;
+  formats: string;
+  status: "required" | "recommended" | "optional";
+  acceptedSpecifiers: string[];
+};
+
+const evidence: EvidenceUploadItem[] = [
+  {
+    key: "cad-source",
+    title: "CAD source",
+    description: "Attach the source model or export that reviewers should compare against the editable Web CAD record.",
+    formats: ".ork/.ork.gz, STEP/STP, STL, JSON/XML, ZIP",
+    status: "recommended",
+    acceptedSpecifiers: [".ork", ".ork.gz", ".xml", ".step", ".stp", ".stl", ".json", ".zip"],
+  },
+  {
+    key: "motor-thrust-source",
+    title: "Motor and thrust source",
+    description: "Use interoperable motor data or measured static-fire files for simulation traceability.",
+    formats: ".eng, .rse, CSV, JSON, TXT, PDF",
+    status: "recommended",
+    acceptedSpecifiers: [".eng", ".rse", ".csv", ".json", ".txt", ".pdf"],
+  },
+  {
+    key: "telemetry-logs",
+    title: "Telemetry logs",
+    description: "Upload raw flight data so altitude, velocity, acceleration, pressure, and GPS channels can be mapped.",
+    formats: "CSV, JSON, TXT, ZIP",
+    status: "recommended",
+    acceptedSpecifiers: [".csv", ".json", ".txt", ".zip"],
+  },
+  {
+    key: "media-proof",
+    title: "Proof media",
+    description: "Add launch, recovery, inspection, or bench-test media for visual verification.",
+    formats: "Images, videos, PDF, ZIP",
+    status: "optional",
+    acceptedSpecifiers: ["image/*", "video/*", ".pdf", ".zip"],
+  },
+  {
+    key: "inspection-notes",
+    title: "Inspection notes",
+    description: "Keep post-test findings, anomalies, recovery notes, and failure observations with the project.",
+    formats: "TXT, PDF, CSV, JSON, images, ZIP",
+    status: "optional",
+    acceptedSpecifiers: [".txt", ".pdf", ".csv", ".json", "image/*", ".zip"],
+  },
+  {
+    key: "build-package",
+    title: "Build package",
+    description: "Attach BOMs, drawings, guides, safe handling notes, or packaged source files.",
+    formats: "ZIP, PDF, JSON, CSV, TXT, STEP/STP, STL, images",
+    status: "optional",
+    acceptedSpecifiers: [".zip", ".pdf", ".json", ".csv", ".txt", ".step", ".stp", ".stl", "image/*"],
+  },
 ];
 
 export default function UploadPage() {
@@ -450,21 +502,33 @@ function FlightStep() {
   );
 }
 
-function EvidenceStep({ files, setFiles }: { files: Record<string, string[]>; setFiles: (files: Record<string, string[]>) => void }) {
+function EvidenceStep({ files, setFiles }: { files: Record<string, string[]>; setFiles: Dispatch<SetStateAction<Record<string, string[]>>> }) {
+  const attachedCount = Object.values(files).reduce((sum, names) => sum + names.length, 0);
+  const coveredCount = evidence.filter((item) => files[item.key]?.length).length;
+
   return (
-    <Panel Icon={UploadCloud} title="Evidence files" detail="Each proof type is optional and separated for review clarity.">
-      <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2 xl:grid-cols-3">
+    <Panel Icon={UploadCloud} title="Evidence files" detail="Upload source files with clear format checks, review labels, and file feedback.">
+      <div className="mb-2 grid grid-cols-1 gap-1.5 md:grid-cols-3">
+        <Info title="Attached files" value={`${attachedCount} selected`} />
+        <Info title="Coverage" value={`${coveredCount}/${evidence.length} evidence groups`} />
+        <Info title="Core formats" value=".ork, .eng/.rse, CSV, STEP/STL" />
+      </div>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
         {evidence.map((item) => (
-          <label key={item} className="rounded-2xl border border-dashed border-slate-300 bg-white p-2">
-            <p className="text-sm font-black">{item.split(":")[0]}</p>
-            <p className="mt-1 text-xs font-semibold text-slate-500">{item.split(":")[1]}</p>
-            <input
-              className="mt-2 w-full text-xs font-semibold"
-              type="file"
-              multiple
-              onChange={(event) => setFiles({ ...files, [item]: Array.from(event.target.files ?? []).map((file) => file.name) })}
-            />
-          </label>
+          <FileUploadBox
+            key={item.key}
+            title={item.title}
+            description={item.description}
+            formats={item.formats}
+            status={item.status}
+            acceptedSpecifiers={item.acceptedSpecifiers}
+            onFilesSelected={(_, selectedFiles) => {
+              setFiles((current) => ({
+                ...current,
+                [item.key]: selectedFiles.map((file) => file.name),
+              }));
+            }}
+          />
         ))}
       </div>
     </Panel>
