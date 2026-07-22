@@ -21,10 +21,15 @@ export type AuthUser = {
 export const AUTH_STORAGE_KEY = "rocketry-house.auth-user";
 export const AUTH_ACCOUNTS_KEY = "rocketry-house.auth-accounts";
 
+export type AccountAccessStatus = "active" | "review" | "suspended";
+
 type LocalAccountRecord = {
   user: AuthUser;
   passwordSalt: string;
   passwordHash: string;
+  accessStatus?: AccountAccessStatus;
+  statusNote?: string;
+  lastReviewedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -175,6 +180,7 @@ export async function createLocalAccount(user: AuthUser, password: string) {
     },
     passwordSalt,
     passwordHash: await hashPassword(password, passwordSalt),
+    accessStatus: "active",
     createdAt: now,
     updatedAt: now
   };
@@ -197,6 +203,10 @@ export async function authenticateLocalAccount(email: string, password: string) 
   const passwordHash = await hashPassword(password, account.passwordSalt);
   if (passwordHash !== account.passwordHash) {
     throw new Error("Incorrect password.");
+  }
+
+  if (account.accessStatus === "suspended") {
+    throw new Error("This account is suspended. Contact Rocketry House admin.");
   }
 
   return { ...account.user, email: normalizedEmail, isDemo: false };
