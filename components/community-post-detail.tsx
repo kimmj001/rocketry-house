@@ -91,7 +91,8 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
 
   useEffect(() => {
     const localPost = readStoredPosts().find((item) => item.slug === slug);
-    const resolved = localPost ?? initialPost;
+    const seededPost = communityPosts.find((item) => item.slug === slug);
+    const resolved = initialPost ?? seededPost ?? localPost;
     setPost(resolved);
     const storedComments = readStoredComments(slug);
     setComments(storedComments.length ? storedComments : resolved?.commentList ?? communityComments);
@@ -100,7 +101,7 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
     setReported(readStoredSet(REPORTED_POSTS_KEY).has(slug));
     void loadCommunityPostsArchive().then((posts) => {
       const archivedPost = posts.find((item) => item.slug === slug);
-      if (archivedPost) setPost(archivedPost);
+      if (archivedPost && !initialPost) setPost(archivedPost);
     });
     void loadCommunityCommentsArchive(slug).then((archivedComments) => {
       if (archivedComments.length) setComments(archivedComments);

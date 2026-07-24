@@ -1,6 +1,6 @@
 "use client";
 
-import type { CommunityComment, CommunityPost } from "@/lib/community-data";
+import { communityPosts, type CommunityComment, type CommunityPost } from "@/lib/community-data";
 import { loadPersistentRecords, PUBLIC_COMMUNITY_OWNER_KEY, savePersistentRecord } from "@/lib/cloud-persistence";
 
 const DB_NAME = "rocketry-house-community";
@@ -123,7 +123,7 @@ export async function loadCommunityPostsArchive() {
   const localPosts = safeReadLocalPosts();
   const idbPosts = await readAllIdb<CommunityPost>(POSTS_STORE);
   const cloudRecords = await loadPersistentRecords<CommunityPost>("community_posts", ARCHIVE_OPTIONS);
-  const merged = mergePosts(cloudRecords.map((record) => record.payload), idbPosts, localPosts);
+  const merged = mergePosts(cloudRecords.map((record) => record.payload), idbPosts, localPosts, communityPosts);
   safeWriteLocalPosts(merged);
   return merged;
 }

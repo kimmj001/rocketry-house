@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   CommunityPost,
+  communityPosts,
   communityTopics,
   getCommunityAuthorFromAuth,
   guestCommunityUser
@@ -103,6 +104,16 @@ function postScore(post: CommunityPost) {
 function postFreshness(post: CommunityPost) {
   if (!post.createdAt) return 0;
   return new Date(post.createdAt).getTime();
+}
+
+function mergeCommunityPosts(...groups: CommunityPost[][]) {
+  const merged = new Map<string, CommunityPost>();
+  for (const group of groups) {
+    for (const post of group) {
+      if (!merged.has(post.slug)) merged.set(post.slug, post);
+    }
+  }
+  return Array.from(merged.values()).sort((a, b) => postFreshness(b) - postFreshness(a));
 }
 
 function compressImageDataUrl(file: File) {
@@ -300,7 +311,7 @@ export function CommunityBoard() {
   useEffect(() => {
     let active = true;
 
-    setLocalPosts(readStoredPosts());
+    setLocalPosts(mergeCommunityPosts(readStoredPosts(), communityPosts));
     setLiked(readStoredSet(LIKED_POSTS_KEY));
     setBookmarked(readStoredSet(BOOKMARKED_POSTS_KEY));
     setReported(readStoredSet(REPORTED_POSTS_KEY));
@@ -320,13 +331,11 @@ export function CommunityBoard() {
 
       if (!active) return;
 
+      const nextPosts = mergeCommunityPosts(cloudPosts, readStoredPosts(), communityPosts);
+      setLocalPosts(nextPosts);
+      setStoredItem(LOCAL_POSTS_KEY, JSON.stringify(nextPosts));
       if (cloudPosts.length) {
-        const merged = new Map<string, CommunityPost>();
-        [...cloudPosts, ...readStoredPosts()].forEach((post) => merged.set(post.slug, post));
-        const nextPosts = Array.from(merged.values()).sort((a, b) => postFreshness(b) - postFreshness(a));
-        setLocalPosts(nextPosts);
-        setStoredItem(LOCAL_POSTS_KEY, JSON.stringify(nextPosts));
-        setArchiveStatus(`Synced ${nextPosts.length} archived community posts.`);
+        setArchiveStatus(`Synced ${cloudPosts.length} cloud posts with ${communityPosts.length} launch discussions.`);
       }
 
       if (cloudLiked.size) setLiked(cloudLiked);
