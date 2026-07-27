@@ -2,12 +2,13 @@ import { notFound, redirect } from "next/navigation";
 import { CADEditor } from "@/components/cad-editor";
 import { ProjectTabs } from "@/components/project-tabs";
 import { mockProjects } from "@/lib/mock-data";
+import { loadPublicProjectBySlug } from "@/lib/public-projects";
 import { bySlug, canonicalSlug } from "@/lib/utils";
 
 export default async function CadPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   if (canonicalSlug(slug) !== slug) redirect(`/cad/${canonicalSlug(slug)}`);
-  const project = bySlug(mockProjects, slug);
+  const project = bySlug(mockProjects, slug) ?? await loadPublicProjectBySlug(slug);
   if (!project) notFound();
   return (
     <main className="min-h-screen bg-space-radial px-6 py-24">

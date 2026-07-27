@@ -26,3 +26,19 @@ export async function loadPublicProjectArchive(limit?: number): Promise<{ projec
     error: null
   };
 }
+
+export async function loadPublicProjectBySlug(slug: string): Promise<RocketProject | undefined> {
+  const supabase = getSupabaseClient();
+  if (!supabase || isMockMode) return undefined;
+
+  const { data, error } = await supabase
+    .from("user_data_records")
+    .select("collection, record_key, payload, updated_at")
+    .eq("owner_key", PUBLIC_PROJECTS_OWNER_KEY)
+    .eq("collection", "projects")
+    .eq("record_key", slug)
+    .maybeSingle();
+
+  if (error || !data) return undefined;
+  return archivedProjectToRocketProject(data as PublicProjectRecord);
+}
