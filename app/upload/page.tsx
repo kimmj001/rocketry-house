@@ -29,7 +29,7 @@ import { PUBLIC_PROJECTS_OWNER_KEY, savePersistentRecord, type PersistentFileRec
 import { runRocketEstimateWithMotor } from "@/lib/rocket-simulation";
 import { useCloudUsage } from "@/lib/use-cloud-usage";
 import type { Difficulty, RocketComponent, RocketComponentType, VerificationStatus } from "@/lib/types";
-import type { AccountType, UsageStatus } from "@/lib/usage-limits";
+import { ARTICLE_COVERAGE_COPY, type AccountType, type UsageStatus } from "@/lib/usage-limits";
 
 type Step = { title: string; label: string; Icon: LucideIcon };
 
@@ -751,7 +751,7 @@ function ProjectStep({
       <div className="mt-2 grid grid-cols-1 gap-1.5 md:grid-cols-3">
         <Info title="Standard plan" value="Up to 3 projects" />
         <Info title="Cloud source of truth" value="Project usage is checked against Supabase before publishing." />
-        <Info title="Article coverage" value="Request coverage at rocketryhouse@gmail.com." />
+        <Info title="Article coverage" value="Pro requests route to ICANEWS Global Research through rocketryhouse@gmail.com." />
       </div>
     </Panel>
   );
@@ -925,7 +925,7 @@ function ReleaseStep({ form, setForm }: { form: ReleaseFormState; setForm: Dispa
       </div>
       <div className="mt-2 grid grid-cols-1 gap-1.5 md:grid-cols-3">
         <Info title="Attribution" value="Forked projects retain lineage and original credit." />
-        <Info title="Article coverage" value="Available by request for completed projects, launches, events, or competitions." />
+        <Info title="Article coverage" value={ARTICLE_COVERAGE_COPY} />
         <Info title="Moderation" value="Reports and safety status attach to the project." />
       </div>
     </Panel>

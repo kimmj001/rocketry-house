@@ -32,6 +32,7 @@ type StatusOverride = {
   accessStatus: AccountAccessStatus;
   statusNote?: string;
   accountType?: AuthUser["accountType"];
+  subscriptionTier?: NonNullable<AuthUser["subscriptionTier"]>;
   approvalStatus?: AccountApprovalStatus;
   organizationName?: string;
   lastReviewedAt?: string;
@@ -50,6 +51,7 @@ type DirectoryStatus = {
 const accessOptions: AccountAccessStatus[] = ["active", "review", "suspended"];
 const approvalOptions: AccountApprovalStatus[] = ["none", "requested", "approved"];
 const accountTypes: AuthUser["accountType"][] = ["personal", "team", "organization"];
+const subscriptionTiers: Array<NonNullable<AuthUser["subscriptionTier"]>> = ["standard", "pro"];
 const sourceLabels: Record<AccountDirectorySource, string> = {
   "supabase-auth": "Auth",
   "cloud-profile": "Cloud profile",
@@ -150,7 +152,7 @@ export function AccountStatusManager() {
     router.refresh();
   }
 
-  async function applyUpdates(targets: ManagedAccount[], patch: Partial<Pick<ManagedAccount, "accessStatus" | "statusNote" | "accountType" | "approvalStatus" | "organizationName">>) {
+  async function applyUpdates(targets: ManagedAccount[], patch: Partial<Pick<ManagedAccount, "accessStatus" | "statusNote" | "accountType" | "subscriptionTier" | "approvalStatus" | "organizationName">>) {
     if (!targets.length) return;
 
     const now = new Date().toISOString();
@@ -160,6 +162,7 @@ export function AccountStatusManager() {
       email: account.email,
       name: account.name,
       accountType: patch.accountType ?? account.accountType,
+      subscriptionTier: patch.subscriptionTier ?? account.subscriptionTier,
       organizationName: patch.organizationName ?? account.organizationName,
       approvalStatus: patch.approvalStatus ?? account.approvalStatus,
       accessStatus: patch.accessStatus ?? account.accessStatus,
@@ -174,6 +177,7 @@ export function AccountStatusManager() {
       return {
         ...account,
         accountType: update.accountType ?? account.accountType,
+        subscriptionTier: update.subscriptionTier ?? account.subscriptionTier,
         organizationName: update.organizationName || account.organizationName,
         approvalStatus: update.approvalStatus ?? account.approvalStatus,
         accessStatus: update.accessStatus ?? account.accessStatus,
@@ -306,12 +310,14 @@ export function AccountStatusManager() {
                 <Button size="sm" variant="outline" onClick={() => void applyUpdates(selectedAccounts, { accessStatus: "review" })} disabled={!selectedAccounts.length}>Needs review</Button>
                 <Button size="sm" variant="outline" onClick={() => void applyUpdates(selectedAccounts, { accessStatus: "suspended" })} disabled={!selectedAccounts.length}>Suspend</Button>
                 <Button size="sm" onClick={() => void applyUpdates(selectedAccounts, { approvalStatus: "approved" })} disabled={!selectedAccounts.length}>Approve</Button>
+                <Button size="sm" variant="outline" onClick={() => void applyUpdates(selectedAccounts, { subscriptionTier: "standard" })} disabled={!selectedAccounts.length}>Set Standard</Button>
+                <Button size="sm" onClick={() => void applyUpdates(selectedAccounts, { subscriptionTier: "pro" })} disabled={!selectedAccounts.length}>Set Pro</Button>
               </div>
             </div>
           </div>
 
           <div className="mt-5 overflow-x-auto">
-            <table className="w-full min-w-[1040px] border-separate border-spacing-y-2 text-left text-sm">
+            <table className="w-full min-w-[1160px] border-separate border-spacing-y-2 text-left text-sm">
               <thead className="text-xs uppercase tracking-[0.12em] text-orange-50/45">
                 <tr>
                   <th className="px-3 py-2 font-medium">
@@ -326,6 +332,7 @@ export function AccountStatusManager() {
                   <th className="px-3 py-2 font-medium">Account</th>
                   <th className="px-3 py-2 font-medium">Sources</th>
                   <th className="px-3 py-2 font-medium">Type</th>
+                  <th className="px-3 py-2 font-medium">Plan</th>
                   <th className="px-3 py-2 font-medium">Approval</th>
                   <th className="px-3 py-2 font-medium">Access</th>
                   <th className="px-3 py-2 font-medium">Activity</th>
@@ -361,6 +368,11 @@ export function AccountStatusManager() {
                     <td className="px-3 py-3">
                       <select value={account.accountType} onChange={(event) => void applyUpdates([account], { accountType: event.target.value as AuthUser["accountType"] })} className="h-9 w-32 rounded-md border border-white/10 bg-[#151a27] px-2 text-orange-50 outline-none">
                         {accountTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-3 py-3">
+                      <select value={account.subscriptionTier} onChange={(event) => void applyUpdates([account], { subscriptionTier: event.target.value as NonNullable<AuthUser["subscriptionTier"]> })} className="h-9 w-32 rounded-md border border-white/10 bg-[#151a27] px-2 text-orange-50 outline-none">
+                        {subscriptionTiers.map((tier) => <option key={tier} value={tier}>{tier}</option>)}
                       </select>
                     </td>
                     <td className="px-3 py-3">
@@ -469,6 +481,7 @@ function readLocalManagedAccounts() {
       name: record.user.name,
       email,
       accountType: override?.accountType ?? record.user.accountType,
+      subscriptionTier: override?.subscriptionTier ?? record.user.subscriptionTier ?? "standard",
       organizationName: override?.organizationName ?? record.user.organizationName,
       approvalStatus: override?.approvalStatus ?? record.user.organizationApprovalStatus ?? "none",
       accessStatus: override?.accessStatus ?? record.accessStatus ?? "active",
@@ -492,6 +505,7 @@ function readLocalManagedAccounts() {
       name: currentUser.name,
       email,
       accountType: override?.accountType ?? currentUser.accountType,
+      subscriptionTier: override?.subscriptionTier ?? currentUser.subscriptionTier ?? "standard",
       organizationName: override?.organizationName ?? currentUser.organizationName,
       approvalStatus: override?.approvalStatus ?? currentUser.organizationApprovalStatus ?? "none",
       accessStatus: override?.accessStatus ?? existing?.accessStatus ?? "active",
@@ -523,6 +537,7 @@ function mergeAccounts(accounts: ManagedAccount[]) {
       name: existing.name || account.name,
       email: existing.email || account.email,
       accountType: account.cloudSynced ? account.accountType : existing.accountType,
+      subscriptionTier: account.cloudSynced ? account.subscriptionTier : existing.subscriptionTier,
       organizationName: account.organizationName || existing.organizationName,
       approvalStatus: account.cloudSynced ? account.approvalStatus : existing.approvalStatus,
       accessStatus: account.sourceLabels.includes("cloud-status") ? account.accessStatus : existing.accessStatus,
@@ -545,6 +560,7 @@ function writeLocalStatusOverrides(updates: AccountStatusUpdate[], now: string) 
       accessStatus: update.accessStatus ?? "active",
       statusNote: update.statusNote,
       accountType: update.accountType,
+      subscriptionTier: update.subscriptionTier,
       approvalStatus: update.approvalStatus,
       organizationName: update.organizationName,
       lastReviewedAt: now
@@ -568,6 +584,7 @@ function updateLocalAccountRecords(updates: AccountStatusUpdate[], now: string) 
       user: {
         ...record.user,
         accountType: update.accountType ?? record.user.accountType,
+        subscriptionTier: update.subscriptionTier ?? record.user.subscriptionTier ?? "standard",
         organizationName: update.organizationName ?? record.user.organizationName,
         organizationApprovalStatus: update.approvalStatus ?? record.user.organizationApprovalStatus
       }
@@ -582,6 +599,7 @@ function updateLocalAccountRecords(updates: AccountStatusUpdate[], now: string) 
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({
       ...currentUser,
       accountType: update.accountType ?? currentUser.accountType,
+      subscriptionTier: update.subscriptionTier ?? currentUser.subscriptionTier ?? "standard",
       organizationName: update.organizationName ?? currentUser.organizationName,
       organizationApprovalStatus: update.approvalStatus ?? currentUser.organizationApprovalStatus
     }));

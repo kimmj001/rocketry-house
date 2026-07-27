@@ -148,6 +148,7 @@ async function buildAccountDirectory(): Promise<AccountDirectoryResponse> {
       name: stringValue(metadata.name) || stringValue(metadata.display_name) || stringValue(user.email).split("@")[0] || "Supabase user",
       email: normalizeEmail(stringValue(user.email)),
       accountType: accountTypeValue(metadata.account_type),
+      subscriptionTier: subscriptionTierValue(metadata.subscription_tier),
       organizationName: stringValue(metadata.organization_name),
       approvalStatus: approvalStatusValue(metadata.organization_approval_status),
       accessStatus: "active",
@@ -169,6 +170,7 @@ async function buildAccountDirectory(): Promise<AccountDirectoryResponse> {
       name: stringValue(payload.name) || stringValue(payload.display_name) || email.split("@")[0] || "Cloud profile",
       email,
       accountType: accountTypeValue(payload.accountType ?? payload.account_type),
+      subscriptionTier: subscriptionTierValue(payload.subscriptionTier ?? payload.subscription_tier),
       organizationName: stringValue(payload.organizationName ?? payload.organization_name),
       approvalStatus: approvalStatusValue(payload.organizationApprovalStatus ?? payload.organization_approval_status),
       accessStatus: "active",
@@ -187,6 +189,7 @@ async function buildAccountDirectory(): Promise<AccountDirectoryResponse> {
       name: status.name || status.email || "Account status record",
       email: status.email,
       accountType: status.accountType,
+      subscriptionTier: status.subscriptionTier,
       organizationName: status.organizationName,
       approvalStatus: status.approvalStatus,
       accessStatus: status.accessStatus,
@@ -205,6 +208,7 @@ async function buildAccountDirectory(): Promise<AccountDirectoryResponse> {
     return {
       ...account,
       accountType: status.accountType,
+      subscriptionTier: status.subscriptionTier,
       organizationName: status.organizationName || account.organizationName,
       approvalStatus: status.approvalStatus,
       accessStatus: status.accessStatus,
@@ -288,6 +292,7 @@ function addAccount(accounts: Map<string, ManagedAccount>, next: ManagedAccount)
     name: existing.name || next.name,
     email: existing.email || next.email,
     accountType: next.accountType ?? existing.accountType,
+    subscriptionTier: next.subscriptionTier ?? existing.subscriptionTier,
     organizationName: next.organizationName || existing.organizationName,
     approvalStatus: next.approvalStatus ?? existing.approvalStatus,
     accessStatus: next.accessStatus ?? existing.accessStatus,
@@ -314,6 +319,7 @@ function collectStatusRecords(records: UserDataRecord[]) {
       name: stringValue(payload.name) || email || id,
       email,
       accountType: accountTypeValue(payload.accountType),
+      subscriptionTier: subscriptionTierValue(payload.subscriptionTier),
       organizationName: stringValue(payload.organizationName),
       approvalStatus: approvalStatusValue(payload.approvalStatus),
       accessStatus: accessStatusValue(payload.accessStatus),
@@ -371,6 +377,7 @@ function normalizeUpdate(value: unknown): AccountStatusUpdate | null {
     email,
     name: stringValue(input.name),
     accountType: input.accountType ? accountTypeValue(input.accountType) : undefined,
+    subscriptionTier: input.subscriptionTier ? subscriptionTierValue(input.subscriptionTier) : undefined,
     organizationName: stringValue(input.organizationName),
     approvalStatus: input.approvalStatus ? approvalStatusValue(input.approvalStatus) : undefined,
     accessStatus: input.accessStatus ? accessStatusValue(input.accessStatus) : undefined,
@@ -396,6 +403,10 @@ function stringValue(value: unknown) {
 
 function accountTypeValue(value: unknown): AuthUser["accountType"] {
   return value === "team" || value === "organization" || value === "personal" ? value : "personal";
+}
+
+function subscriptionTierValue(value: unknown): NonNullable<AuthUser["subscriptionTier"]> {
+  return value === "pro" ? "pro" : "standard";
 }
 
 function approvalStatusValue(value: unknown): AccountApprovalStatus {

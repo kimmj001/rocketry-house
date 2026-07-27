@@ -9,6 +9,7 @@ export type ManagedAccount = {
   name: string;
   email: string;
   accountType: AuthUser["accountType"];
+  subscriptionTier: NonNullable<AuthUser["subscriptionTier"]>;
   organizationName?: string;
   approvalStatus: AccountApprovalStatus;
   accessStatus: AccountAccessStatus;
@@ -26,6 +27,7 @@ export type AccountStatusUpdate = {
   email?: string;
   name?: string;
   accountType?: AuthUser["accountType"];
+  subscriptionTier?: NonNullable<AuthUser["subscriptionTier"]>;
   organizationName?: string;
   approvalStatus?: AccountApprovalStatus;
   accessStatus?: AccountAccessStatus;

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { CheckCircle2, Mail, Sparkles } from "lucide-react";
 import { checkoutHref } from "@/lib/checkout";
-import { PRO_PRICES, type AccountType } from "@/lib/usage-limits";
+import { ARTICLE_COVERAGE_COPY, PRO_PRICES, type AccountType } from "@/lib/usage-limits";
 
 const planGroups: Array<{
   accountType: AccountType;
@@ -99,7 +99,7 @@ export default function PricingPage() {
                 price="Free"
                 features={group.standard}
                 badge="Exact Standard quota"
-                href="/auth/sign-up"
+                href={`/auth/sign-up?type=${group.accountType}`}
                 cta="Start free"
               />
               <PlanCard
@@ -122,11 +122,11 @@ export default function PricingPage() {
               <h2 className="text-xl font-black">Article coverage</h2>
             </div>
             <p className="mt-3 max-w-4xl text-sm font-semibold leading-6 text-slate-600">
-              Article coverage is available by request for completed projects, launches, events, or competitions. To request coverage, please contact the Rocketry House team at rocketryhouse@gmail.com.
+              {ARTICLE_COVERAGE_COPY}
             </p>
           </div>
-          <Link href="mailto:rocketryhouse@gmail.com" className="inline-flex h-10 items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-black text-white hover:bg-slate-800">
-            Contact team
+          <Link href="mailto:rocketryhouse@gmail.com?subject=ICANEWS%20Global%20Research%20article%20request" className="inline-flex h-10 items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-black text-white hover:bg-slate-800">
+            Request coverage
           </Link>
         </section>
       </div>

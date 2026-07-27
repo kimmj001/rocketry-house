@@ -82,6 +82,29 @@ export const USAGE_FIELD_LABELS: Record<LimitedUsageField, string> = {
   activeEventPagesCount: "Event pages"
 };
 
+export const USAGE_FIELDS_BY_ACCOUNT: Record<AccountType, Array<{ field: LimitedUsageField; label: string; periodText?: string }>> = {
+  personal: [
+    { field: "projectsCreatedCount", label: "Projects" },
+    { field: "cfdRunsUsed", label: "CFD runs", periodText: "this month" },
+    { field: "dmSentCount", label: "Messages", periodText: "this month" }
+  ],
+  team: [
+    { field: "projectsCreatedCount", label: "Projects" },
+    { field: "cfdRunsUsed", label: "CFD runs", periodText: "this month" },
+    { field: "memberTeamsCount", label: "Team members" },
+    { field: "dmSentCount", label: "Messages", periodText: "this month" }
+  ],
+  organization: [
+    { field: "memberTeamsCount", label: "Member teams" },
+    { field: "broadcastCount", label: "Broadcasts", periodText: "this month" },
+    { field: "activeEventPagesCount", label: "Event pages" },
+    { field: "dmSentCount", label: "Messages", periodText: "this month" }
+  ]
+};
+
+export const ARTICLE_COVERAGE_COPY =
+  "Coverage is handled with partner journalists at ICANEWS Global Research. Send a request email to rocketryhouse@gmail.com; ICANEWS will review the request and publish approved coverage on ICANEWS Global Research.";
+
 const UPGRADE_COPY: Record<LimitedUsageField, string> = {
   projectsCreatedCount: "Upgrade to Pro to create unlimited projects.",
   cfdRunsUsed: "Upgrade to Pro for unlimited CFD runs.",
@@ -171,6 +194,10 @@ export function usageCounterText(label: string, status: UsageStatus, periodText?
   const suffix = periodText ? ` ${periodText}` : "";
   if (status.limit === null) return `${label}: ${status.used} used / unlimited${suffix}`;
   return `${label}: ${status.used} / ${status.limit} used${suffix}`;
+}
+
+export function usageFieldsForAccount(accountType: AccountType) {
+  return USAGE_FIELDS_BY_ACCOUNT[accountType];
 }
 
 export function upgradePromptFor(field: LimitedUsageField) {

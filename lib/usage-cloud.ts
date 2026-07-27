@@ -15,6 +15,8 @@ import {
 } from "@/lib/usage-limits";
 
 const USAGE_COLLECTION = "usage_counters";
+const ACCOUNT_STATUS_OWNER_KEY = "admin:account-status";
+const ACCOUNT_STATUS_COLLECTION = "account_status";
 
 type UsageContext = {
   user: User;
@@ -56,6 +58,37 @@ function isUniqueConflict(error: { code?: string; message?: string }) {
   return error.code === "23505" || /duplicate key|unique constraint/i.test(error.message ?? "");
 }
 
+function safeRecordKey(value: string) {
+  return value.replace(/[^a-zA-Z0-9@._:-]+/g, "-").replace(/^-|-$/g, "") || "account";
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function objectValue(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+async function loadAccountStatusOverride(user: User) {
+  const supabase = getSupabaseClient();
+  if (!supabase || isMockMode) return {};
+
+  const keys = Array.from(new Set([user.email ? safeRecordKey(user.email.toLowerCase()) : "", safeRecordKey(user.id)].filter(Boolean)));
+  if (!keys.length) return {};
+
+  const { data } = await supabase
+    .from("user_data_records")
+    .select("payload, updated_at")
+    .eq("owner_key", ACCOUNT_STATUS_OWNER_KEY)
+    .eq("collection", ACCOUNT_STATUS_COLLECTION)
+    .in("record_key", keys)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+
+  return objectValue(data?.[0]?.payload);
+}
+
 async function resolveUsageContext(request: Request): Promise<UsageContext> {
   const supabase = getSupabaseClient();
   const token = authTokenFromRequest(request);
@@ -71,10 +104,12 @@ async function resolveUsageContext(request: Request): Promise<UsageContext> {
 
   const user = data.user;
   const metadata = user.user_metadata ?? {};
-  const accountType = normalizeAccountType(metadata.account_type);
-  const subscriptionTier = normalizeSubscriptionTier(metadata.subscription_tier);
-  const accountName = typeof metadata.organization_name === "string" && metadata.organization_name.trim()
-    ? metadata.organization_name.trim()
+  const statusOverride = await loadAccountStatusOverride(user);
+  const accountType = normalizeAccountType(statusOverride.accountType ?? metadata.account_type);
+  const subscriptionTier = normalizeSubscriptionTier(statusOverride.subscriptionTier ?? metadata.subscription_tier);
+  const organizationName = stringValue(statusOverride.organizationName) || stringValue(metadata.organization_name);
+  const accountName = organizationName
+    ? organizationName
     : user.id;
   const accountId = accountType === "personal" ? user.id : `${accountType}:${accountName}`;
   const usagePeriod = currentUsagePeriod();

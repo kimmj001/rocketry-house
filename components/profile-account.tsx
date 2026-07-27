@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { Award, BadgeCheck, Flame, Globe, MapPin, Pencil, RadioTower, Rocket, Save, UserRoundCheck, X } from "lucide-react";
+import { AccountFeatureConsole } from "@/components/account-feature-console";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { UsageCounter } from "@/components/usage-meter";
 import { readMockUser, restoreAuthUserFromCloud, saveAuthUserProfileToCloud, type AuthUser, updateLocalAccountUser, writeMockUser } from "@/lib/auth";
 import { loadPersistentRecords, savePersistentRecord, uploadPersistentFiles } from "@/lib/cloud-persistence";
 import { useCloudUsage } from "@/lib/use-cloud-usage";
+import { usageFieldsForAccount } from "@/lib/usage-limits";
 import type { SavedMotor } from "@/types/motor";
 
 type StoredRocketProject = {
@@ -34,7 +36,7 @@ export function ProfileAccount() {
   const [profileStatus, setProfileStatus] = useState("");
   const [savedMotors, setSavedMotors] = useState<SavedMotor[]>([]);
   const [rocketProjects, setRocketProjects] = useState<StoredRocketProject[]>([]);
-  const { statuses, loading: usageLoading, error: usageError } = useCloudUsage();
+  const { usage, statuses, loading: usageLoading, error: usageError, claimUsage, refreshUsage } = useCloudUsage();
   const [draft, setDraft] = useState({
     name: "",
     headline: "",
@@ -128,6 +130,10 @@ export function ProfileAccount() {
     "No rating yet",
     publishedProjects.length ? "Published" : "Not verified"
   ];
+  const planUser: AuthUser = usage
+    ? { ...user, accountType: usage.accountType, subscriptionTier: usage.subscriptionTier }
+    : { ...user, subscriptionTier: user.subscriptionTier ?? "standard" };
+  const planUsageFields = usageFieldsForAccount(planUser.accountType);
 
   async function updateProfilePhoto(file: File | undefined) {
     if (!file || !user) return;
@@ -219,7 +225,7 @@ export function ProfileAccount() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-3">
                 <UserRoundCheck className="h-7 w-7 text-orange-300" />
-                <p className="text-sm uppercase tracking-[0.18em] text-orange-100/55">{user.accountType} account</p>
+                <p className="text-sm uppercase tracking-[0.18em] text-orange-100/55">{planUser.accountType} {planUser.subscriptionTier ?? "standard"} account</p>
                 <Button variant="outline" onClick={() => { setDraftFromUser(user); setEditing(true); setProfileStatus(""); }} className="ml-auto">
                   <Pencil className="h-4 w-4" />
                   Edit profile
@@ -284,19 +290,27 @@ export function ProfileAccount() {
           <h2 className="font-semibold">Plan usage</h2>
           <p className="mt-2 text-sm text-orange-50/58">Standard limits are checked against cloud usage before limited actions run.</p>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <UsageCounter label="Projects" status={statuses?.projectsCreatedCount} loading={usageLoading} error={usageError} />
-            <UsageCounter label="CFD runs" status={statuses?.cfdRunsUsed} periodText="this month" loading={usageLoading} error={usageError} />
-            <UsageCounter label="Messages" status={statuses?.dmSentCount} periodText="this month" loading={usageLoading} error={usageError} />
-            {user.accountType === "organization" ? (
-              <>
-                <UsageCounter label="Member teams" status={statuses?.memberTeamsCount} loading={usageLoading} error={usageError} />
-                <UsageCounter label="Broadcasts" status={statuses?.broadcastCount} periodText="this month" loading={usageLoading} error={usageError} />
-                <UsageCounter label="Event pages" status={statuses?.activeEventPagesCount} loading={usageLoading} error={usageError} />
-              </>
-            ) : null}
+            {planUsageFields.map((item) => (
+              <UsageCounter
+                key={item.field}
+                label={item.label}
+                status={statuses?.[item.field]}
+                periodText={item.periodText}
+                loading={usageLoading}
+                error={usageError}
+              />
+            ))}
           </div>
         </Card>
-        <RoleWorkspace user={user} />
+        <AccountFeatureConsole
+          user={planUser}
+          statuses={statuses}
+          usageLoading={usageLoading}
+          usageError={usageError}
+          claimUsage={claimUsage}
+          refreshUsage={refreshUsage}
+        />
+        <RoleWorkspace user={planUser} />
         <div className="mt-8 grid gap-5 lg:grid-cols-3">
           <Card className="p-5">
             <Award className="h-6 w-6 text-orange-200" />

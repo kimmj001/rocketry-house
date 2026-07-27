@@ -11,6 +11,7 @@ export default async function CheckoutPreparePage({
   const accountType = normalizeAccountType(params.accountType);
   const planId = params.planId || PRO_PLAN_IDS[accountType];
   const planName = `${accountTitle(accountType)} Pro`;
+  const activationHref = `mailto:rocketryhouse@gmail.com?subject=${encodeURIComponent(`${planName} activation request`)}&body=${encodeURIComponent(`Hello Rocketry House team,\n\nPlease prepare ${planName} activation for this account.\n\nPlan ID: ${planId}\nBilling: ${PRO_PRICES[accountType]}\n\nAccount email:\n`)}`;
 
   return (
     <main className="min-h-screen bg-[#f4f1ea] px-4 py-24 text-slate-950 sm:px-6">
@@ -38,15 +39,15 @@ export default async function CheckoutPreparePage({
           </div>
 
           <div className="mt-6 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">
-            Stripe checkout is not connected yet. This page is the prepared conversion step for createCheckoutSession(accountType, &quot;pro&quot;) and keeps the plan ID mapping ready for payment integration.
+            Stripe checkout is not connected yet. This page is the prepared conversion step for createCheckoutSession(accountType, &quot;pro&quot;) and keeps the plan ID mapping ready for payment integration. Until Stripe is connected, Rocketry House can review activation requests and set the account plan from Unified account management.
           </div>
 
           <div className="mt-6 flex flex-wrap gap-2">
             <Link href="/pricing" className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-black text-slate-800 hover:bg-slate-100">
               View plans
             </Link>
-            <Link href="mailto:rocketryhouse@gmail.com" className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-4 text-sm font-black text-white hover:bg-orange-600">
-              Contact Rocketry House
+            <Link href={activationHref} className="inline-flex h-10 items-center justify-center rounded-md bg-orange-500 px-4 text-sm font-black text-white hover:bg-orange-600">
+              Request Pro activation
             </Link>
           </div>
         </section>
