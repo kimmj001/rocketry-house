@@ -1,5 +1,5 @@
-import { DirectMessages } from "@/components/direct-messages";
+import { redirect } from "next/navigation";
 
 export default function MessagesPage() {
-  return <DirectMessages />;
+  redirect("/explore");
 }

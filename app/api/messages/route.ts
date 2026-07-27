@@ -43,6 +43,12 @@ type UserDataRecord = {
   updated_at?: string;
 };
 
+type MessageTarget = {
+  id?: string;
+  email?: string;
+  name?: string;
+};
+
 function authTokenFromRequest(request: Request) {
   const header = request.headers.get("authorization") ?? "";
   const match = header.match(/^Bearer\s+(.+)$/i);
@@ -62,8 +68,8 @@ async function requireUser(request: Request) {
 export async function GET(request: Request) {
   try {
     const { user, supabase } = await requireUser(request);
-    const accounts = await loadMessageAccounts(supabase, user);
     const messages = await loadMessagesForUser(supabase, user.id);
+    const accounts = await loadMessageAccounts(supabase, user, messages, targetFromRequest(request));
     const currentUser = accounts.find((account) => account.id === user.id) ?? accountFromUser(user);
 
     return NextResponse.json({
@@ -96,7 +102,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Message text is required." }, { status: 400 });
     }
 
-    const accounts = await loadMessageAccounts(supabase, user);
+    const accounts = await loadMessageAccounts(supabase, user, [], { id: recipientId });
     const sender = accounts.find((account) => account.id === user.id) ?? accountFromUser(user);
     const recipient = accounts.find((account) => account.id === recipientId);
     if (!recipient) {
@@ -125,22 +131,18 @@ export async function POST(request: Request) {
   }
 }
 
-async function loadMessageAccounts(supabase: SupabaseClient, user: User) {
+async function loadMessageAccounts(supabase: SupabaseClient, user: User, messages: DirectMessage[], target?: MessageTarget) {
+  const accountKeys = scopedAccountKeys(user, messages, target);
+  const [profileRecords, statusRecords] = await Promise.all([
+    loadScopedProfileRecords(supabase, accountKeys, target),
+    loadScopedStatusRecords(supabase, accountKeys, target)
+  ]);
 
-  const { data, error } = await supabase
-    .from("user_data_records")
-    .select("owner_key,collection,record_key,payload,updated_at")
-    .in("collection", ["profiles", ACCOUNT_STATUS_COLLECTION])
-    .limit(2000);
-
-  if (error) throw error;
-
-  const records = (data ?? []) as UserDataRecord[];
-  const statuses = collectAccountStatuses(records.filter((record) => record.collection === ACCOUNT_STATUS_COLLECTION));
+  const statuses = collectAccountStatuses(statusRecords);
   const accounts = new Map<string, MessageAccount>();
   addAccount(accounts, applyStatus(accountFromUser(user), statuses));
 
-  for (const record of records.filter((item) => item.collection === "profiles")) {
+  for (const record of profileRecords) {
     const payload = objectValue(record.payload);
     const id = stringValue(payload.id) || record.record_key;
     if (!id) continue;
@@ -157,10 +159,26 @@ async function loadMessageAccounts(supabase: SupabaseClient, user: User) {
     addAccount(accounts, account);
   }
 
+  if (target?.id && !accounts.has(target.id)) {
+    addAccount(accounts, applyStatus(accountFromTarget(target), statuses));
+  }
+
   return Array.from(accounts.values()).sort((left, right) => left.name.localeCompare(right.name));
 }
 
 async function loadMessagesForUser(supabase: SupabaseClient, userId: string) {
+
+  const scoped = await supabase
+    .from("user_data_records")
+    .select("payload, updated_at")
+    .eq("collection", MESSAGES_COLLECTION)
+    .or(`payload->>senderId.eq.${userId},payload->>recipientId.eq.${userId}`)
+    .order("updated_at", { ascending: true })
+    .limit(1000);
+
+  if (!scoped.error && scoped.data) {
+    return normalizeMessages(scoped.data, userId);
+  }
 
   const { data, error } = await supabase
     .from("user_data_records")
@@ -171,6 +189,10 @@ async function loadMessagesForUser(supabase: SupabaseClient, userId: string) {
 
   if (error) throw error;
 
+  return normalizeMessages(data ?? [], userId);
+}
+
+function normalizeMessages(data: Array<{ payload?: unknown }>, userId: string) {
   return ((data ?? []) as Array<{ payload?: unknown }>).map((record) => normalizeMessage(record.payload))
     .filter((message): message is DirectMessage => Boolean(message && (message.senderId === userId || message.recipientId === userId)))
     .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
@@ -224,6 +246,90 @@ function collectAccountStatuses(records: UserDataRecord[]) {
     for (const key of [id, email].filter(Boolean)) statuses.set(key, status);
   }
   return statuses;
+}
+
+function targetFromRequest(request: Request): MessageTarget | undefined {
+  const url = new URL(request.url);
+  const target = {
+    id: stringValue(url.searchParams.get("targetId")),
+    email: normalizeEmail(stringValue(url.searchParams.get("targetEmail"))),
+    name: stringValue(url.searchParams.get("targetName"))
+  };
+  return target.id || target.email || target.name ? target : undefined;
+}
+
+function scopedAccountKeys(user: User, messages: DirectMessage[], target?: MessageTarget) {
+  const keys = new Set<string>([user.id]);
+  for (const message of messages) {
+    if (message.senderId) keys.add(message.senderId);
+    if (message.recipientId) keys.add(message.recipientId);
+  }
+  if (target?.id) keys.add(target.id);
+  if (target?.email) keys.add(target.email);
+  return Array.from(keys).filter(Boolean);
+}
+
+async function loadScopedProfileRecords(supabase: SupabaseClient, accountKeys: string[], target?: MessageTarget) {
+  const records: UserDataRecord[] = [];
+
+  if (accountKeys.length) {
+    const { data, error } = await supabase
+      .from("user_data_records")
+      .select("owner_key,collection,record_key,payload,updated_at")
+      .eq("collection", "profiles")
+      .in("record_key", accountKeys)
+      .limit(250);
+    if (error) throw error;
+    records.push(...((data ?? []) as UserDataRecord[]));
+  }
+
+  const targetEmail = normalizeEmail(target?.email ?? "");
+  const targetName = target?.name ?? "";
+  if (targetEmail) {
+    const { data } = await supabase
+      .from("user_data_records")
+      .select("owner_key,collection,record_key,payload,updated_at")
+      .eq("collection", "profiles")
+      .filter("payload->>email", "eq", targetEmail)
+      .limit(5);
+    records.push(...((data ?? []) as UserDataRecord[]));
+  }
+
+  if (targetName) {
+    const [byName, byDisplayName] = await Promise.all([
+      supabase
+        .from("user_data_records")
+        .select("owner_key,collection,record_key,payload,updated_at")
+        .eq("collection", "profiles")
+        .filter("payload->>name", "eq", targetName)
+        .limit(5),
+      supabase
+        .from("user_data_records")
+        .select("owner_key,collection,record_key,payload,updated_at")
+        .eq("collection", "profiles")
+        .filter("payload->>display_name", "eq", targetName)
+        .limit(5)
+    ]);
+    records.push(...((byName.data ?? []) as UserDataRecord[]), ...((byDisplayName.data ?? []) as UserDataRecord[]));
+  }
+
+  return uniqueRecords(records);
+}
+
+async function loadScopedStatusRecords(supabase: SupabaseClient, accountKeys: string[], target?: MessageTarget) {
+  const keys = Array.from(new Set([...accountKeys, target?.email ?? "", target?.name ?? ""].map((key) => safeRecordKey(key)).filter(Boolean)));
+  if (!keys.length) return [] as UserDataRecord[];
+
+  const { data, error } = await supabase
+    .from("user_data_records")
+    .select("owner_key,collection,record_key,payload,updated_at")
+    .eq("owner_key", ACCOUNT_STATUS_OWNER_KEY)
+    .eq("collection", ACCOUNT_STATUS_COLLECTION)
+    .in("record_key", keys)
+    .limit(250);
+
+  if (error) throw error;
+  return (data ?? []) as UserDataRecord[];
 }
 
 function applyStatus(account: MessageAccount, statuses: Map<string, Partial<MessageAccount> & { accessStatus?: string }>) {
@@ -280,6 +386,16 @@ function accountFromUser(user: User): MessageAccount {
   };
 }
 
+function accountFromTarget(target: MessageTarget): MessageAccount {
+  return {
+    id: target.id ?? "",
+    name: target.name || target.email || "Rocketry House account",
+    email: normalizeEmail(target.email ?? ""),
+    accountType: "personal",
+    subscriptionTier: "standard"
+  };
+}
+
 function conversationKey(left: string, right: string) {
   return [left, right].sort().join("__");
 }
@@ -294,4 +410,17 @@ function stringValue(value: unknown) {
 
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
+}
+
+function safeRecordKey(value: string) {
+  return value.replace(/[^a-zA-Z0-9@._:-]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function uniqueRecords(records: UserDataRecord[]) {
+  const map = new Map<string, UserDataRecord>();
+  for (const record of records) {
+    const key = `${record.owner_key}:${record.collection}:${record.record_key}`;
+    if (!map.has(key)) map.set(key, record);
+  }
+  return Array.from(map.values());
 }

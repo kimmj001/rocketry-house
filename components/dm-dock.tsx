@@ -77,7 +77,6 @@ export function DmDock() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [limitPrompt, setLimitPrompt] = useState<{ title: string; description: string } | null>(null);
-  const [pendingTarget, setPendingTarget] = useState<DmTargetProfile | null>(null);
   const [usageStatuses, setUsageStatuses] = useState<Record<LimitedUsageField, UsageStatus> | null>(null);
 
   const selectedAccount = accounts.find((account) => account.id === selectedId) ?? null;
@@ -87,14 +86,20 @@ export function DmDock() {
     return messages.filter((message) => message.conversationKey === key);
   }, [currentUser, messages, selectedAccount]);
 
-  const filteredAccounts = useMemo(() => {
+  const conversationAccounts = useMemo(() => {
+    if (!currentUser) return [] as MessageAccount[];
+    return accounts.filter((account) => messages.some((message) => message.conversationKey === conversationKey(currentUser.id, account.id)))
+      .sort((left, right) => latestConversationTime(messages, currentUser.id, right.id) - latestConversationTime(messages, currentUser.id, left.id));
+  }, [accounts, currentUser, messages]);
+
+  const filteredConversations = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return accounts.filter((account) => {
+    return conversationAccounts.filter((account) => {
       if (!term) return true;
       return [account.name, account.email, account.accountType, account.organizationName ?? "", account.headline ?? ""]
         .some((value) => value.toLowerCase().includes(term));
     });
-  }, [accounts, query]);
+  }, [conversationAccounts, query]);
 
   const loadMessages = useCallback(async (target?: DmTargetProfile | null) => {
     setLoading(true);
@@ -110,7 +115,9 @@ export function DmDock() {
       return;
     }
 
-    const response = await fetch("/api/messages", { headers, cache: "no-store" });
+    const params = targetParams(target);
+    const endpoint = params ? `/api/messages?${params}` : "/api/messages";
+    const response = await fetch(endpoint, { headers, cache: "no-store" });
     const data = await response.json() as MessagesPayload & { error?: string };
     if (!response.ok) {
       setError(data.error ?? "Direct messages could not be loaded.");
@@ -119,10 +126,13 @@ export function DmDock() {
     }
 
     setCurrentUser(data.currentUser);
+    const targetMatch = target ? resolveTargetAccount(data.accounts, target) : null;
     setAccounts(data.accounts);
     setMessages(data.messages);
-    setSelectedId((current) => current || data.accounts[0]?.id || "");
-    if (target) setPendingTarget(target);
+    setSelectedId((current) => targetMatch?.id ?? (data.accounts.some((account) => account.id === current) ? current : data.accounts[0]?.id || ""));
+    if (target) {
+      setNotice(targetMatch ? `DM opened with ${targetMatch.name}.` : `${target.name} does not have a message-enabled account yet.`);
+    }
     setLoading(false);
   }, []);
 
@@ -134,8 +144,7 @@ export function DmDock() {
       setNotice("");
       setError("");
       if (target) {
-        setPendingTarget(target);
-        setQuery(target.email ?? target.name);
+        setQuery("");
       }
       void loadMessages(target ?? null);
     }
@@ -149,22 +158,9 @@ export function DmDock() {
     void loadMessages();
   }, [currentUser, loadMessages, loading, open]);
 
-  useEffect(() => {
-    if (!pendingTarget || !accounts.length) return;
-    const match = resolveTargetAccount(accounts, pendingTarget);
-    if (match) {
-      setSelectedId(match.id);
-      setQuery("");
-      setNotice(`Conversation opened with ${match.name}.`);
-    } else {
-      setNotice(`${pendingTarget.name} does not have a message-enabled account yet.`);
-    }
-    setPendingTarget(null);
-  }, [accounts, pendingTarget]);
-
   async function sendMessage() {
     if (!selectedAccount) {
-      setError("Choose an account before sending a DM.");
+      setError("Open a profile before starting a new DM.");
       return;
     }
     const body = draft.trim();
@@ -241,35 +237,49 @@ export function DmDock() {
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
-                    placeholder="Search accounts"
+                    placeholder="Search conversations"
                   />
                 </label>
-                <div className="mt-3 flex max-h-32 gap-2 overflow-x-auto pb-1">
-                  {filteredAccounts.slice(0, 18).map((account) => (
-                    <button
-                      key={account.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedId(account.id);
-                        setQuery("");
-                      }}
-                      className={`min-w-36 rounded-md border px-3 py-2 text-left text-xs transition ${
-                        account.id === selectedId ? "border-orange-300 bg-orange-50 text-orange-900" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <MiniAvatar account={account} />
-                        <span className="min-w-0 truncate font-semibold">{account.name}</span>
-                      </div>
-                      <p className="mt-1 truncate text-[11px] opacity-70">{latestMessagePreview(messages, currentUser.id, account.id) || account.accountType}</p>
-                    </button>
-                  ))}
-                  {!loading && !filteredAccounts.length ? (
-                    <div className="grid min-h-20 flex-1 place-items-center rounded-md border border-dashed border-slate-200 px-3 text-center text-xs text-slate-500">
-                      No message-enabled account found.
+                {selectedAccount && !conversationAccounts.some((account) => account.id === selectedAccount.id) ? (
+                  <div className="mt-3 flex items-center gap-3 rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
+                    <MiniAvatar account={selectedAccount} />
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">New DM to {selectedAccount.name}</p>
+                      <p className="truncate text-xs text-orange-800/70">Started from a profile.</p>
                     </div>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
+                {conversationAccounts.length ? (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Recent conversations</p>
+                    <div className="max-h-36 space-y-1 overflow-y-auto pr-1">
+                      {filteredConversations.slice(0, 24).map((account) => (
+                        <button
+                          key={account.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedId(account.id);
+                            setQuery("");
+                          }}
+                          className={`flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left text-xs transition ${
+                            account.id === selectedId ? "border-orange-300 bg-orange-50 text-orange-900" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                          }`}
+                        >
+                          <MiniAvatar account={account} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-semibold">{account.name}</span>
+                            <span className="block truncate text-[11px] opacity-70">{latestMessagePreview(messages, currentUser.id, account.id)}</span>
+                          </span>
+                        </button>
+                      ))}
+                      {!loading && !filteredConversations.length ? (
+                        <div className="rounded-md border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
+                          No conversations match.
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className="min-h-72 flex-1 overflow-y-auto bg-slate-50 p-3">
@@ -287,7 +297,7 @@ export function DmDock() {
                     );
                   }) : <EmptyState icon={MessageCircle} title="No messages yet" body="Send the first DM from this profile." />
                 ) : null}
-                {!loading && !selectedAccount ? <EmptyState icon={Inbox} title="Choose an account" body="Pick a profile to start a direct message." /> : null}
+                {!loading && !selectedAccount ? <EmptyState icon={Inbox} title="No conversations yet" body="Open a profile from Explore or Community to start a DM." /> : null}
               </div>
 
               {limitPrompt ? (
@@ -348,6 +358,15 @@ function resolveTargetAccount(accounts: MessageAccount[], target: DmTargetProfil
     ?? null;
 }
 
+function targetParams(target?: DmTargetProfile | null) {
+  if (!target) return "";
+  const params = new URLSearchParams();
+  if (target.id) params.set("targetId", target.id);
+  if (target.email) params.set("targetEmail", target.email);
+  if (target.name) params.set("targetName", target.name);
+  return params.toString();
+}
+
 function MiniAvatar({ account }: { account: MessageAccount }) {
   if (account.avatarUrl) return <img src={account.avatarUrl} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" />;
   return (
@@ -371,6 +390,13 @@ function EmptyState({ icon: Icon, title, body, children }: { icon: LucideIcon; t
 function latestMessagePreview(messages: DirectMessage[], currentUserId: string, accountId: string) {
   const key = conversationKey(currentUserId, accountId);
   return messages.filter((message) => message.conversationKey === key).at(-1)?.body ?? "";
+}
+
+function latestConversationTime(messages: DirectMessage[], currentUserId: string, accountId: string) {
+  const key = conversationKey(currentUserId, accountId);
+  return messages
+    .filter((message) => message.conversationKey === key)
+    .reduce((latest, message) => Math.max(latest, new Date(message.createdAt).getTime()), 0);
 }
 
 function conversationKey(left: string, right: string) {
