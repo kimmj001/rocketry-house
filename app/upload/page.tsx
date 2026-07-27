@@ -272,6 +272,16 @@ function flattenEvidenceRecords(files: Record<string, EvidenceSelection>) {
   return Object.values(files).flatMap((group) => group.records);
 }
 
+const imageFilePattern = /\.(avif|gif|jpe?g|png|svg|webp)$/i;
+
+function representativeImageFromRecords(records: Array<{ name: string; contentType?: string; type?: string; signedUrl?: string | null; publicUrl?: string }>) {
+  const image = records.find((record) => {
+    const type = record.contentType ?? record.type ?? "";
+    return /^image\//i.test(type) || imageFilePattern.test(record.name);
+  });
+  return image?.publicUrl ?? image?.signedUrl ?? undefined;
+}
+
 const evidence: EvidenceUploadItem[] = [
   {
     key: "cad-source",
@@ -438,6 +448,7 @@ export default function UploadPage() {
       signedUrlCreated: Boolean(file.publicUrl),
       uploadedAt: file.uploadedAt,
     }));
+    const representativeImage = representativeImageFromRecords(uploadedFiles) ?? "/project-art-1.svg";
     const projectPackage = {
       ...payload,
       id: projectKey,
@@ -464,7 +475,7 @@ export default function UploadPage() {
       verifiedFlight: verificationStatus === "Telemetry attached" || Boolean(actualAltitudeM && files["media-proof"]?.names.length),
       priceCents: 0,
       tags: [projectForm.category, flightForm.propellantFamily, motorClass, requestedVisibility, projectForm.publishGoal].filter(Boolean),
-      image: "/placeholder.svg",
+      image: representativeImage,
       specs: {
         lengthMm: totalLength,
         diameterMm: Math.round(Math.max(...parts.map((part) => part.diameter), 1)),

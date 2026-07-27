@@ -1,4 +1,3 @@
-import Image from "next/image";
 import Link from "next/link";
 import { AccountProfileLink } from "@/components/account-profile-link";
 import { Card } from "@/components/ui/card";
@@ -34,7 +33,7 @@ export function ProjectCard({ project }: { project: RocketProject }) {
     <Card className="h-full overflow-hidden border-slate-200 bg-white text-slate-950 shadow-sm ring-1 ring-slate-950/[0.03] transition hover:-translate-y-1 hover:border-orange-300 hover:shadow-lg">
       <Link href={`/projects/${project.slug}`} className="group block">
         <div className="relative m-3 aspect-[16/10] overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-inner">
-          <Image src={project.image} alt={project.title} fill className="object-contain p-3 transition duration-500 group-hover:scale-105" />
+          <img src={project.image} alt={project.title} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain p-3 transition duration-500 group-hover:scale-105" />
         </div>
       </Link>
       <div className="px-5 pb-5 pt-2">

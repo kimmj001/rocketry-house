@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 import {
   AlertTriangle,
@@ -129,7 +128,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <aside className="space-y-4">
             <Card className="overflow-hidden border-slate-200 bg-white p-0 text-slate-950 shadow-sm shadow-black/0 backdrop-blur-0">
               <div className="relative aspect-[16/11] bg-slate-100">
-                <Image src={project.image} alt={project.title} fill className="object-contain p-4" />
+                <img src={project.image} alt={project.title} loading="eager" decoding="async" className="absolute inset-0 h-full w-full object-contain p-4" />
               </div>
             </Card>
             <Card className="border-slate-200 bg-white p-5 text-slate-950 shadow-sm shadow-black/0 backdrop-blur-0">

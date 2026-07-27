@@ -63,6 +63,8 @@ const verificationStatuses: VerificationStatus[] = [
   "Static fire data",
   "Flight verified"
 ];
+const fallbackProjectImages = ["/project-art-1.svg", "/project-art-2.svg", "/project-art-3.svg", "/project-art-4.svg"];
+const imageFilePattern = /\.(avif|gif|jpe?g|png|svg|webp)$/i;
 
 function normalizedDifficulty(value: unknown): Difficulty {
   if (typeof value !== "string") return "Intermediate";
@@ -145,18 +147,43 @@ function hasEvidence(project: UploadedProjectPayload, pattern: RegExp) {
   return pattern.test(`${evidenceText} ${tagsText}`);
 }
 
+function normalizedUploadedFile(file: UploadedFileSummary): UploadedFileSummary {
+  return {
+    ...file,
+    sizeBytes: file.sizeBytes ?? file.size,
+    contentType: file.contentType ?? file.type,
+    signedUrl: file.signedUrl ?? file.publicUrl ?? null,
+    signedUrlCreated: Boolean(file.signedUrl ?? file.publicUrl)
+  };
+}
+
 function uploadedFilesFrom(project: UploadedProjectPayload): UploadedFileSummary[] {
-  if (Array.isArray(project.uploadedFiles)) return project.uploadedFiles;
+  if (Array.isArray(project.uploadedFiles)) return project.uploadedFiles.map(normalizedUploadedFile);
   if (Array.isArray(project.evidenceFiles)) {
-    return project.evidenceFiles.map((file) => ({
-      ...file,
-      sizeBytes: file.sizeBytes ?? file.size,
-      contentType: file.contentType ?? file.type,
-      signedUrl: file.signedUrl ?? file.publicUrl ?? null,
-      signedUrlCreated: Boolean(file.signedUrl ?? file.publicUrl)
-    }));
+    return project.evidenceFiles.map(normalizedUploadedFile);
   }
   return (project.files ?? []).map((name) => ({ name }));
+}
+
+function isPlaceholderImage(value: string | undefined) {
+  return !value || /placeholder\.svg(?:$|\?)/i.test(value);
+}
+
+function imageUrlFromFile(file: UploadedFileSummary) {
+  const type = file.contentType ?? file.type ?? "";
+  const isImage = /^image\//i.test(type) || imageFilePattern.test(file.name);
+  if (!isImage) return undefined;
+  return file.publicUrl ?? file.signedUrl ?? undefined;
+}
+
+function fallbackProjectImage(slug: string, index: number) {
+  const seed = Array.from(slug).reduce((sum, char) => sum + char.charCodeAt(0), index);
+  return fallbackProjectImages[Math.abs(seed) % fallbackProjectImages.length];
+}
+
+function representativeImageFrom(payload: UploadedProjectPayload, uploadedFiles: UploadedFileSummary[], slug: string, index: number) {
+  const explicitImage = [payload.image, payload.imageUrl, payload.thumbnailUrl].find((value) => !isPlaceholderImage(value));
+  return explicitImage ?? uploadedFiles.map(imageUrlFromFile).find(Boolean) ?? fallbackProjectImage(slug, index);
 }
 
 export function archivedProjectToRocketProject(record: ProjectRecordLike, index = 0): RocketProject {
@@ -164,6 +191,7 @@ export function archivedProjectToRocketProject(record: ProjectRecordLike, index 
   const slug = payload.slug ?? payload.id ?? record.record_key ?? slugFrom(payload.title ?? payload.name ?? `public-project-${index + 1}`);
   const title = payload.title ?? payload.name ?? "Untitled rocket project";
   const components = payload.components ?? payload.cad?.components ?? [];
+  const uploadedFiles = uploadedFilesFrom(payload);
   const verificationStatus = normalizedVerification(payload.verificationStatus ?? payload.status);
   const actualAltitude = payload.actualAltitudeM ?? payload.summary?.actualAltitudeM ?? undefined;
   const publicReferenceUrl =
@@ -196,7 +224,7 @@ export function archivedProjectToRocketProject(record: ProjectRecordLike, index 
     verifiedFlight: payload.verifiedFlight ?? verificationStatus === "Flight verified",
     forkCount: payload.forkCount ?? Math.max(0, index * 3),
     downloadCount: payload.downloadCount ?? Math.max(0, 120 + index * 37),
-    image: payload.image ?? payload.imageUrl ?? payload.thumbnailUrl ?? "/placeholder.svg",
+    image: representativeImageFrom(payload, uploadedFiles, slug, index),
     specs: specsFrom(payload, components),
     files: payload.files ?? ["design.rh.json", "project-summary.json", "evidence-index.json"],
     components,
@@ -216,7 +244,7 @@ export function archivedProjectToRocketProject(record: ProjectRecordLike, index 
     release: payload.release,
     summary: payload.summary,
     evidence: payload.evidence,
-    uploadedFiles: uploadedFilesFrom(payload),
+    uploadedFiles,
     accessPolicy: payload.accessPolicy,
     moderation: payload.moderation,
     narrative: payload.narrative,
