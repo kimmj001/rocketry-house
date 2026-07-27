@@ -926,6 +926,501 @@ export const communityPosts: CommunityPost[] = [
       seedComment("unused-altimeter-tracker-for-sale-2", launchAuthors.mira, "오늘 저녁에 캘리퍼로 측정해서 본문에 추가하겠습니다. 배터리는 포함하지 않습니다.", "6 hr ago", 8),
       seedComment("unused-altimeter-tracker-for-sale-3", launchAuthors.bps, "펌웨어 버전과 마지막 정상 작동 날짜도 함께 적어주시면 구매 판단에 도움이 될 것 같습니다.", "5 hr ago", 9)
     ]
+  },
+  {
+    slug: "same-motor-actual-apogee-too-low-en",
+    topic: "Propulsion",
+    title: "Same motor, but the real apogee was far lower than the simulation",
+    preview: "OpenRocket predicted about 820 m, but the altimeter recorded 610 m. Should I check surface drag, fin alignment, Cd, or rail exit velocity first?",
+    body: [
+      "I launched my first mid-power rocket this weekend. OpenRocket predicted an apogee of about 820 m, but the actual altimeter log topped out at 610 m. The finished mass was only about 40 g different from the simulation, and the wind did not feel strong at the field.",
+      "The causes I am considering are surface finish drag, fin alignment, the real drag coefficient, and rail exit velocity. Is this size of gap common? For the next simulation pass, which value would you adjust first?",
+      "I am going back through the launch video to check early attitude and weathercocking. I am also planning to re-enter the real center of gravity with paint, adhesive, and internal wiring included."
+    ],
+    author: launchAuthors.hwan,
+    time: "Just now",
+    views: "1,420",
+    likes: 42,
+    comments: 2,
+    evidenceLinks: ["OpenRocket 820 m vs altimeter 610 m", "Image: Wikimedia Commons / newmexico.photographer, CC BY 2.0"],
+    images: ["/community/seed-images/model-rocket-launch-2019.jpg"],
+    linkedProject: "Apogee mismatch review",
+    best: true,
+    recommended: true,
+    createdAt: "2026-07-27T08:20:00.000Z",
+    commentList: [
+      seedComment("same-motor-actual-apogee-too-low-en-1", launchAuthors.delft, "The real center of gravity can matter more than the final mass alone. Re-enter the physical values after paint, adhesive, and internal wiring are installed.", "3 min ago", 11),
+      seedComment("same-motor-actual-apogee-too-low-en-2", launchAuthors.bps, "If you have launch video, check the initial attitude and weathercocking first. Even a small tilt can cut a lot of vertical altitude.", "1 min ago", 9)
+    ]
+  },
+  {
+    slug: "motor-selection-rail-exit-before-apogee-en",
+    topic: "Propulsion",
+    title: "When choosing a motor, do you check rail exit velocity before apogee?",
+    preview: "The motor that matches target altitude has a low rail exit velocity, while the next size up clears the rail well but overshoots the altitude target.",
+    body: [
+      "At first I assumed I should simply pick the motor that gets closest to the target altitude. But when I tried a weaker motor in the sim, the predicted apogee looked reasonable while the rail exit velocity was low.",
+      "The next larger motor leaves the rail much faster, but it overshoots the target altitude by a lot. When experienced builders choose a motor, what order do you check: rail exit velocity, max acceleration, apogee, delay time, or predicted landing area?",
+      "If this were for a competition, I am also wondering whether ballast should be part of the design process. Trying to satisfy every condition with the motor alone makes the choices feel too narrow."
+    ],
+    author: launchAuthors.bps,
+    time: "6 min ago",
+    views: "1,780",
+    likes: 51,
+    comments: 2,
+    evidenceLinks: ["Rail exit velocity checklist", "Image: NASA Glenn Research Center engine performance diagram"],
+    images: ["/community/seed-images/rocket-engine-performance.gif"],
+    linkedProject: "Motor selection trade study",
+    recommended: true,
+    createdAt: "2026-07-27T08:16:00.000Z",
+    commentList: [
+      seedComment("motor-selection-rail-exit-before-apogee-en-1", launchAuthors.copenhagen, "I look at safe rail exit velocity first, then apogee. You can tune altitude with mass or drag, but a slow rail exit can be risky from the start.", "5 min ago", 14),
+      seedComment("motor-selection-rail-exit-before-apogee-en-2", launchAuthors.usc, "For a competition, do not judge the motor alone. Designing ballast with the motor gives you more room than forcing one motor to satisfy every condition.", "2 min ago", 8)
+    ]
+  },
+  {
+    slug: "first-tms-thrust-curve-too-jagged-en",
+    topic: "Propulsion",
+    title: "First TMS result: the thrust curve looks much too jagged",
+    preview: "Burn time and total impulse are close to the manufacturer data, but the curve is noisy. How should I separate sensor noise, frame resonance, and sampling issues?",
+    body: [
+      "I tested the data collection side of a small thrust measurement setup using a commercial motor. The overall burn time and total impulse are close to the manufacturer data, but the thrust curve is very jagged.",
+      "I cannot tell whether this is sensor vibration, frame resonance, or a sampling problem. Before the next test, I am considering frame reinforcement, fixing the sensor wiring, recording unloaded data, saving raw data before filtering, and syncing camera frames with measurement timestamps.",
+      "Which of those should I check first? I am worried that applying a strong filter too early could erase real variation, so I plan to preserve the raw data separately."
+    ],
+    author: launchAuthors.solder,
+    time: "11 min ago",
+    views: "2,260",
+    likes: 67,
+    comments: 2,
+    evidenceLinks: ["Raw thrust data first", "Image: Wikimedia Commons / Jesman, CC0", "Image: NASA Glenn Research Center performance curves"],
+    images: ["/community/seed-images/thrustcurve-d12.jpg", "/community/seed-images/rocket-engine-performance.gif"],
+    linkedProject: "TMS noise isolation",
+    best: true,
+    recommended: true,
+    createdAt: "2026-07-27T08:11:00.000Z",
+    commentList: [
+      seedComment("first-tms-thrust-curve-too-jagged-en-1", launchAuthors.kim, "Start with unloaded data and known static loads. If the noise is large without a motor, the issue is more likely electrical or data processing than structure.", "8 min ago", 19),
+      seedComment("first-tms-thrust-curve-too-jagged-en-2", launchAuthors.bps, "Do not apply a heavy filter first. It can hide real behavior. Keep the original data as a separate record no matter what.", "4 min ago", 16)
+    ]
+  },
+  {
+    slug: "rocket-bent-hard-toward-wind-en",
+    topic: "Flight results",
+    title: "The rocket suddenly bent hard toward the wind during ascent",
+    preview: "It climbed nearly vertical at first, then made a sharp left turn at altitude. Should I call this weathercocking, or inspect fin alignment and stability margin?",
+    body: [
+      "The first part of the flight was almost vertical, but after it gained some altitude the rocket suddenly turned hard to the left. After that it continued climbing in a stable way, and there was no tumbling.",
+      "The surface wind at launch was weak, but I suspect there may have been wind aloft. The stability margin at liftoff was about 2 calibers.",
+      "Does this sound like weathercocking, or should I also suspect fin alignment or excessive stability? I am planning to review the video for any rotation or roll during the turn."
+    ],
+    author: launchAuthors.balloon,
+    time: "18 min ago",
+    views: "1,930",
+    likes: 46,
+    comments: 2,
+    evidenceLinks: ["Video review: pitch/yaw/roll", "Stability margin note"],
+    linkedProject: "Weathercocking review",
+    recommended: true,
+    createdAt: "2026-07-27T08:04:00.000Z",
+    commentList: [
+      seedComment("rocket-bent-hard-toward-wind-en-1", launchAuthors.usc, "If it changed direction sharply instead of slowly arcing, it could be a gust or wind shear aloft. Check whether the video shows rotation or roll at the same time.", "14 min ago", 13),
+      seedComment("rocket-bent-hard-toward-wind-en-2", launchAuthors.princeton, "A larger stability margin can make the rocket follow the wind more aggressively. Bigger is not always better.", "9 min ago", 10)
+    ]
+  },
+  {
+    slug: "parachute-deployed-descent-twice-fast-en",
+    topic: "Flight results",
+    title: "The parachute deployed, but descent was almost twice as fast as expected",
+    preview: "The sim predicted about 6 m/s, but the flight log shows around 11 m/s. Are vent size, line length, attachment length, and deployment speed more important than diameter?",
+    body: [
+      "The simulation predicted a descent rate of about 6 m/s, but the actual flight log was near 11 m/s. The parachute looked like it came out completely, but in the video the canopy keeps oscillating and one side looks slightly folded.",
+      "I did not find any line twists. Could vent size, shroud line length, canopy material, attachment length to the rocket, or deployment speed matter more than the listed parachute diameter?",
+      "I am going to check how long the canopy was fully inflated in the video. It may have deployed, but never settled into a stable shape."
+    ],
+    author: launchAuthors.kim,
+    time: "25 min ago",
+    views: "2,090",
+    likes: 58,
+    comments: 2,
+    evidenceLinks: ["Recovery video frame review", "Image: NASA Glenn Research Center flight stages diagram"],
+    images: ["/community/seed-images/model-rocket-flight.gif"],
+    linkedProject: "Recovery descent mismatch",
+    best: true,
+    recommended: true,
+    createdAt: "2026-07-27T07:57:00.000Z",
+    commentList: [
+      seedComment("parachute-deployed-descent-twice-fast-en-1", launchAuthors.copenhagen, "Check how long it was fully inflated in the video. It may have deployed but failed to create a stable canopy shape.", "21 min ago", 17),
+      seedComment("parachute-deployed-descent-twice-fast-en-2", launchAuthors.delft, "The drag coefficient entered in the simulation may not match the actual parachute. Diameter alone is a poor predictor of parachute performance.", "16 min ago", 12)
+    ]
+  },
+  {
+    slug: "first-flight-fin-fillet-crack-en",
+    topic: "Flight results",
+    title: "First flight succeeded, but one fin cracked after landing",
+    preview: "The rocket flew and recovered, but one fin has a 15 mm crack near the fillet. Is local reinforcement enough, or should I replace the fin?",
+    body: [
+      "The flight itself was successful and all electronics were recovered. After landing, though, I found a small crack near the fillet on one fin.",
+      "The ground was hard, and when the rocket tipped over after touchdown that fin hit first. Before the next flight, would you reinforce just that area, or replace the entire fin?",
+      "The crack is about 15 mm long, and I do not see obvious play when I move it by hand. I am also hearing that the internal bond matters more than the visible surface crack, so I am unsure."
+    ],
+    author: launchAuthors.hwan,
+    time: "34 min ago",
+    views: "1,310",
+    likes: 37,
+    comments: 2,
+    evidenceLinks: ["Landing damage note", "Fin fillet inspection"],
+    linkedProject: "Post-flight damage inspection",
+    recommended: true,
+    createdAt: "2026-07-27T07:48:00.000Z",
+    commentList: [
+      seedComment("first-flight-fin-fillet-crack-en-1", launchAuthors.delft, "The internal bond is more important than the crack visible from outside. If possible, inspect deeper before deciding.", "29 min ago", 12),
+      seedComment("first-flight-fin-fillet-crack-en-2", launchAuthors.usc, "I would repair it, then fly a lower-power confirmation flight before going larger. I would not jump straight to a bigger motor.", "23 min ago", 10)
+    ]
+  },
+  {
+    slug: "fin-tab-motor-mount-clearance-tight-en",
+    topic: "CAD review",
+    title: "Is the clearance between the fin tab and motor mount too tight?",
+    preview: "There is only about 3 mm between the retainer and the fin tab end. Once adhesive, tolerances, and tool access are included, it feels too tight.",
+    body: [
+      "I am reviewing the CAD for my first self-designed rocket. The fin tab reaches the motor tube, and the clearance between the retainer and the end of the fin tab is only about 3 mm.",
+      "It looks buildable, but once adhesive and manufacturing tolerances are included it feels too tight. What minimum clearance do you usually leave at the CAD stage?",
+      "In real builds, adhesive often takes up more space than the drawing suggests. I am planning to simulate the assembly order and tool access in CAD, not just the finished state."
+    ],
+    author: launchAuthors.delft,
+    time: "45 min ago",
+    views: "1,870",
+    likes: 52,
+    comments: 2,
+    evidenceLinks: ["Assembly clearance review", "Image: NASA Glenn Research Center model rocket parts diagram"],
+    images: ["/community/seed-images/model-rocket-parts.gif"],
+    linkedProject: "Fin tab clearance CAD check",
+    best: true,
+    recommended: true,
+    createdAt: "2026-07-27T07:37:00.000Z",
+    commentList: [
+      seedComment("fin-tab-motor-mount-clearance-tight-en-1", launchAuthors.princeton, "Three millimeters looks pretty tight once print tolerance and adhesive are included. Try replaying the full assembly sequence in CAD.", "39 min ago", 15),
+      seedComment("fin-tab-motor-mount-clearance-tight-en-2", launchAuthors.solder, "Do not only check whether the finished parts fit. Check whether a tool can actually reach the joint. Parts can fit while still being impossible to fasten or bond properly.", "33 min ago", 13)
+    ]
+  },
+  {
+    slug: "how-hollow-can-printed-nosecone-be-en",
+    topic: "CAD review",
+    title: "How hollow can a 3D-printed nose cone safely be?",
+    preview: "I want to reduce mass with a 2.4 mm shell and internal ribs, but I am worried about landing and handling damage. Which area usually breaks first?",
+    body: [
+      "I am planning to 3D print a nose cone. The current model uses a 2.4 mm outer wall, internal ribs, and a space near the bottom where I can add ballast.",
+      "I want to reduce mass, but if I make it too thin I am worried it will be damaged during landing or transport. I am more concerned about dropping it on the ground than flight loads.",
+      "For people who have printed similar nose cones, which area broke first? I have heard that the shoulder where the cone meets the body tube can be more fragile than the tip."
+    ],
+    author: launchAuthors.kim,
+    time: "56 min ago",
+    views: "1,520",
+    likes: 39,
+    comments: 2,
+    evidenceLinks: ["Nose cone shell thickness note", "Layer direction test plan"],
+    linkedProject: "3D printed nose cone review",
+    recommended: true,
+    createdAt: "2026-07-27T07:26:00.000Z",
+    commentList: [
+      seedComment("how-hollow-can-printed-nosecone-be-en-1", launchAuthors.balloon, "For us, the shoulder where the nose cone met the body tube broke before the tip. Repeated insertion and removal built up stress there.", "49 min ago", 11),
+      seedComment("how-hollow-can-printed-nosecone-be-en-2", launchAuthors.bps, "Wall thickness is not the only variable. Layer direction and material choice matter too. Test-fit it in the actual body tube several times after printing.", "42 min ago", 10)
+    ]
+  },
+  {
+    slug: "avionics-bay-cad-review-maintenance-en",
+    topic: "CAD review",
+    title: "Could you review my avionics bay CAD?",
+    preview: "Component spacing looks fine, but the wiring path is complicated and the center connector cannot be reached after assembly. Should maintenance access take priority?",
+    body: [
+      "I designed an avionics bay for the first time. It includes one flight computer, two batteries, two switches, and an antenna mount.",
+      "The spacing between components looks sufficient, but the wiring path is complicated, and after assembly I cannot reach the center connector. I am considering two changes: making the tray removable from both sides, and moving the connector closer to the outside.",
+      "Is it acceptable to prioritize maintenance access over vibration concerns? Since battery replacement and continuity checks happen at the field, I am starting to think maintainability is part of safety."
+    ],
+    author: launchAuthors.solder,
+    time: "1 hr ago",
+    views: "1,660",
+    likes: 44,
+    comments: 2,
+    evidenceLinks: ["Avionics tray access review", "Strain relief placement"],
+    linkedProject: "Avionics bay CAD access",
+    recommended: true,
+    createdAt: "2026-07-27T07:14:00.000Z",
+    commentList: [
+      seedComment("avionics-bay-cad-review-maintenance-en-1", launchAuthors.copenhagen, "Field battery replacement and continuity checks are real operations, so maintainability is part of safety.", "58 min ago", 14),
+      seedComment("avionics-bay-cad-review-maintenance-en-2", launchAuthors.delft, "Mark the strain relief points in CAD too, so the wiring does not pull directly on the connectors.", "51 min ago", 12)
+    ]
+  },
+  {
+    slug: "telemetry-dropout-around-300m-en",
+    topic: "Telemetry",
+    title: "Telemetry dropped out around 300 m, then came back",
+    preview: "Ground tests were fine, but packet loss jumped around 300 m in real flight. Should I inspect antenna placement first?",
+    body: [
+      "Ground testing showed no problem, but during the actual flight packet loss increased sharply around 300 m. After apogee, some of the data started coming back again.",
+      "The antenna is mounted vertically inside the body tube, and there is a battery and a metal standoff nearby. RSSI was good near the launch rail.",
+      "In this situation, would you suspect antenna placement, ground station pointing, or transmit interval first? I still have onboard stored data, so I want to separate a wireless link issue from a sensor issue."
+    ],
+    author: launchAuthors.bps,
+    time: "1 hr ago",
+    views: "2,350",
+    likes: 73,
+    comments: 2,
+    evidenceLinks: ["RSSI versus altitude review", "Onboard log comparison"],
+    linkedProject: "Telemetry dropout investigation",
+    best: true,
+    recommended: true,
+    createdAt: "2026-07-27T07:02:00.000Z",
+    commentList: [
+      seedComment("telemetry-dropout-around-300m-en-1", launchAuthors.solder, "Check the body material and nearby metal around the antenna first. It can look fine close to the ground, then create a shadow zone as attitude changes.", "1 hr ago", 18),
+      seedComment("telemetry-dropout-around-300m-en-2", launchAuthors.usc, "If onboard storage survived, you can first separate a real sensor issue from a wireless link issue.", "55 min ago", 13)
+    ]
+  },
+  {
+    slug: "telemetry-and-onboard-log-time-drift-en",
+    topic: "Telemetry",
+    title: "Telemetry data and onboard log timestamps do not line up",
+    preview: "After 90 seconds, live telemetry and SD-card logs drift apart by about 0.8 seconds. Should I use GPS time or event-based post-flight alignment?",
+    body: [
+      "The timestamps in received live telemetry and the data saved to the SD card slowly drift apart. At the beginning they are almost aligned, but after about 90 seconds the difference is roughly 0.8 seconds.",
+      "This is inconvenient when comparing apogee and parachute deployment timing. Would you resync everything to GPS time, or use launch detection as a reference and correct the logs after the flight?",
+      "If this is local clock error in each device, aligning only the start point will not fully solve it. I am also considering calculating a drift rate over time."
+    ],
+    author: launchAuthors.mira,
+    time: "2 hr ago",
+    views: "1,470",
+    likes: 36,
+    comments: 2,
+    evidenceLinks: ["Clock drift estimate", "Shared event markers"],
+    linkedProject: "Telemetry log alignment",
+    recommended: true,
+    createdAt: "2026-07-27T06:49:00.000Z",
+    commentList: [
+      seedComment("telemetry-and-onboard-log-time-drift-en-1", launchAuthors.bps, "If each device has local clock error, matching only the start point will not solve it. Estimate the drift rate and correct across time.", "1 hr ago", 11),
+      seedComment("telemetry-and-onboard-log-time-drift-en-2", launchAuthors.princeton, "Use multiple common events, such as launch detect, apogee, and deployment. Post-flight alignment gets better with more anchor points.", "1 hr ago", 9)
+    ]
+  },
+  {
+    slug: "live-telemetry-dashboard-essential-values-en",
+    topic: "Telemetry",
+    title: "What values are actually necessary on a live telemetry dashboard?",
+    preview: "Altitude, speed, acceleration, voltage, GPS, RSSI, and state codes are all on one screen, but during launch it is easy to miss the important state.",
+    body: [
+      "I am building a new ground station screen for our team. Right now altitude, velocity, acceleration, battery voltage, GPS coordinates, RSSI, and state code are all shown on one screen.",
+      "During an actual launch, though, there is so much information that it is easy to miss the key status. How do you decide what must be large during flight and what should move to an analysis view?",
+      "I have heard that live screens should be simple and warning-centered. Maybe altitude and link status are enough as large graphs, while everything else can move into the review screen."
+    ],
+    author: launchAuthors.usc,
+    time: "2 hr ago",
+    views: "1,980",
+    likes: 59,
+    comments: 2,
+    evidenceLinks: ["Ground station screen priority", "Warning-first dashboard"],
+    linkedProject: "Live telemetry dashboard",
+    recommended: true,
+    createdAt: "2026-07-27T06:35:00.000Z",
+    commentList: [
+      seedComment("live-telemetry-dashboard-essential-values-en-1", launchAuthors.delft, "A live screen worked best for us when it focused on state and warnings. Altitude and link status were enough as the large graphs.", "2 hr ago", 16),
+      seedComment("live-telemetry-dashboard-essential-values-en-2", launchAuthors.solder, "Showing lots of normal values is less useful than making abnormal states impossible to miss with color or sound.", "1 hr ago", 15)
+    ]
+  },
+  {
+    slug: "new-university-rocket-team-roles-en",
+    topic: "University teams",
+    title: "How should a new university rocket team divide roles?",
+    preview: "We have 11 mostly new members. Should we divide structure, propulsion, electronics, recovery, simulation, and operations from the start?",
+    body: [
+      "We are a university rocket team formed this semester. We currently have 11 members, and most of us have no rocket-building experience.",
+      "We are thinking of dividing work into structure/CAD, propulsion and motor selection, electronics/telemetry, recovery systems, simulation, and operations/sponsorship. But the team is small, so one person will need to cover multiple roles.",
+      "Should we split into detailed parts from the beginning, or should everyone build the first rocket together? I keep hearing that university teams should divide roles but keep records and collaboration central."
+    ],
+    author: launchAuthors.princeton,
+    time: "3 hr ago",
+    views: "2,740",
+    likes: 81,
+    comments: 2,
+    evidenceLinks: ["Team structure draft", "Shared design review ritual"],
+    linkedProject: "New university team operating model",
+    best: true,
+    recommended: true,
+    createdAt: "2026-07-27T06:17:00.000Z",
+    commentList: [
+      seedComment("new-university-rocket-team-roles-en-1", launchAuthors.delft, "Early on, divide roles but make everyone participate in design reviews. If teams separate completely, people stop knowing what others are doing.", "2 hr ago", 21),
+      seedComment("new-university-rocket-team-roles-en-2", launchAuthors.usc, "I recommend making CAD and documentation an explicit role. If nobody records design decisions and changes, the next cohort starts over.", "2 hr ago", 18)
+    ]
+  },
+  {
+    slug: "team-files-disappear-after-graduation-en",
+    topic: "University teams",
+    title: "Team files and data disappear every time members graduate",
+    preview: "Code, CAD, and test results are scattered across personal accounts and chat messages. How should we organize GitHub and shared drive records?",
+    body: [
+      "Our team's biggest problem is not the technical work. It is handoff. Last year's flight computer code is in a personal account, CAD files are scattered across chat versions, and test results exist separately as spreadsheets and photos.",
+      "Starting this year, we want to introduce GitHub and a shared drive. How do other university teams organize CAD originals, production drawings, BOMs, test data, flight results, and design-change records?",
+      "The advice that stuck with me is to save why a decision was made, not just the final file. Recording failed options can help the next team avoid the same mistakes."
+    ],
+    author: launchAuthors.delft,
+    time: "3 hr ago",
+    views: "2,210",
+    likes: 66,
+    comments: 2,
+    evidenceLinks: ["CAD/BOM/test-data archive plan", "Approved version marker"],
+    linkedProject: "Team handoff archive",
+    recommended: true,
+    createdAt: "2026-07-27T06:01:00.000Z",
+    commentList: [
+      seedComment("team-files-disappear-after-graduation-en-1", launchAuthors.princeton, "Do not save only the final files. Record why decisions were made. Failed options are useful because the next team can avoid repeating them.", "3 hr ago", 18),
+      seedComment("team-files-disappear-after-graduation-en-2", launchAuthors.copenhagen, "A procedure for marking approved versions mattered more than file naming rules for us. Clean folders still fail if nobody knows which file was used for fabrication.", "2 hr ago", 15)
+    ]
+  },
+  {
+    slug: "first-competition-technical-goals-too-high-en",
+    topic: "University teams",
+    title: "For our first competition, I think our technical goals are too high",
+    preview: "Some members want a custom flight computer, dual deploy, active control, and custom propulsion in year one. Is that too much scope?",
+    body: [
+      "Some members suggested that in our first year we should build a custom flight computer, dual deploy, active control, and a custom propulsion system all at once.",
+      "Personally, I think we should use a commercial motor and a proven recovery system first, focus on a stable successful flight, and add only one custom development element.",
+      "Would lowering the technical difficulty for the first competition be too conservative, or is it better to protect completion quality and flight success first?"
+    ],
+    author: launchAuthors.usc,
+    time: "4 hr ago",
+    views: "2,680",
+    likes: 74,
+    comments: 2,
+    evidenceLinks: ["Scope control note", "Integration risk list"],
+    linkedProject: "First competition scope review",
+    best: true,
+    recommended: true,
+    createdAt: "2026-07-27T05:43:00.000Z",
+    commentList: [
+      seedComment("first-competition-technical-goals-too-high-en-1", launchAuthors.bps, "For a first vehicle, fewer interfaces are much better. More features mean more integration risk even when each part works by itself.", "3 hr ago", 20),
+      seedComment("first-competition-technical-goals-too-high-en-2", launchAuthors.princeton, "One clearly demonstrated hard feature looks better in a portfolio than five unfinished features.", "3 hr ago", 17)
+    ]
+  },
+  {
+    slug: "rocket-project-for-admissions-portfolio-en",
+    topic: "Admissions / portfolio",
+    title: "How should I present a rocket project in a college portfolio?",
+    preview: "A finished rocket photo feels too shallow by itself. Should I center the story on design process, simulation, failures, fixes, or flight data?",
+    body: [
+      "I am a high school student, and I want to include a model rocket project in my college application portfolio. I have photos of the finished rocket, but if the story ends at 'I built and launched it,' it feels too shallow.",
+      "Which should be the center of the portfolio: design process, OpenRocket simulation, fabrication failures and fixes, actual flight data, my role on the team, or the safety plan?",
+      "A lot of people have told me that finding and correcting problems matters more than the final result. The differences between prediction and reality may actually be the strongest material."
+    ],
+    author: launchAuthors.knsb,
+    time: "4 hr ago",
+    views: "1,950",
+    likes: 63,
+    comments: 2,
+    evidenceLinks: ["Portfolio story outline", "Expected vs actual comparison"],
+    linkedProject: "Admissions portfolio structure",
+    recommended: true,
+    createdAt: "2026-07-27T05:27:00.000Z",
+    commentList: [
+      seedComment("rocket-project-for-admissions-portfolio-en-1", launchAuthors.princeton, "Show how you discovered and corrected problems more than the final object. The gap between expected and actual results can be great portfolio material.", "4 hr ago", 19),
+      seedComment("rocket-project-for-admissions-portfolio-en-2", launchAuthors.kim, "Clearly mark the parts you personally handled. In a team project, claiming everything as your own can hurt trust.", "3 hr ago", 15)
+    ]
+  },
+  {
+    slug: "rocket-project-outside-aerospace-major-en",
+    topic: "Admissions / portfolio",
+    title: "Can a rocket project help even if I do not major in aerospace?",
+    preview: "I am choosing between mechanical and electrical engineering. Should I force the project toward one major, or show it as an interdisciplinary system?",
+    body: [
+      "I am deciding between mechanical engineering and electrical/electronics engineering. On the rocket team I handled CAD and structure, but recently I have become interested in sensors and data analysis too.",
+      "Should I force the portfolio to fit one specific major, or is it okay to present the project as a system that connects several fields?",
+      "Rockets naturally combine multiple engineering areas, so I think the connections can be a strength. I just need to go beyond 'I like rockets' and explain what engineering questions the project made me care about."
+    ],
+    author: launchAuthors.mira,
+    time: "5 hr ago",
+    views: "1,610",
+    likes: 47,
+    comments: 2,
+    evidenceLinks: ["Cross-major portfolio framing", "Systems engineering reflection"],
+    linkedProject: "Major-fit portfolio note",
+    recommended: true,
+    createdAt: "2026-07-27T05:10:00.000Z",
+    commentList: [
+      seedComment("rocket-project-outside-aerospace-major-en-1", launchAuthors.delft, "A rocket is already a system that mixes several fields, so it is a good project for showing connections.", "4 hr ago", 14),
+      seedComment("rocket-project-outside-aerospace-major-en-2", launchAuthors.princeton, "Do not stop at 'I like rockets.' Connect the project to the engineering questions you became interested in.", "4 hr ago", 13)
+    ]
+  },
+  {
+    slug: "prelaunch-checklist-missing-items-en",
+    topic: "Safety notes",
+    title: "I am organizing the must-have items for a prelaunch checklist",
+    preview: "We already check exterior condition, motor retention, CG, recovery, power, continuity, people, wind, and post-launch approach. What commonly gets missed?",
+    body: [
+      "We want to turn the verbal checks our team does into a written checklist. Right now it includes rocket exterior and fin condition, motor retention, center of gravity, recovery connection, avionics power, and ignition circuit continuity.",
+      "We also included launch rail and personnel checks, wind speed and launch direction, and post-launch approach procedure. What items are commonly forgotten at the field?",
+      "I am going to add post-recovery handling too, especially what to do with a possible misfire state or damaged motor after retrieval."
+    ],
+    author: launchAuthors.copenhagen,
+    time: "5 hr ago",
+    views: "2,880",
+    likes: 91,
+    comments: 2,
+    evidenceLinks: ["Prelaunch checklist draft", "Image: NASA Glenn Research Center model rocket parts diagram"],
+    images: ["/community/seed-images/model-rocket-parts.gif"],
+    linkedProject: "Launch-day safety checklist",
+    best: true,
+    recommended: true,
+    createdAt: "2026-07-27T04:54:00.000Z",
+    commentList: [
+      seedComment("prelaunch-checklist-missing-items-en-1", launchAuthors.usc, "Include not just flight prep, but also how to handle misfire states or damaged motors after recovery.", "5 hr ago", 21),
+      seedComment("prelaunch-checklist-missing-items-en-2", launchAuthors.delft, "Make it explicit who has final launch authority. Everyone can think everything was checked while nobody actually owns the full decision.", "4 hr ago", 18)
+    ]
+  },
+  {
+    slug: "launch-scrub-criteria-before-field-en",
+    topic: "Safety notes",
+    title: "Should launch scrub criteria be defined numerically before going to the field?",
+    preview: "I want thresholds for wind, visibility, ground condition, communications, and recovery area, but I do not want the criteria to be too rigid.",
+    body: [
+      "On launch day, the team has already spent time and money, so it becomes easy to say, 'This is probably fine.'",
+      "Because of that, I want to define scrub criteria in advance for wind, visibility, ground condition, communication status, and predicted recovery area. The field always has variables, though, so criteria that are too rigid may also create problems.",
+      "How do other teams combine quantitative thresholds and safety-officer judgment? My current thought is to set numbers where numbers make sense, and give the safety officer authority to cancel more conservatively."
+    ],
+    author: launchAuthors.princeton,
+    time: "6 hr ago",
+    views: "2,040",
+    likes: 70,
+    comments: 2,
+    evidenceLinks: ["Scrub criteria draft", "Safety officer authority"],
+    linkedProject: "Launch/no-launch decision guide",
+    recommended: true,
+    createdAt: "2026-07-27T04:36:00.000Z",
+    commentList: [
+      seedComment("launch-scrub-criteria-before-field-en-1", launchAuthors.copenhagen, "Set numerical thresholds where numbers work, and give the safety officer authority to scrub even more conservatively.", "5 hr ago", 17),
+      seedComment("launch-scrub-criteria-before-field-en-2", launchAuthors.balloon, "It also matters that people feel free to say why the launch does not need to happen, not just why it should happen.", "5 hr ago", 15)
+    ]
+  },
+  {
+    slug: "unused-altimeter-tracker-for-sale-en",
+    topic: "Marketplace",
+    title: "Selling an unused altimeter and tracker set",
+    preview: "Small altimeter, GPS tracker, ground receiver, cables, and printed manual. Please verify frequency compatibility and local rules before buying.",
+    body: [
+      "Our project direction changed, so I am selling unused equipment. The set includes one small altimeter, one GPS tracker, one dedicated ground receiver, connection cables, and a printed manual.",
+      "The altimeter has only been powered on for testing and has never flown. The tracker was tested twice on the ground for communication.",
+      "Before buying, please verify frequency compatibility and the rules for your own region. I prefer selling everything together, but if there is no buyer after a few days I may consider selling items separately. I will measure the outside dimensions with calipers tonight and add them to the listing. Batteries are not included."
+    ],
+    author: launchAuthors.mira,
+    time: "7 hr ago",
+    views: "1,330",
+    likes: 28,
+    comments: 3,
+    evidenceLinks: ["Bench power-on only", "Ground link tested twice", "Buyer must verify local RF rules"],
+    linkedProject: "Marketplace avionics listing",
+    recommended: true,
+    createdAt: "2026-07-27T04:15:00.000Z",
+    commentList: [
+      seedComment("unused-altimeter-tracker-for-sale-en-1", launchAuthors.solder, "Can you share the battery connector type and outside dimensions? I want to check whether it fits my avionics bay.", "6 hr ago", 10),
+      seedComment("unused-altimeter-tracker-for-sale-en-2", launchAuthors.mira, "I will measure it with calipers tonight and add the dimensions to the body. Batteries are not included.", "6 hr ago", 8),
+      seedComment("unused-altimeter-tracker-for-sale-en-3", launchAuthors.bps, "Firmware version and the last normal operation date would also help buyers make a decision.", "5 hr ago", 9)
+    ]
   }
 ];
 
