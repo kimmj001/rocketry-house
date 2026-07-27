@@ -80,11 +80,16 @@ export type TelemetryDataset = {
 
 export type UploadedFileSummary = {
   name: string;
+  title?: string;
   storagePath?: string;
   sizeBytes?: number;
+  size?: number;
   contentType?: string;
+  type?: string;
   signedUrlCreated?: boolean;
   signedUrl?: string | null;
+  publicUrl?: string;
+  uploadedAt?: string;
 };
 
 export type ProjectSummary = {
@@ -115,6 +120,14 @@ export type ProjectModeration = {
   rawSourcePublished?: boolean;
   omittedDetails?: string[];
   [key: string]: unknown;
+};
+
+export type ProjectNarrative = {
+  highlights?: string;
+  reuseNotes?: string;
+  limitations?: string;
+  safetyScope?: string;
+  dataNotes?: string;
 };
 
 export type RocketProject = {
@@ -164,11 +177,15 @@ export type RocketProject = {
   visibility?: string;
   uploadedAt?: string;
   publishedAt?: string;
+  uploadProject?: Record<string, unknown>;
+  flight?: Record<string, unknown>;
+  release?: Record<string, unknown>;
   summary?: ProjectSummary;
   evidence?: Record<string, unknown>;
   uploadedFiles?: UploadedFileSummary[];
   accessPolicy?: ProjectAccessPolicy;
   moderation?: ProjectModeration;
+  narrative?: ProjectNarrative;
   scaffoldNotice?: string;
 };
 

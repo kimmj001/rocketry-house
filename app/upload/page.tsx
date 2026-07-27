@@ -145,6 +145,9 @@ type ProjectFormState = {
   referenceUrl: string;
   publishGoal: string;
   description: string;
+  highlights: string;
+  reuseNotes: string;
+  limitations: string;
 };
 
 type FlightFormState = {
@@ -188,6 +191,9 @@ const defaultProjectForm: ProjectFormState = {
   referenceUrl: "",
   publishGoal: "Share project",
   description: "",
+  highlights: "",
+  reuseNotes: "",
+  limitations: "",
 };
 
 const defaultFlightForm: FlightFormState = {
@@ -227,6 +233,10 @@ function slugFrom(value: string) {
 function parseNumber(value: string) {
   const match = value.replace(/,/g, "").match(/-?\d+(\.\d+)?/);
   return match ? Number(match[0]) : undefined;
+}
+
+function parseNumbers(value: string) {
+  return Array.from(value.replace(/,/g, "").matchAll(/-?\d+(\.\d+)?/g)).map((match) => Number(match[0]));
 }
 
 function referenceNameFromUrl(value: string) {
@@ -397,6 +407,20 @@ export default function UploadPage() {
     const verificationStatus = verificationFromEvidence(files, actualAltitudeM);
     const motorClass = flightForm.motorClass.trim() || projectForm.motorClass.trim() || flightForm.motorDesignation.trim() || "Unspecified solid motor";
     const evidenceFileNames = Object.values(files).flatMap((group) => group.names);
+    const totalImpulseNs = parseNumber(flightForm.totalImpulse);
+    const thrustValues = parseNumbers(flightForm.avgPeakThrust);
+    const maxThrustN = thrustValues.length ? Math.max(...thrustValues) : undefined;
+    const burnTimeS = parseNumber(flightForm.burnTime);
+    const uploadedFiles = evidenceFiles.map((file) => ({
+      name: file.name,
+      title: file.title,
+      sizeBytes: file.size,
+      contentType: file.type,
+      storagePath: file.storagePath,
+      signedUrl: file.publicUrl ?? null,
+      signedUrlCreated: Boolean(file.publicUrl),
+      uploadedAt: file.uploadedAt,
+    }));
     const projectPackage = {
       ...payload,
       id: projectKey,
@@ -432,6 +456,7 @@ export default function UploadPage() {
       },
       files: evidenceFileNames.length ? evidenceFileNames : ["design.rh.json", "project-summary.json", "evidence-index.json"],
       components: parts,
+      uploadProject: projectForm,
       publicReference: referenceUrl ? { name: referenceNameFromUrl(referenceUrl) ?? "Public reference", url: referenceUrl } : undefined,
       referenceName: referenceUrl ? referenceNameFromUrl(referenceUrl) : undefined,
       referenceUrl: referenceUrl || undefined,
@@ -451,10 +476,22 @@ export default function UploadPage() {
         cgMm: cg,
         cpMm: cp,
         stabilityMargin: Number(stability),
+        maxVelocityMps: simulationResult.maxVelocityMps,
+        maxThrustN,
+        totalImpulseNs,
+        burnTimeS,
+      },
+      narrative: {
+        highlights: projectForm.highlights.trim() || undefined,
+        reuseNotes: projectForm.reuseNotes.trim() || undefined,
+        limitations: projectForm.limitations.trim() || undefined,
+        safetyScope: flightForm.disclosureLevel,
+        dataNotes: `${evidenceFileCount} evidence files, ${parts.length} CAD components, ${simulationResult.timeSeries.length} simulation points`,
       },
       release: releaseForm,
       flight: flightForm,
       evidenceFiles,
+      uploadedFiles,
       publishedAt: now,
       updatedAt: now,
     };
@@ -625,6 +662,35 @@ function ProjectStep({ form, setForm }: { form: ProjectFormState; setForm: Dispa
         className="mt-2 h-16 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold outline-none focus:border-orange-400"
         placeholder="Design goal, assumptions, safety constraints, flight history, and what a fork should preserve."
       />
+      <div className="mt-2 grid grid-cols-1 gap-1.5 lg:grid-cols-3">
+        <label className="min-w-0">
+          <span className="mb-1 block truncate text-xs font-black text-slate-600">Highlights</span>
+          <textarea
+            value={form.highlights}
+            onChange={(event) => update({ highlights: event.target.value })}
+            className="h-24 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold outline-none focus:border-orange-400"
+            placeholder="Most useful finding, flight result, design decision, or comparison."
+          />
+        </label>
+        <label className="min-w-0">
+          <span className="mb-1 block truncate text-xs font-black text-slate-600">Reusable data</span>
+          <textarea
+            value={form.reuseNotes}
+            onChange={(event) => update({ reuseNotes: event.target.value })}
+            className="h-24 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold outline-none focus:border-orange-400"
+            placeholder="CAD parts, telemetry, thrust source, files, or checks another builder can inspect."
+          />
+        </label>
+        <label className="min-w-0">
+          <span className="mb-1 block truncate text-xs font-black text-slate-600">Known limitations</span>
+          <textarea
+            value={form.limitations}
+            onChange={(event) => update({ limitations: event.target.value })}
+            className="h-24 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold outline-none focus:border-orange-400"
+            placeholder="Missing measurements, private details, uncertainty, review status, or safety scope."
+          />
+        </label>
+      </div>
       <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
         Solid motor data is accepted for simulation and documentation only. Hazardous manufacturing instructions, harmful payload workflows, and weaponization content are not allowed.
       </div>
@@ -887,6 +953,7 @@ function PreviewModal({
             <p className="text-[11px] font-black uppercase tracking-[0.28em] text-orange-600">Publish preview</p>
             <h3 className="mt-1 text-2xl font-black">{title}</h3>
             <p className="mt-2 text-sm font-semibold text-slate-600">{project.description || "No description added yet."}</p>
+            {project.highlights ? <p className="mt-2 text-sm font-black text-slate-800">{project.highlights}</p> : null}
           </div>
           <button type="button" onClick={onClose} className="rounded-full border border-slate-200 p-2"><X className="h-4 w-4" /></button>
         </div>

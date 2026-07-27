@@ -2,6 +2,7 @@ import type {
   Difficulty,
   ProjectAccessPolicy,
   ProjectModeration,
+  ProjectNarrative,
   ProjectSummary,
   RocketComponent,
   RocketProject,
@@ -25,6 +26,10 @@ type UploadedProjectPayload = Partial<RocketProject> & {
   uploadedAt?: string;
   publishedAt?: string;
   scaffoldNotice?: string;
+  project?: Record<string, unknown>;
+  uploadProject?: Record<string, unknown>;
+  flight?: Record<string, unknown>;
+  release?: Record<string, unknown>;
   cad?: {
     components?: RocketComponent[];
     totalLength?: number;
@@ -36,8 +41,10 @@ type UploadedProjectPayload = Partial<RocketProject> & {
   summary?: ProjectSummary;
   evidence?: Record<string, unknown>;
   uploadedFiles?: UploadedFileSummary[];
+  evidenceFiles?: UploadedFileSummary[];
   accessPolicy?: ProjectAccessPolicy;
   moderation?: ProjectModeration;
+  narrative?: ProjectNarrative;
 };
 
 type ProjectRecordLike = {
@@ -140,6 +147,15 @@ function hasEvidence(project: UploadedProjectPayload, pattern: RegExp) {
 
 function uploadedFilesFrom(project: UploadedProjectPayload): UploadedFileSummary[] {
   if (Array.isArray(project.uploadedFiles)) return project.uploadedFiles;
+  if (Array.isArray(project.evidenceFiles)) {
+    return project.evidenceFiles.map((file) => ({
+      ...file,
+      sizeBytes: file.sizeBytes ?? file.size,
+      contentType: file.contentType ?? file.type,
+      signedUrl: file.signedUrl ?? file.publicUrl ?? null,
+      signedUrlCreated: Boolean(file.signedUrl ?? file.publicUrl)
+    }));
+  }
   return (project.files ?? []).map((name) => ({ name }));
 }
 
@@ -195,11 +211,15 @@ export function archivedProjectToRocketProject(record: ProjectRecordLike, index 
     visibility: payload.visibility,
     uploadedAt: payload.uploadedAt,
     publishedAt: payload.publishedAt,
+    uploadProject: payload.uploadProject ?? payload.project,
+    flight: payload.flight,
+    release: payload.release,
     summary: payload.summary,
     evidence: payload.evidence,
     uploadedFiles: uploadedFilesFrom(payload),
     accessPolicy: payload.accessPolicy,
     moderation: payload.moderation,
+    narrative: payload.narrative,
     scaffoldNotice: payload.scaffoldNotice,
     publicReference: publicReferenceUrl
       ? {
