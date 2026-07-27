@@ -5,11 +5,6 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatPrice(cents: number) {
-  if (cents === 0) return "Free";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
-}
-
 export function bySlug<T extends { slug: string }>(items: T[], slug: string) {
   const aliases: Record<string, string> = {
     "openrocket-replacement-demo-rocket": "copenhagen-nexo-ii-reference",

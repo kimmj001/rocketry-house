@@ -692,7 +692,7 @@ export function CommunityBoard() {
             </div>
             <div className="space-y-3 text-sm leading-6 text-slate-500">
               <p>Use real identities. Share engineering context, not unsafe manufacturing instructions.</p>
-              <p>Attach evidence when discussing flight results, test data, or marketplace claims.</p>
+              <p>Attach evidence when discussing flight results, test data, or shared project claims.</p>
               <p>Report harmful payload, targeting, or weaponization content.</p>
             </div>
           </section>

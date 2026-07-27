@@ -72,7 +72,7 @@ export const communityTopics = [
   "University teams",
   "Admissions / portfolio",
   "Safety notes",
-  "Marketplace",
+  "Equipment notes",
   "Other"
 ] as const;
 
@@ -259,7 +259,7 @@ export const communityPosts: CommunityPost[] = [
     createdAt: "2026-07-24T12:49:00.000Z",
     commentList: [
       seedComment("one-page-cad-review-caught-the-mistake-1", launchAuthors.copenhagen, "Service order is underrated. If a design cannot be inspected or disassembled calmly, it tends to create pressure at exactly the wrong moment.", "51 min ago", 17),
-      seedComment("one-page-cad-review-caught-the-mistake-2", launchAuthors.mira, "This is also a good marketplace standard. A seller could include an access-path image without revealing sensitive drawings.", "28 min ago", 12)
+      seedComment("one-page-cad-review-caught-the-mistake-2", launchAuthors.mira, "This is also a good public-reference standard. An access-path image can explain maintainability without revealing sensitive drawings.", "28 min ago", 12)
     ]
   },
   {
@@ -360,27 +360,27 @@ export const communityPosts: CommunityPost[] = [
     ]
   },
   {
-    slug: "marketplace-bench-test-receipt",
-    topic: "Marketplace",
-    title: "Used avionics listings should come with a bench-test receipt",
-    preview: "A marketplace can feel trustworthy if the listing asks for the right evidence: timestamped photos, power-on state, firmware note, and known limits.",
+    slug: "bench-test-evidence-receipt",
+    topic: "Equipment notes",
+    title: "Avionics references should come with a bench-test receipt",
+    preview: "Shared avionics notes become easier to trust when they include timestamped photos, power-on state, firmware notes, and known limits.",
     body: [
-      "A used avionics listing should not be judged by the prettiest photo. The useful evidence is boring: timestamped board photo, power-on state, firmware or configuration note, connector condition, and a clear list of what the seller did not test.",
-      "This does not have to become a heavy certification process. It can be a lightweight receipt attached to the listing. The buyer gets enough context to ask better questions, and the seller avoids repeating the same explanation in messages.",
-      "I would love to see Rocketry House make evidence-first marketplace posts the norm. It protects beginners from vague listings and rewards sellers who document their gear honestly."
+      "An avionics reference should not be judged by the prettiest photo. The useful evidence is boring: timestamped board photo, power-on state, firmware or configuration note, connector condition, and a clear list of untested limits.",
+      "This does not have to become a heavy certification process. It can be a lightweight receipt attached to the project note. Other builders get enough context to ask better questions, and the author avoids repeating the same explanation in messages.",
+      "I would love to see Rocketry House make evidence-first equipment notes the norm. It protects beginners from vague claims and rewards builders who document their gear honestly."
     ],
     author: launchAuthors.mira,
     time: "6 hr ago",
     views: "1,880",
     likes: 54,
     comments: 2,
-    evidenceLinks: ["Bench-test receipt", "Listing photo standard"],
-    linkedProject: "Marketplace trust checklist",
+    evidenceLinks: ["Bench-test receipt", "Reference photo standard"],
+    linkedProject: "Equipment evidence checklist",
     recommended: true,
     createdAt: "2026-07-24T07:12:00.000Z",
     commentList: [
-      seedComment("marketplace-bench-test-receipt-1", launchAuthors.solder, "Connector condition 사진은 꼭 있었으면 좋겠습니다. 납땜이나 커넥터 문제는 사진 없으면 거의 추측이 됩니다.", "5 hr ago", 14),
-      seedComment("marketplace-bench-test-receipt-2", launchAuthors.copenhagen, "Known limits are important. Honest uncertainty is more useful than overconfident listing copy.", "4 hr ago", 11)
+      seedComment("bench-test-evidence-receipt-1", launchAuthors.solder, "Connector condition 사진은 꼭 있었으면 좋겠습니다. 납땜이나 커넥터 문제는 사진 없으면 거의 추측이 됩니다.", "5 hr ago", 14),
+      seedComment("bench-test-evidence-receipt-2", launchAuthors.copenhagen, "Known limits are important. Honest uncertainty is more useful than overconfident reference notes.", "4 hr ago", 11)
     ]
   },
   {
@@ -904,7 +904,7 @@ export const communityPosts: CommunityPost[] = [
   },
   {
     slug: "unused-altimeter-tracker-for-sale",
-    topic: "Marketplace",
+    topic: "Equipment notes",
     title: "사용하지 않은 고도계와 추적기를 판매합니다",
     preview: "소형 고도계, GPS 추적기, 지상 수신기, 케이블과 인쇄 설명서를 판매합니다. 호환 주파수와 지역 규정은 구매 전 직접 확인해주세요.",
     body: [
@@ -917,8 +917,8 @@ export const communityPosts: CommunityPost[] = [
     views: "1,330",
     likes: 28,
     comments: 3,
-    evidenceLinks: ["Bench power-on only", "Ground link tested twice", "Buyer must verify local RF rules"],
-    linkedProject: "Marketplace avionics listing",
+    evidenceLinks: ["Bench power-on only", "Ground link tested twice", "Reviewer must verify local RF rules"],
+    linkedProject: "Avionics compatibility note",
     recommended: true,
     createdAt: "2026-07-24T10:17:00.000Z",
     commentList: [
@@ -1399,27 +1399,27 @@ export const communityPosts: CommunityPost[] = [
   },
   {
     slug: "unused-altimeter-tracker-for-sale-en",
-    topic: "Marketplace",
-    title: "Selling an unused altimeter and tracker set",
-    preview: "Small altimeter, GPS tracker, ground receiver, cables, and printed manual. Please verify frequency compatibility and local rules before buying.",
+    topic: "Equipment notes",
+    title: "Bench notes for an unused altimeter and tracker set",
+    preview: "Small altimeter, GPS tracker, ground receiver, cables, and printed manual notes. Verify frequency compatibility and local rules before field use.",
     body: [
-      "Our project direction changed, so I am selling unused equipment. The set includes one small altimeter, one GPS tracker, one dedicated ground receiver, connection cables, and a printed manual.",
+      "Our project direction changed, so I wrote a bench note for unused equipment. The set includes one small altimeter, one GPS tracker, one dedicated ground receiver, connection cables, and a printed manual.",
       "The altimeter has only been powered on for testing and has never flown. The tracker was tested twice on the ground for communication.",
-      "Before buying, please verify frequency compatibility and the rules for your own region. I prefer selling everything together, but if there is no buyer after a few days I may consider selling items separately. I will measure the outside dimensions with calipers tonight and add them to the listing. Batteries are not included."
+      "Before field use, verify frequency compatibility and the rules for your own region. I will measure the outside dimensions with calipers tonight and add them to the reference note. Batteries are not included."
     ],
     author: launchAuthors.mira,
     time: "7 hr ago",
     views: "1,330",
     likes: 28,
     comments: 3,
-    evidenceLinks: ["Bench power-on only", "Ground link tested twice", "Buyer must verify local RF rules"],
-    linkedProject: "Marketplace avionics listing",
+    evidenceLinks: ["Bench power-on only", "Ground link tested twice", "Reviewer must verify local RF rules"],
+    linkedProject: "Avionics compatibility note",
     recommended: true,
     createdAt: "2026-07-27T04:15:00.000Z",
     commentList: [
       seedComment("unused-altimeter-tracker-for-sale-en-1", launchAuthors.solder, "Can you share the battery connector type and outside dimensions? I want to check whether it fits my avionics bay.", "6 hr ago", 10),
       seedComment("unused-altimeter-tracker-for-sale-en-2", launchAuthors.mira, "I will measure it with calipers tonight and add the dimensions to the body. Batteries are not included.", "6 hr ago", 8),
-      seedComment("unused-altimeter-tracker-for-sale-en-3", launchAuthors.bps, "Firmware version and the last normal operation date would also help buyers make a decision.", "5 hr ago", 9)
+      seedComment("unused-altimeter-tracker-for-sale-en-3", launchAuthors.bps, "Firmware version and the last normal operation date would also help reviewers understand the equipment state.", "5 hr ago", 9)
     ]
   }
 ];

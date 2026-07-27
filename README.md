@@ -1,6 +1,6 @@
 # Rocketry House
 
-Rocketry House is a production-ready web-based rocket CAD ecosystem: project-first rocket repositories, browser CAD, engineering estimates, marketplace flows, forking, telemetry upload UX, and moderation workflows.
+Rocketry House is a production-ready web-based rocket CAD ecosystem: project-first rocket repositories, browser CAD, engineering estimates, Explore flows, forking, telemetry upload UX, and moderation workflows.
 
 ## Stack
 
@@ -109,13 +109,13 @@ Rocketry House is for educational and lawful rocketry use only. The UI includes 
 ## Product Pages
 
 - Landing page with cinematic quote hero
-- Marketplace explore
+- Explore
 - Project detail
 - Web CAD editor
 - Simulation
-- Upload/sell project
+- Upload project
 - Creator dashboard
 - Profile
 - Fork tree
 - Project release workflow
-- Project archive/downloads
+- Project archive

@@ -31,9 +31,9 @@ type UploadedProjectPayload = Partial<RocketProject> & {
     stabilityMargin?: number;
   };
   evidence?: Record<string, unknown>;
-  marketplace?: {
+  accessPolicy?: {
     priceCents?: number;
-    license?: string;
+    usageRights?: string;
     forkPolicy?: string;
   };
 };
@@ -156,8 +156,8 @@ export function archivedProjectToRocketProject(record: ProjectRecordLike, index 
     creatorRating: payload.creatorRating ?? Number((4.2 + (index % 6) * 0.1).toFixed(1)),
     description:
       payload.description ??
-      "A public Rocketry House project package with web CAD metadata, motor context, evidence attachments, and marketplace settings.",
-    priceCents: payload.priceCents ?? payload.marketplace?.priceCents ?? 0,
+      "A public Rocketry House project package with web CAD metadata, motor context, evidence attachments, and access settings.",
+    priceCents: payload.priceCents ?? payload.accessPolicy?.priceCents ?? 0,
     tags: payload.tags ?? [payload.summary?.propellantFamily, payload.summary?.motorClass, payload.visibility].filter(Boolean) as string[],
     difficulty: normalizedDifficulty(payload.difficulty),
     motorClass: payload.motorClass ?? payload.summary?.motorClass ?? "Solid rocket motor",

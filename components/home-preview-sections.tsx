@@ -147,8 +147,8 @@ export function HomePreviewSections({ initialProjects = [] }: { initialProjects?
           <SectionHeader
             eyebrow="Explore"
             title="Public rocket projects, motor records, and flight evidence"
-            copy="Browse public repositories with CAD metadata, motor context, telemetry, proof files, forks, and marketplace-ready project pages."
-            href="/marketplace"
+            copy="Browse public repositories with CAD metadata, motor context, telemetry, proof files, forks, and source-linked project pages."
+            href="/explore"
           />
 
           <div className="mt-10">

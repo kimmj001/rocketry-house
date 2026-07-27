@@ -28,7 +28,7 @@ export function ForkTree({ project, forks }: { project: RocketProject; forks: Ro
             ))
           ) : (
             <p className="text-sm text-orange-50/65">
-              No forks yet. Public projects can be forked with attribution when the license allows it.
+              No forks yet. Public projects can be forked with attribution when the usage rights allow it.
             </p>
           )}
         </div>

@@ -54,7 +54,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             <div className="relative aspect-[16/11] overflow-hidden rounded-lg border border-white/10 bg-white/[0.03]"><Image src={project.image} alt={project.title} fill className="object-contain p-4" /></div>
             <Card className="p-5">
               <h2 className="font-semibold">Project access</h2>
-              <p className="mt-2 text-sm text-orange-50/65">Projects are shared as engineering references. Files, evidence, and fork permissions follow the selected visibility and license.</p>
+              <p className="mt-2 text-sm text-orange-50/65">Projects are shared as engineering references. Files, evidence, and fork permissions follow the selected visibility and usage rights.</p>
               <div className="mt-4 flex gap-2"><Button asChild href={`/forks/${project.slug}`}><GitFork className="h-4 w-4" />Fork tree</Button><Button asChild href={`/upload`} variant="outline">Publish your project</Button></div>
             </Card>
             <Card className="p-5">

@@ -7,7 +7,7 @@ export default function NotFound() {
       <p className="text-sm uppercase tracking-[0.24em] text-orange-200">Lost signal</p>
       <h1 className="mt-4 text-4xl font-semibold">That project path is beyond range.</h1>
       <Button asChild className="mt-8">
-        <Link href="/marketplace">Return to marketplace</Link>
+        <Link href="/explore">Return to Explore</Link>
       </Button>
     </main>
   );

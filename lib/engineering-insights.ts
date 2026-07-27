@@ -1,4 +1,4 @@
-export const evidenceMarketplaceFilters = [
+export const evidenceExploreFilters = [
   "Static-fire tested",
   "Measured thrust curve",
   "Chamber pressure trace",

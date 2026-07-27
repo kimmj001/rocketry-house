@@ -321,7 +321,7 @@ export function ProfileAccount() {
           </Card>
           <Card className="p-5">
             <h2 className="flex items-center gap-2 font-semibold"><Rocket className="h-5 w-5 text-cyan-200" />My rocket builds</h2>
-            <p className="mt-2 text-sm text-orange-50/62">Rocket projects stay project-first: CAD, simulation, files, forks, discussions, and marketplace data remain attached to the rocket repository.</p>
+            <p className="mt-2 text-sm text-orange-50/62">Rocket projects stay project-first: CAD, simulation, files, forks, discussions, and access settings remain attached to the rocket repository.</p>
             <div className="mt-4 grid gap-2 text-sm text-orange-50/68">
               <p>Draft rocket CAD: {draftProjects.length}</p>
               <p>Published rocket repositories: {publishedProjects.length}</p>
@@ -358,7 +358,7 @@ export function ProfileAccount() {
         ) : (
           <Card className="mt-8 p-6">
             <h2 className="font-semibold">No public projects yet</h2>
-            <p className="mt-2 text-sm text-orange-50/58">Your published rockets, motors, launch logs, and marketplace releases will appear here after upload.</p>
+            <p className="mt-2 text-sm text-orange-50/58">Your published rockets, motors, launch logs, and public references will appear here after upload.</p>
             <Button href="/upload" asChild variant="outline" className="mt-4">Prepare first upload</Button>
           </Card>
         )}

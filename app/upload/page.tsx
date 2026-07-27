@@ -36,7 +36,7 @@ const steps: Step[] = [
   { title: "CAD", label: "Web model", Icon: Grid3X3 },
   { title: "Flight", label: "Motor data", Icon: Calculator },
   { title: "Evidence", label: "Proof files", Icon: UploadCloud },
-  { title: "Release", label: "License", Icon: BadgeCheck },
+  { title: "Release", label: "Access", Icon: BadgeCheck },
 ];
 
 const initialParts: RocketComponent[] = [
@@ -164,7 +164,7 @@ type FlightFormState = {
 
 type ReleaseFormState = {
   releaseType: "Private archive" | "Public project" | "Unlisted reference";
-  license: string;
+  usageRights: string;
   forkPolicy: string;
   dataAccess: string;
   articleRequest: string;
@@ -207,7 +207,7 @@ const defaultFlightForm: FlightFormState = {
 
 const defaultReleaseForm: ReleaseFormState = {
   releaseType: "Private archive",
-  license: "Educational reference",
+  usageRights: "Educational reference",
   forkPolicy: "Allow attributed forks",
   dataAccess: "Summary only",
   articleRequest: "Not requested",
@@ -435,9 +435,9 @@ export default function UploadPage() {
       publicReference: referenceUrl ? { name: referenceNameFromUrl(referenceUrl) ?? "Public reference", url: referenceUrl } : undefined,
       referenceName: referenceUrl ? referenceNameFromUrl(referenceUrl) : undefined,
       referenceUrl: referenceUrl || undefined,
-      marketplace: {
+      accessPolicy: {
         priceCents: 0,
-        license: releaseForm.license,
+        usageRights: releaseForm.usageRights,
         forkPolicy: releaseForm.forkPolicy,
       },
       summary: {
@@ -792,10 +792,10 @@ function EvidenceStep({ files, setFiles }: { files: Record<string, EvidenceSelec
 function ReleaseStep({ form, setForm }: { form: ReleaseFormState; setForm: Dispatch<SetStateAction<ReleaseFormState>> }) {
   const update = (patch: Partial<ReleaseFormState>) => setForm((current) => ({ ...current, ...patch }));
   return (
-    <Panel Icon={BadgeCheck} title="License and release" detail="Choose access, attribution, review state, and article request status before publishing.">
+    <Panel Icon={BadgeCheck} title="Access and release" detail="Choose visibility, usage rights, review state, and article request status before publishing.">
       <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2 xl:grid-cols-4">
         <Pick label="Release type" value={form.releaseType} onChange={(releaseType) => update({ releaseType: releaseType as ReleaseFormState["releaseType"] })} options={["Private archive", "Public project", "Unlisted reference"]} />
-        <Pick label="License" value={form.license} onChange={(license) => update({ license })} options={["Educational reference", "Creative Commons", "Team permission required", "Custom"]} />
+        <Pick label="Usage rights" value={form.usageRights} onChange={(usageRights) => update({ usageRights })} options={["Educational reference", "Subscriber-visible reference", "Team permission required", "Custom access note"]} />
         <Pick label="Fork policy" value={form.forkPolicy} onChange={(forkPolicy) => update({ forkPolicy })} options={["Allow attributed forks", "Team approval required", "No public forks"]} />
         <Pick label="Data access" value={form.dataAccess} onChange={(dataAccess) => update({ dataAccess })} options={["Summary only", "Files visible", "Telemetry visible", "Full evidence package"]} />
         <Pick label="Article request" value={form.articleRequest} onChange={(articleRequest) => update({ articleRequest })} options={["Not requested", "Request coverage", "Coverage already published"]} />
@@ -905,7 +905,7 @@ function PreviewModal({
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Release</p>
-            <p className="mt-2 text-sm font-bold text-slate-800">{release.license} / {release.forkPolicy}</p>
+            <p className="mt-2 text-sm font-bold text-slate-800">{release.usageRights} / {release.forkPolicy}</p>
             <p className="mt-1 text-sm font-semibold text-slate-600">{release.dataAccess} / {release.reviewState}</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">

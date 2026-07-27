@@ -1,5 +1,5 @@
 export const platformNav = [
-  ["Explore", "/marketplace"],
+  ["Explore", "/explore"],
   ["Build", "/build"],
   ["Community", "/community"],
   ["Upload", "/upload"],
@@ -72,7 +72,7 @@ export const flightGraphOutputs = [
 export const rankingCategories = [
   "Highest altitude",
   "Best efficiency",
-  "Most downloaded motor",
+  "Most referenced motor",
   "Best stability",
   "Longest burn",
   "Best educational project",

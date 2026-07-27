@@ -18,7 +18,3 @@ export function StabilityBadge({ margin }: { margin: number }) {
     </span>
   );
 }
-
-export function PriceTag({ cents }: { cents: number }) {
-  return <span className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white">{cents === 0 ? "Free" : `$${(cents / 100).toFixed(0)}`}</span>;
-}

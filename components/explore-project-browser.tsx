@@ -11,12 +11,11 @@ import type { RocketProject } from "@/lib/types";
 
 const categories = ["All", "Rockets", "Motors", "Telemetry", "Writeups"];
 const filterGroups = [
-  ["Access", ["Free", "Paid"]],
   ["Evidence", ["Verified", "Has CAD", "Telemetry", "Motor data"]],
   ["Class", ["High Power"]]
 ] as const;
 
-export function MarketplaceProjectBrowser({ initialProjects, initialLoadError }: { initialProjects: RocketProject[]; initialLoadError: string | null }) {
+export function ExploreProjectBrowser({ initialProjects, initialLoadError }: { initialProjects: RocketProject[]; initialLoadError: string | null }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -72,8 +71,6 @@ export function MarketplaceProjectBrowser({ initialProjects, initialLoadError }:
       if (category === "Writeups" && !project.publicReference) return false;
 
       return activeFilters.every((filter) => {
-        if (filter === "Free") return project.priceCents === 0;
-        if (filter === "Paid") return project.priceCents > 0;
         if (filter === "Verified") return project.verificationStatus !== "Unverified" && project.verificationStatus !== "Design uploaded";
         if (filter === "Has CAD") return project.hasWebCad;
         if (filter === "Telemetry") return project.hasTelemetry || project.hasFlightLog;
@@ -94,8 +91,8 @@ export function MarketplaceProjectBrowser({ initialProjects, initialLoadError }:
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Explore</p>
-            <h1 className="mt-3 max-w-3xl text-4xl font-semibold">Find rockets, motors, and flight data</h1>
-            <p className="mt-4 max-w-2xl text-slate-600">Browse project repositories with CAD, simulations, telemetry, files, and fork lineage.</p>
+            <h1 className="mt-3 max-w-3xl text-4xl font-semibold">Explore rockets, motors, and flight data</h1>
+            <p className="mt-4 max-w-2xl text-slate-600">Browse public engineering references with CAD metadata, simulation context, telemetry, proof files, and fork lineage.</p>
           </div>
           <Button href="/upload" asChild>Publish project</Button>
         </div>
@@ -117,7 +114,7 @@ export function MarketplaceProjectBrowser({ initialProjects, initialLoadError }:
             ))}
           </div>
           {advancedOpen ? (
-            <div className="mt-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-3">
+            <div className="mt-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-2">
               {filterGroups.map(([group, filters]) => (
                 <div key={group}>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{group}</p>

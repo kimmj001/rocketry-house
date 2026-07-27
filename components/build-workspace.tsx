@@ -29,7 +29,7 @@ const safetyWarnings = [
   "Rocketry House does not certify motor safety."
 ];
 
-const flow = ["Design Motor", "Simulate Motor", "Save Motor", "Build Rocket", "Insert Motor", "Simulate Rocket", "Publish / Fork / Sell"];
+const flow = ["Design Motor", "Simulate Motor", "Save Motor", "Build Rocket", "Insert Motor", "Simulate Rocket", "Publish / Fork / Review"];
 const buildPageClass = "min-h-screen bg-space-radial px-6 pb-32 pt-24";
 
 const defaultFreeformFinPoints = [
@@ -332,7 +332,7 @@ export function BuildHome() {
   const libraryNotes = [
     ["Motor library", "Saved motors stay attached to your account and can be inserted into future rocket designs."],
     ["Rocket projects", "Airframe CAD, selected motor, simulation result, and publish settings live together as one project."],
-    ["Public release", "Publish when the design has files, safety notes, flight evidence, and marketplace metadata ready."]
+    ["Public release", "Publish when the design has files, safety notes, flight evidence, and usage-rights metadata ready."]
   ];
 
   return (
@@ -688,7 +688,7 @@ export function RocketBuilder() {
               <div className="mt-4 grid gap-2">
                 <Button variant="outline" onClick={saveRocketProject}><Save className="h-4 w-4" />Save rocket project</Button>
                 <Button variant="outline"><Archive className="h-4 w-4" />Create fork-ready package</Button>
-                <Button><ChevronRight className="h-4 w-4" />Publish / Fork / Sell</Button>
+                <Button><ChevronRight className="h-4 w-4" />Publish / Fork / Review</Button>
               </div>
             </Card>
           </div>
@@ -2121,7 +2121,7 @@ function MotorSaveModal(props: {
         <div className="mt-4 grid gap-3">
           <label className="text-sm text-orange-50/65">Motor name<input value={props.name} onChange={(event) => props.setName(event.target.value)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" /></label>
           <label className="text-sm text-orange-50/65">Visibility<select value={props.visibility} onChange={(event) => props.setVisibility(event.target.value as never)} className="mt-1 w-full rounded-md border border-white/10 bg-[#121421] px-3 py-2 text-orange-50"><option>private</option><option>public</option><option>unlisted</option></select></label>
-          <label className="text-sm text-orange-50/65">License<input value={props.license} onChange={(event) => props.setLicense(event.target.value)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" /></label>
+          <label className="text-sm text-orange-50/65">Usage rights<input value={props.license} onChange={(event) => props.setLicense(event.target.value)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" /></label>
           <p className="rounded-md border border-white/10 bg-white/[0.04] p-3 text-sm text-orange-50/65">Motors are saved as engineering records. Public release and article coverage are handled through the project upload flow.</p>
         </div>
         <div className="mt-5 flex justify-end gap-2">

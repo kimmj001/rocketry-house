@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Activity, BookOpen, Download, GitFork, Star } from "lucide-react";
+import { Activity, BookOpen, GitFork, ShieldCheck, Star } from "lucide-react";
 import { VerificationBadge } from "@/components/badges";
 import { Card } from "@/components/ui/card";
 import type { RocketProject } from "@/lib/types";
@@ -33,7 +33,7 @@ export function ProjectCard({ project }: { project: RocketProject }) {
           </div>
           <div className="flex items-center justify-between text-xs text-slate-500">
             <span className="flex items-center gap-1"><GitFork className="h-3.5 w-3.5" />{project.forkCount}</span>
-            <span className="flex items-center gap-1"><Download className="h-3.5 w-3.5" />{project.downloadCount}</span>
+            <span className="flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" />{project.verifiedFlight ? "verified" : "reference"}</span>
             <span className="flex items-center gap-1"><Star className="h-3.5 w-3.5" />{project.creatorRating}</span>
           </div>
         </div>
