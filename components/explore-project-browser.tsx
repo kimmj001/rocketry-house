@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Box, FileSearch, Filter, Gauge, Search, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Filter, Gauge, Search, SlidersHorizontal } from "lucide-react";
 import { ProjectCard } from "@/components/project-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -107,16 +107,6 @@ export function ExploreProjectBrowser({ initialProjects, initialLoadError }: { i
     });
   }, [activeFilters, category, publicProjects, query, sortBy]);
 
-  const archiveStats = useMemo(() => {
-    const files = publicProjects.reduce((sum, project) => sum + (project.uploadedFiles?.length ?? project.files.length), 0);
-    return [
-      { label: "Projects", value: publicProjects.length, icon: FileSearch },
-      { label: "Evidence notes", value: publicProjects.reduce((sum, project) => sum + evidenceCount(project), 0), icon: ShieldCheck },
-      { label: "CAD parts", value: publicProjects.reduce((sum, project) => sum + project.components.length, 0), icon: Box },
-      { label: "Files", value: files, icon: Activity }
-    ];
-  }, [publicProjects]);
-
   function toggleFilter(filter: string) {
     setActiveFilters((current) => current.includes(filter) ? current.filter((item) => item !== filter) : [...current, filter]);
   }
@@ -131,18 +121,6 @@ export function ExploreProjectBrowser({ initialProjects, initialLoadError }: { i
             <p className="mt-4 max-w-3xl text-slate-600">Compare performance claims, inspect source evidence, audit CAD assumptions, and find projects worth forking or reviewing.</p>
           </div>
           <Button href="/upload" asChild>Publish project</Button>
-        </div>
-
-        <div className="mt-6 grid gap-3 md:grid-cols-4">
-          {archiveStats.map((stat) => {
-            const Icon = stat.icon;
-            return (
-              <div key={stat.label} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500"><Icon className="h-4 w-4" />{stat.label}</p>
-                <p className="mt-2 text-2xl font-semibold text-slate-950">{stat.value}</p>
-              </div>
-            );
-          })}
         </div>
 
         <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -196,10 +174,10 @@ export function ExploreProjectBrowser({ initialProjects, initialLoadError }: { i
       </p>
       {loadError ? <Card className="mt-4 border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">{loadError}</Card> : null}
 
-      <div className="mt-8 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+      <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
         {loading
           ? Array.from({ length: 4 }, (_, index) => (
-              <Card key={index} className="h-96 animate-pulse border-slate-200 bg-white p-4">
+              <Card key={index} className="h-80 animate-pulse border-slate-200 bg-white p-4">
                 <div className="h-40 rounded-lg bg-slate-100" />
                 <div className="mt-5 h-5 w-3/4 rounded bg-slate-100" />
                 <div className="mt-3 h-4 w-1/2 rounded bg-slate-100" />

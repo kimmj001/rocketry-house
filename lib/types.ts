@@ -122,6 +122,7 @@ export type RocketProject = {
   slug: string;
   title: string;
   creator: string;
+  creatorAvatarUrl?: string;
   creatorRating: number;
   description: string;
   priceCents: number;

@@ -17,6 +17,9 @@ type UploadedProjectPayload = Partial<RocketProject> & {
   visibility?: string;
   imageUrl?: string;
   thumbnailUrl?: string;
+  avatarUrl?: string;
+  creatorAvatarUrl?: string;
+  creatorProfileImageUrl?: string;
   referenceUrl?: string;
   referenceName?: string;
   uploadedAt?: string;
@@ -157,6 +160,7 @@ export function archivedProjectToRocketProject(record: ProjectRecordLike, index 
     slug,
     title,
     creator: payload.creator ?? "Rocketry House builder",
+    creatorAvatarUrl: payload.creatorAvatarUrl ?? payload.creatorProfileImageUrl ?? payload.avatarUrl,
     creatorRating: payload.creatorRating ?? Number((4.2 + (index % 6) * 0.1).toFixed(1)),
     description:
       payload.description ??
