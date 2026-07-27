@@ -27,6 +27,12 @@ type UsageContext = {
   recordKey: string;
 };
 
+type StoredUsageRecord = {
+  usage: UsageCounters;
+  exists: boolean;
+  updatedAt?: string;
+};
+
 export type UsageClaimResult = {
   allowed: boolean;
   blocked: boolean;
@@ -44,6 +50,10 @@ function authTokenFromRequest(request: Request) {
 
 function safeSegment(value: string) {
   return value.replace(/[^a-zA-Z0-9._:-]+/g, "-").replace(/^-+|-+$/g, "") || "account";
+}
+
+function isUniqueConflict(error: { code?: string; message?: string }) {
+  return error.code === "23505" || /duplicate key|unique constraint/i.test(error.message ?? "");
 }
 
 async function resolveUsageContext(request: Request): Promise<UsageContext> {
@@ -82,21 +92,7 @@ async function resolveUsageContext(request: Request): Promise<UsageContext> {
   };
 }
 
-async function loadUsage(context: UsageContext) {
-  const supabase = getSupabaseClient();
-  if (!supabase || isMockMode) throw new Error("Cloud usage tracking is not configured.");
-
-  const { data, error } = await supabase
-    .from("user_data_records")
-    .select("payload")
-    .eq("owner_key", context.ownerKey)
-    .eq("collection", USAGE_COLLECTION)
-    .eq("record_key", context.recordKey)
-    .maybeSingle();
-
-  if (error) throw error;
-
-  const now = new Date().toISOString();
+function normalizeStoredUsage(context: UsageContext, payload: Partial<UsageCounters> | undefined, now: string) {
   const empty = createEmptyUsageCounters({
     userId: context.userId,
     accountId: context.accountId,
@@ -108,7 +104,7 @@ async function loadUsage(context: UsageContext) {
 
   return {
     ...empty,
-    ...(data?.payload as Partial<UsageCounters> | undefined),
+    ...payload,
     userId: context.userId,
     accountId: context.accountId,
     accountType: context.accountType,
@@ -117,27 +113,72 @@ async function loadUsage(context: UsageContext) {
   };
 }
 
-async function saveUsage(context: UsageContext, usage: UsageCounters) {
+async function loadUsageRecord(context: UsageContext): Promise<StoredUsageRecord> {
   const supabase = getSupabaseClient();
   if (!supabase || isMockMode) throw new Error("Cloud usage tracking is not configured.");
 
-  const { error } = await supabase.from("user_data_records").upsert(
+  const { data, error } = await supabase
+    .from("user_data_records")
+    .select("payload, updated_at")
+    .eq("owner_key", context.ownerKey)
+    .eq("collection", USAGE_COLLECTION)
+    .eq("record_key", context.recordKey)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  return {
+    usage: normalizeStoredUsage(context, data?.payload as Partial<UsageCounters> | undefined, new Date().toISOString()),
+    exists: Boolean(data),
+    updatedAt: typeof data?.updated_at === "string" ? data.updated_at : undefined
+  };
+}
+
+async function insertUsageRecord(context: UsageContext, usage: UsageCounters) {
+  const supabase = getSupabaseClient();
+  if (!supabase || isMockMode) throw new Error("Cloud usage tracking is not configured.");
+
+  const { data, error } = await supabase.from("user_data_records").insert(
     {
       owner_key: context.ownerKey,
       collection: USAGE_COLLECTION,
       record_key: context.recordKey,
       payload: usage,
       updated_at: usage.updatedAt
-    },
-    { onConflict: "owner_key,collection,record_key" }
-  );
+    }
+  ).select("payload, updated_at").single();
+
+  if (error) {
+    if (isUniqueConflict(error)) return null;
+    throw error;
+  }
+
+  return normalizeStoredUsage(context, data?.payload as Partial<UsageCounters> | undefined, usage.updatedAt);
+}
+
+async function updateUsageRecord(context: UsageContext, previousUpdatedAt: string, usage: UsageCounters) {
+  const supabase = getSupabaseClient();
+  if (!supabase || isMockMode) throw new Error("Cloud usage tracking is not configured.");
+
+  const { data, error } = await supabase
+    .from("user_data_records")
+    .update({ payload: usage, updated_at: usage.updatedAt })
+    .eq("owner_key", context.ownerKey)
+    .eq("collection", USAGE_COLLECTION)
+    .eq("record_key", context.recordKey)
+    .eq("updated_at", previousUpdatedAt)
+    .select("payload, updated_at");
 
   if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : null;
+  if (!row) return null;
+
+  return normalizeStoredUsage(context, row.payload as Partial<UsageCounters> | undefined, usage.updatedAt);
 }
 
 export async function getUsageForRequest(request: Request) {
   const context = await resolveUsageContext(request);
-  const usage = await loadUsage(context);
+  const { usage } = await loadUsageRecord(context);
   return {
     usage,
     statuses: getAllUsageStatuses(usage)
@@ -146,34 +187,44 @@ export async function getUsageForRequest(request: Request) {
 
 export async function claimUsageForRequest(request: Request, field: LimitedUsageField, delta = 1): Promise<UsageClaimResult> {
   const context = await resolveUsageContext(request);
-  const usage = await loadUsage(context);
-  const status = getUsageStatus(usage, field);
 
-  if (usage.subscriptionTier === "standard" && status.limit !== null && status.used + delta > status.limit) {
-    return {
-      allowed: false,
-      blocked: true,
-      usage,
-      statuses: getAllUsageStatuses(usage),
-      prompt: upgradePromptFor(field),
-      message: "You've reached your Standard plan limit."
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const record = await loadUsageRecord(context);
+    const { usage } = record;
+    const status = getUsageStatus(usage, field);
+
+    if (usage.subscriptionTier === "standard" && status.limit !== null && status.used + delta > status.limit) {
+      return {
+        allowed: false,
+        blocked: true,
+        usage,
+        statuses: getAllUsageStatuses(usage),
+        prompt: upgradePromptFor(field),
+        message: "You've reached your Standard plan limit."
+      };
+    }
+
+    const now = new Date().toISOString();
+    const nextUsage: UsageCounters = {
+      ...usage,
+      [field]: Number(usage[field] ?? 0) + delta,
+      updatedAt: now,
+      createdAt: usage.createdAt || now
     };
+
+    const savedUsage = record.exists && record.updatedAt
+      ? await updateUsageRecord(context, record.updatedAt, nextUsage)
+      : await insertUsageRecord(context, nextUsage);
+
+    if (savedUsage) {
+      return {
+        allowed: true,
+        blocked: false,
+        usage: savedUsage,
+        statuses: getAllUsageStatuses(savedUsage)
+      };
+    }
   }
 
-  const now = new Date().toISOString();
-  const nextUsage: UsageCounters = {
-    ...usage,
-    [field]: Number(usage[field] ?? 0) + delta,
-    updatedAt: now,
-    createdAt: usage.createdAt || now
-  };
-
-  await saveUsage(context, nextUsage);
-
-  return {
-    allowed: true,
-    blocked: false,
-    usage: nextUsage,
-    statuses: getAllUsageStatuses(nextUsage)
-  };
+  throw new Error("Usage quota changed while claiming. Please try again.");
 }
