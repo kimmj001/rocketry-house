@@ -1,5 +1,5 @@
-import type { User } from "@supabase/supabase-js";
-import { getSupabaseClient, isMockMode } from "@/lib/supabase";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { getServerSupabaseClient } from "@/lib/supabase-server";
 import {
   createEmptyUsageCounters,
   currentUsagePeriod,
@@ -19,6 +19,7 @@ const ACCOUNT_STATUS_OWNER_KEY = "admin:account-status";
 const ACCOUNT_STATUS_COLLECTION = "account_status";
 
 type UsageContext = {
+  supabase: SupabaseClient;
   user: User;
   userId: string;
   accountId: string;
@@ -70,10 +71,7 @@ function objectValue(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-async function loadAccountStatusOverride(user: User) {
-  const supabase = getSupabaseClient();
-  if (!supabase || isMockMode) return {};
-
+async function loadAccountStatusOverride(user: User, supabase: SupabaseClient) {
   const keys = Array.from(new Set([user.email ? safeRecordKey(user.email.toLowerCase()) : "", safeRecordKey(user.id)].filter(Boolean)));
   if (!keys.length) return {};
 
@@ -90,10 +88,10 @@ async function loadAccountStatusOverride(user: User) {
 }
 
 async function resolveUsageContext(request: Request): Promise<UsageContext> {
-  const supabase = getSupabaseClient();
   const token = authTokenFromRequest(request);
+  const supabase = getServerSupabaseClient(token);
 
-  if (!supabase || isMockMode || !token) {
+  if (!supabase || !token) {
     throw new Error("Cloud sign-in is required before using Standard plan quota.");
   }
 
@@ -104,7 +102,7 @@ async function resolveUsageContext(request: Request): Promise<UsageContext> {
 
   const user = data.user;
   const metadata = user.user_metadata ?? {};
-  const statusOverride = await loadAccountStatusOverride(user);
+  const statusOverride = await loadAccountStatusOverride(user, supabase);
   const accountType = normalizeAccountType(statusOverride.accountType ?? metadata.account_type);
   const subscriptionTier = normalizeSubscriptionTier(statusOverride.subscriptionTier ?? metadata.subscription_tier);
   const organizationName = stringValue(statusOverride.organizationName) || stringValue(metadata.organization_name);
@@ -116,6 +114,7 @@ async function resolveUsageContext(request: Request): Promise<UsageContext> {
   const safeAccount = safeSegment(accountId);
 
   return {
+    supabase,
     user,
     userId: user.id,
     accountId,
@@ -149,8 +148,7 @@ function normalizeStoredUsage(context: UsageContext, payload: Partial<UsageCount
 }
 
 async function loadUsageRecord(context: UsageContext): Promise<StoredUsageRecord> {
-  const supabase = getSupabaseClient();
-  if (!supabase || isMockMode) throw new Error("Cloud usage tracking is not configured.");
+  const supabase = context.supabase;
 
   const { data, error } = await supabase
     .from("user_data_records")
@@ -170,8 +168,7 @@ async function loadUsageRecord(context: UsageContext): Promise<StoredUsageRecord
 }
 
 async function insertUsageRecord(context: UsageContext, usage: UsageCounters) {
-  const supabase = getSupabaseClient();
-  if (!supabase || isMockMode) throw new Error("Cloud usage tracking is not configured.");
+  const supabase = context.supabase;
 
   const { data, error } = await supabase.from("user_data_records").insert(
     {
@@ -192,8 +189,7 @@ async function insertUsageRecord(context: UsageContext, usage: UsageCounters) {
 }
 
 async function updateUsageRecord(context: UsageContext, previousUpdatedAt: string, usage: UsageCounters) {
-  const supabase = getSupabaseClient();
-  if (!supabase || isMockMode) throw new Error("Cloud usage tracking is not configured.");
+  const supabase = context.supabase;
 
   const { data, error } = await supabase
     .from("user_data_records")

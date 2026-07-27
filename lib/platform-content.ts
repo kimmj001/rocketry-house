@@ -2,6 +2,7 @@ export const platformNav = [
   ["Explore", "/explore"],
   ["Build", "/build"],
   ["Community", "/community"],
+  ["Messages", "/messages"],
   ["Upload", "/upload"],
   ["Pricing", "/pricing"],
   ["Rankings", "/ranking"],

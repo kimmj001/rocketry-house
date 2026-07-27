@@ -47,7 +47,6 @@ type AccountFeatureConsoleProps = {
 };
 
 const collections = [
-  "direct_messages",
   "team_members",
   "organization_member_teams",
   "broadcasts",
@@ -66,7 +65,6 @@ export function AccountFeatureConsole({ user, statuses, usageLoading, usageError
   const [records, setRecords] = useState<Record<string, FeatureRecord[]>>({});
   const [notice, setNotice] = useState("");
   const [limitPrompt, setLimitPrompt] = useState<{ title: string; description: string } | null>(null);
-  const [messageText, setMessageText] = useState("Could we compare recovery data after your next launch?");
   const [teamName, setTeamName] = useState(accountType === "team" ? "New avionics member" : "North Star Rocketry Team");
   const [broadcastText, setBroadcastText] = useState("Registration is open for the next static-fire review window.");
   const [eventTitle, setEventTitle] = useState("Regional Rocketry Design Review");
@@ -209,11 +207,10 @@ export function AccountFeatureConsole({ user, statuses, usageLoading, usageError
       {notice ? <p className="mt-3 text-sm font-semibold text-emerald-100/80">{notice}</p> : null}
 
       <div className="mt-6 grid gap-4 xl:grid-cols-3">
-        <FeatureCard icon={Send} title="Direct messaging" detail="Send tracked account messages. Standard plans stop at the exact monthly quota.">
-          <textarea value={messageText} onChange={(event) => setMessageText(event.target.value)} className="min-h-24 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-orange-50 outline-none" />
-          <Button className="mt-3 w-full" onClick={() => void claimThenSave("dmSentCount", "direct_messages", "Direct message", messageText)}>
+        <FeatureCard icon={Send} title="Direct messaging" detail="Open the chat window, choose another account, and send tracked messages against your monthly DM quota.">
+          <Button href="/messages" asChild className="w-full">
             <Send className="h-4 w-4" />
-            Send message
+            Open messages
           </Button>
         </FeatureCard>
 
