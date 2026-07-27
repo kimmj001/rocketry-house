@@ -21,13 +21,15 @@ import {
   createRocketComponent,
 } from "@/components/build-workspace";
 import { FileUploadBox } from "@/components/file-upload-box";
+import { UpgradeLimitCard, UsageCounter } from "@/components/usage-meter";
 import { Button } from "@/components/ui/button";
 import { readMockUser, restoreAuthUserFromCloud, type AuthUser } from "@/lib/auth";
 import { totalLength as calculateRocketLength } from "@/lib/cad/geometry";
 import { PUBLIC_PROJECTS_OWNER_KEY, savePersistentRecord, type PersistentFileRecord } from "@/lib/cloud-persistence";
 import { runRocketEstimateWithMotor } from "@/lib/rocket-simulation";
+import { useCloudUsage } from "@/lib/use-cloud-usage";
 import type { Difficulty, RocketComponent, RocketComponentType, VerificationStatus } from "@/lib/types";
-import { STANDARD_LIMITS } from "@/lib/usage-limits";
+import type { AccountType, UsageStatus } from "@/lib/usage-limits";
 
 type Step = { title: string; label: string; Icon: LucideIcon };
 
@@ -329,10 +331,12 @@ export default function UploadPage() {
   const [safetyOpen, setSafetyOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [projectLimitPrompt, setProjectLimitPrompt] = useState<{ title: string; description: string } | null>(null);
   const [projectForm, setProjectForm] = useState<ProjectFormState>(defaultProjectForm);
   const [flightForm, setFlightForm] = useState<FlightFormState>(defaultFlightForm);
   const [releaseForm, setReleaseForm] = useState<ReleaseFormState>(defaultReleaseForm);
   const [files, setFiles] = useState<Record<string, EvidenceSelection>>({});
+  const { statuses, loading: usageLoading, error: usageError, claimUsage, refreshUsage } = useCloudUsage();
 
   useEffect(() => {
     let mounted = true;
@@ -398,6 +402,19 @@ export default function UploadPage() {
   }
 
   async function publishProject() {
+    setProjectLimitPrompt(null);
+    const usageClaim = await claimUsage("projectsCreatedCount");
+    if (!usageClaim.ok) {
+      const prompt = usageClaim.data.prompt ?? {
+        title: usageClaim.data.message ?? "Cloud usage sync required.",
+        description: usageClaim.data.error ?? "Sign in with a cloud account before publishing projects so Standard plan usage can be tracked."
+      };
+      setProjectLimitPrompt({ title: prompt.title, description: prompt.description });
+      setStatus(prompt.title);
+      setSafetyOpen(false);
+      return;
+    }
+
     const now = new Date().toISOString();
     const title = projectForm.title.trim() || "Untitled Rocket Project";
     const projectKey = `${slugFrom(title)}-${Date.now()}`;
@@ -513,6 +530,7 @@ export default function UploadPage() {
             : "Project package published to your account archive."
           : "Project package published locally."
     );
+    void refreshUsage();
     setSafetyOpen(false);
   }
 
@@ -581,7 +599,18 @@ export default function UploadPage() {
           </div>
 
           <div className="p-2">
-            {active === 0 && <ProjectStep form={projectForm} setForm={setProjectForm} />}
+            {active === 0 && (
+              <ProjectStep
+                form={projectForm}
+                setForm={setProjectForm}
+                projectUsage={statuses?.projectsCreatedCount}
+                usageLoading={usageLoading}
+                usageError={usageError}
+                limitPrompt={projectLimitPrompt}
+                accountType={currentUser?.accountType ?? "personal"}
+                onDismissLimitPrompt={() => setProjectLimitPrompt(null)}
+              />
+            )}
             {active === 1 && (
               <CadStep
                 parts={parts}
@@ -641,8 +670,25 @@ function StepControls({ active, setActive, compact = false }: { active: number; 
   );
 }
 
-function ProjectStep({ form, setForm }: { form: ProjectFormState; setForm: Dispatch<SetStateAction<ProjectFormState>> }) {
-  const projectLimit = STANDARD_LIMITS.personal.projectsCreatedCount;
+function ProjectStep({
+  form,
+  setForm,
+  projectUsage,
+  usageLoading,
+  usageError,
+  limitPrompt,
+  accountType,
+  onDismissLimitPrompt
+}: {
+  form: ProjectFormState;
+  setForm: Dispatch<SetStateAction<ProjectFormState>>;
+  projectUsage?: UsageStatus | null;
+  usageLoading: boolean;
+  usageError: string;
+  limitPrompt: { title: string; description: string } | null;
+  accountType: AccountType;
+  onDismissLimitPrompt: () => void;
+}) {
   const update = (patch: Partial<ProjectFormState>) => setForm((current) => ({ ...current, ...patch }));
   return (
     <Panel Icon={FileText} title="Project identity" detail="Name the repository, ownership, category, and publish goal.">
@@ -694,9 +740,17 @@ function ProjectStep({ form, setForm }: { form: ProjectFormState; setForm: Dispa
       <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
         Solid motor data is accepted for simulation and documentation only. Hazardous manufacturing instructions, harmful payload workflows, and weaponization content are not allowed.
       </div>
+      <div className="mt-2">
+        <UsageCounter label="Projects" status={projectUsage} loading={usageLoading} error={usageError} />
+      </div>
+      {limitPrompt ? (
+        <div className="mt-2">
+          <UpgradeLimitCard accountType={accountType} title={limitPrompt.title} description={limitPrompt.description} onDismiss={onDismissLimitPrompt} />
+        </div>
+      ) : null}
       <div className="mt-2 grid grid-cols-1 gap-1.5 md:grid-cols-3">
-        <Info title="Standard plan" value={`${projectLimit} projects included`} />
-        <Info title="Cloud source of truth" value="Project records sync to Supabase after sign-in." />
+        <Info title="Standard plan" value="Up to 3 projects" />
+        <Info title="Cloud source of truth" value="Project usage is checked against Supabase before publishing." />
         <Info title="Article coverage" value="Request coverage at rocketryhouse@gmail.com." />
       </div>
     </Panel>

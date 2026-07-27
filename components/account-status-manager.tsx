@@ -236,7 +236,7 @@ export function AccountStatusManager() {
             <p className="text-sm uppercase tracking-[0.18em] text-cyan-100/62">Operations</p>
             <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Unified account management</h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-orange-50/62">
-              All discovered Supabase profiles, account status records, current sessions, and this browser's local accounts in one control surface.
+              All discovered Supabase profiles, account status records, current sessions, and browser-local accounts in one control surface.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

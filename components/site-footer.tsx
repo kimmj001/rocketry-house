@@ -19,6 +19,9 @@ export function SiteFooter() {
           <Link href="/upload" className="font-medium hover:text-orange-600">
             Upload
           </Link>
+          <Link href="/pricing" className="font-medium hover:text-orange-600">
+            Pricing
+          </Link>
         </nav>
       </div>
     </footer>

@@ -10,7 +10,9 @@ import {
   communityComments,
   communityPosts,
   guestCommunityUser,
-  getCommunityAuthorFromAuth
+  getCommunityAuthorFromAuth,
+  isEnglishCommunityComment,
+  isEnglishCommunityPost
 } from "@/lib/community-data";
 import { readMockUser, restoreAuthUserFromCloud, type AuthUser } from "@/lib/auth";
 import { loadPersistentSet, savePersistentSet } from "@/lib/cloud-persistence";
@@ -42,7 +44,7 @@ function setStoredItem(key: string, value: string) {
 function readStoredPosts() {
   if (typeof window === "undefined") return [];
   try {
-    return JSON.parse(getStoredItem(LOCAL_POSTS_KEY) ?? "[]") as CommunityPost[];
+    return (JSON.parse(getStoredItem(LOCAL_POSTS_KEY) ?? "[]") as CommunityPost[]).filter(isEnglishCommunityPost);
   } catch {
     return [];
   }
@@ -65,7 +67,7 @@ function storeSet(key: string, value: Set<string>) {
 function readStoredComments(slug: string) {
   if (typeof window === "undefined") return [];
   try {
-    return JSON.parse(getStoredItem(`${COMMENT_KEY_PREFIX}${slug}`) ?? "[]") as CommunityComment[];
+    return (JSON.parse(getStoredItem(`${COMMENT_KEY_PREFIX}${slug}`) ?? "[]") as CommunityComment[]).filter(isEnglishCommunityComment);
   } catch {
     return [];
   }
@@ -92,7 +94,7 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
   useEffect(() => {
     const localPost = readStoredPosts().find((item) => item.slug === slug);
     const seededPost = communityPosts.find((item) => item.slug === slug);
-    const resolved = initialPost ?? seededPost ?? localPost;
+    const resolved = [initialPost, seededPost, localPost].find((item): item is CommunityPost => Boolean(item && isEnglishCommunityPost(item)));
     setPost(resolved);
     const storedComments = readStoredComments(slug);
     setComments(storedComments.length ? storedComments : resolved?.commentList ?? communityComments);
@@ -101,10 +103,10 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
     setReported(readStoredSet(REPORTED_POSTS_KEY).has(slug));
     void loadCommunityPostsArchive().then((posts) => {
       const archivedPost = posts.find((item) => item.slug === slug);
-      if (archivedPost && !initialPost) setPost(archivedPost);
+      if (archivedPost && !initialPost && isEnglishCommunityPost(archivedPost)) setPost(archivedPost);
     });
     void loadCommunityCommentsArchive(slug).then((archivedComments) => {
-      if (archivedComments.length) setComments(archivedComments);
+      if (archivedComments.length) setComments(archivedComments.filter(isEnglishCommunityComment));
     });
     void loadPersistentSet("community_state", LIKED_POSTS_KEY).then((value) => setLiked(value.has(slug)));
     void loadPersistentSet("community_state", BOOKMARKED_POSTS_KEY).then((value) => setBookmarked(value.has(slug)));

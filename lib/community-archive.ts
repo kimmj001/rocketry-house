@@ -1,6 +1,6 @@
 "use client";
 
-import { communityPosts, type CommunityComment, type CommunityPost } from "@/lib/community-data";
+import { communityPosts, isEnglishCommunityComment, isEnglishCommunityPost, type CommunityComment, type CommunityPost } from "@/lib/community-data";
 import { loadPersistentRecords, PUBLIC_COMMUNITY_OWNER_KEY, savePersistentRecord } from "@/lib/cloud-persistence";
 
 const DB_NAME = "rocketry-house-community";
@@ -113,6 +113,7 @@ function mergePosts(...groups: CommunityPost[][]) {
   const map = new Map<string, CommunityPost>();
   for (const group of groups) {
     for (const post of group) {
+      if (!isEnglishCommunityPost(post)) continue;
       if (!map.has(post.slug)) map.set(post.slug, post);
     }
   }
@@ -142,7 +143,8 @@ export async function loadCommunityCommentsArchive(slug: string) {
   const idbComments = idbRecords.find((record) => record.slug === slug)?.comments ?? [];
   const cloudRecords = await loadPersistentRecords<CommunityComment[]>("community_comments", ARCHIVE_OPTIONS);
   const cloudComments = cloudRecords.find((record) => record.record_key === slug)?.payload ?? [];
-  return cloudComments.length ? cloudComments : idbComments.length ? idbComments : localComments;
+  const comments = cloudComments.length ? cloudComments : idbComments.length ? idbComments : localComments;
+  return comments.filter(isEnglishCommunityComment);
 }
 
 export async function saveCommunityCommentsArchive(slug: string, comments: CommunityComment[]) {

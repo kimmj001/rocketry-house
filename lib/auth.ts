@@ -6,6 +6,7 @@ export type AuthUser = {
   name: string;
   email: string;
   accountType: "personal" | "team" | "organization";
+  subscriptionTier?: "standard" | "pro";
   organizationName?: string;
   organizationApprovalStatus?: "none" | "requested" | "approved";
   avatarUrl?: string;
@@ -96,6 +97,7 @@ export function mapSupabaseUserToAuthUser(user: User, fallback?: Partial<AuthUse
     name: String(metadata.name ?? metadata.display_name ?? fallback?.name ?? user.email?.split("@")[0] ?? "Rocketry House member"),
     email: normalizeEmail(user.email ?? fallback?.email ?? ""),
     accountType,
+    subscriptionTier: metadata.subscription_tier === "pro" ? "pro" : fallback?.subscriptionTier ?? "standard",
     organizationName: typeof metadata.organization_name === "string" ? metadata.organization_name : fallback?.organizationName,
     organizationApprovalStatus: approvalStatus,
     avatarUrl: typeof metadata.avatar_url === "string" ? metadata.avatar_url : fallback?.avatarUrl,
@@ -132,6 +134,7 @@ export async function saveAuthUserProfileToCloud(user: AuthUser) {
     name: user.name,
     display_name: user.name,
     account_type: user.accountType,
+    subscription_tier: user.subscriptionTier ?? "standard",
     organization_name: user.organizationName,
     organization_approval_status: user.organizationApprovalStatus,
     avatar_url: user.avatarUrl,

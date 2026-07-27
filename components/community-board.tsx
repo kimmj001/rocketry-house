@@ -23,7 +23,8 @@ import {
   communityPosts,
   communityTopics,
   getCommunityAuthorFromAuth,
-  guestCommunityUser
+  guestCommunityUser,
+  isEnglishCommunityPost
 } from "@/lib/community-data";
 import { readMockUser, restoreAuthUserFromCloud, type AuthUser } from "@/lib/auth";
 import { loadPersistentSet, savePersistentSet } from "@/lib/cloud-persistence";
@@ -110,6 +111,7 @@ function mergeCommunityPosts(...groups: CommunityPost[][]) {
   const merged = new Map<string, CommunityPost>();
   for (const group of groups) {
     for (const post of group) {
+      if (!isEnglishCommunityPost(post)) continue;
       if (!merged.has(post.slug)) merged.set(post.slug, post);
     }
   }

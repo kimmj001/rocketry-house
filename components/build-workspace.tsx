@@ -9,9 +9,11 @@ import { Card } from "@/components/ui/card";
 import { RocketViewer3D } from "@/components/rocket-viewer-3d";
 import { FileUploadBox } from "@/components/file-upload-box";
 import { TelemetryChart } from "@/components/charts";
+import { UpgradeLimitCard, UsageCounter } from "@/components/usage-meter";
 import { mockProjects } from "@/lib/mock-data";
 import { readMockUser } from "@/lib/auth";
 import { loadPersistentRecords, savePersistentRecord } from "@/lib/cloud-persistence";
+import { getCloudUsageAuthHeaders, useCloudUsage } from "@/lib/use-cloud-usage";
 import { analyzeNozzleFlow, defaultMotorParameters, propellantProfiles, simulateMotor } from "@/lib/motor-simulation";
 import { runRocketEstimateWithMotor } from "@/lib/rocket-simulation";
 import { sortComponents, totalLength } from "@/lib/cad/geometry";
@@ -2143,6 +2145,8 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   const [cfdDebugView, setCfdDebugView] = useState<CfdDebugView>("mach");
   const [cfdFrameIndex, setCfdFrameIndex] = useState(0);
   const [cfdPlaying, setCfdPlaying] = useState(false);
+  const [cfdLimitPrompt, setCfdLimitPrompt] = useState<{ title: string; description: string } | null>(null);
+  const { statuses, loading: usageLoading, error: usageError, refreshUsage } = useCloudUsage();
   const convergenceAngle = Math.max(1, Math.min(89, parameters.convergenceAngleDeg ?? 60));
   const divergenceAngle = Math.max(1, Math.min(89, parameters.divergenceAngleDeg ?? 24));
   const chamberRadius = parameters.casingInnerDiameterMm / 2;
@@ -2233,15 +2237,20 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
 
     setCfdRunning(true);
     setCfdError(null);
+    setCfdLimitPrompt(null);
 
     try {
+      const usageHeaders = await getCloudUsageAuthHeaders();
       const response = await fetch("/api/cfd/nozzle/run", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...(usageHeaders ?? {}), "content-type": "application/json" },
         body: JSON.stringify(payload)
       });
       const data = await response.json();
       if (!response.ok) {
+        if (data?.prompt?.title && data?.prompt?.description) {
+          setCfdLimitPrompt({ title: data.prompt.title, description: data.prompt.description });
+        }
         const message =
           typeof data?.message === "string" ? data.message :
           typeof data?.error === "string" ? data.error :
@@ -2252,6 +2261,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
       setCfdResult(data as NozzleCfdResult);
       setCfdFrameIndex(0);
       setCfdPlaying(Boolean((data as NozzleCfdResult).transientFrames?.length));
+      void refreshUsage();
     } catch (error) {
       setCfdError(error instanceof Error ? error.message : "CFD request failed.");
     } finally {
@@ -2327,6 +2337,20 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
           <p className="mt-3 text-xs leading-5 text-orange-50/55">
             CFD verification mode renders raw finite-volume cells and reports validation failures openly. Treat non-converged fields as numerical diagnostics, not certified plume predictions.
           </p>
+          <div className="mt-3">
+            <UsageCounter
+              label="CFD runs"
+              status={statuses?.cfdRunsUsed}
+              periodText="this month"
+              loading={usageLoading}
+              error={usageError}
+            />
+          </div>
+          {cfdLimitPrompt ? (
+            <div className="mt-3">
+              <UpgradeLimitCard title={cfdLimitPrompt.title} description={cfdLimitPrompt.description} onDismiss={() => setCfdLimitPrompt(null)} />
+            </div>
+          ) : null}
           <p className={`mt-2 text-xs font-semibold ${expansionTone}`}>{expansionCopy} · peak chamber boundary {nozzleFlow.chamberPressureMPa.toFixed(2)} MPa · Pe/Pa {nozzleFlow.pressureRatio.toFixed(2)} · Cf {nozzleFlow.thrustCoefficient.toFixed(2)}</p>
           <svg viewBox="0 0 760 330" className="mt-5 h-auto w-full rounded-lg border border-white/10 bg-[#070a12]" role="img" aria-label="Nozzle convergence throat divergence and flow analysis diagram">
             <defs>

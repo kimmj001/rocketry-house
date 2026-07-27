@@ -181,7 +181,7 @@ export function archivedProjectToRocketProject(record: ProjectRecordLike, index 
     description:
       payload.description ??
       "A public Rocketry House project package with web CAD metadata, motor context, evidence attachments, and access settings.",
-    priceCents: payload.priceCents ?? payload.accessPolicy?.priceCents ?? 0,
+    priceCents: 0,
     tags: payload.tags ?? [payload.summary?.propellantFamily, payload.summary?.motorClass, payload.visibility].filter(Boolean) as string[],
     difficulty: normalizedDifficulty(payload.difficulty),
     motorClass: payload.motorClass ?? payload.summary?.motorClass ?? "Solid rocket motor",
@@ -202,7 +202,7 @@ export function archivedProjectToRocketProject(record: ProjectRecordLike, index 
     components,
     telemetry: payload.telemetry ?? telemetryFrom(payload),
     originalProjectId: payload.originalProjectId,
-    royaltyPercent: payload.royaltyPercent ?? 2,
+    royaltyPercent: 0,
     selectedMotorId: payload.selectedMotorId,
     selectedMotorVersionId: payload.selectedMotorVersionId,
     motorMountPosition: payload.motorMountPosition,

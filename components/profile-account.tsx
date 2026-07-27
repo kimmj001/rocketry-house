@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { Award, BadgeCheck, Flame, Globe, MapPin, Pencil, RadioTower, Rocket, Save, UserRoundCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { UsageCounter } from "@/components/usage-meter";
 import { readMockUser, restoreAuthUserFromCloud, saveAuthUserProfileToCloud, type AuthUser, updateLocalAccountUser, writeMockUser } from "@/lib/auth";
 import { loadPersistentRecords, savePersistentRecord, uploadPersistentFiles } from "@/lib/cloud-persistence";
+import { useCloudUsage } from "@/lib/use-cloud-usage";
 import type { SavedMotor } from "@/types/motor";
 
 type StoredRocketProject = {
@@ -32,6 +34,7 @@ export function ProfileAccount() {
   const [profileStatus, setProfileStatus] = useState("");
   const [savedMotors, setSavedMotors] = useState<SavedMotor[]>([]);
   const [rocketProjects, setRocketProjects] = useState<StoredRocketProject[]>([]);
+  const { statuses, loading: usageLoading, error: usageError } = useCloudUsage();
   const [draft, setDraft] = useState({
     name: "",
     headline: "",
@@ -276,6 +279,22 @@ export function ProfileAccount() {
             </div>
           ) : null}
           <div className="mt-6 grid gap-3 sm:grid-cols-4">{stats.map((item) => <div key={item} className="rounded-lg bg-white/[0.05] p-3 text-sm">{item}</div>)}</div>
+        </Card>
+        <Card className="mt-8 p-5">
+          <h2 className="font-semibold">Plan usage</h2>
+          <p className="mt-2 text-sm text-orange-50/58">Standard limits are checked against cloud usage before limited actions run.</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <UsageCounter label="Projects" status={statuses?.projectsCreatedCount} loading={usageLoading} error={usageError} />
+            <UsageCounter label="CFD runs" status={statuses?.cfdRunsUsed} periodText="this month" loading={usageLoading} error={usageError} />
+            <UsageCounter label="Messages" status={statuses?.dmSentCount} periodText="this month" loading={usageLoading} error={usageError} />
+            {user.accountType === "organization" ? (
+              <>
+                <UsageCounter label="Member teams" status={statuses?.memberTeamsCount} loading={usageLoading} error={usageError} />
+                <UsageCounter label="Broadcasts" status={statuses?.broadcastCount} periodText="this month" loading={usageLoading} error={usageError} />
+                <UsageCounter label="Event pages" status={statuses?.activeEventPagesCount} loading={usageLoading} error={usageError} />
+              </>
+            ) : null}
+          </div>
         </Card>
         <RoleWorkspace user={user} />
         <div className="mt-8 grid gap-5 lg:grid-cols-3">

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { solveInternalNozzleCfd } from "@/lib/cfd/internal-nozzle-solver";
+import { claimUsageForRequest } from "@/lib/usage-cloud";
 import type { NozzleCfdInputs } from "@/types/cfd";
 
 export const runtime = "nodejs";
@@ -56,12 +57,17 @@ export async function POST(request: Request) {
   }
 
   try {
+    const usageClaim = await claimUsageForRequest(request, "cfdRunsUsed");
+    if (usageClaim.blocked) {
+      return NextResponse.json(usageClaim, { status: 402 });
+    }
+
     const result = solveInternalNozzleCfd(body as NozzleCfdInputs);
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, usage: usageClaim.usage, usageStatuses: usageClaim.statuses });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Internal CFD solver failed." },
-      { status: 500 }
+      { status: error instanceof Error && /sign-in/i.test(error.message) ? 401 : 500 }
     );
   }
 }
