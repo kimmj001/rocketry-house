@@ -78,6 +78,45 @@ export type TelemetryDataset = {
   recognized: boolean;
 };
 
+export type UploadedFileSummary = {
+  name: string;
+  storagePath?: string;
+  sizeBytes?: number;
+  contentType?: string;
+  signedUrlCreated?: boolean;
+  signedUrl?: string | null;
+};
+
+export type ProjectSummary = {
+  predictedAltitudeM?: number;
+  actualAltitudeM?: number | null;
+  motorClass?: string;
+  propellantFamily?: string;
+  evidenceFileCount?: number;
+  lengthMm?: number;
+  dryMassG?: number;
+  cgMm?: number;
+  cpMm?: number;
+  stabilityMargin?: number;
+  maxVelocityMps?: number;
+  maxThrustN?: number;
+  totalImpulseNs?: number;
+  burnTimeS?: number;
+};
+
+export type ProjectAccessPolicy = {
+  priceCents?: number;
+  usageRights?: string;
+  forkPolicy?: string;
+};
+
+export type ProjectModeration = {
+  restrictedContentHandling?: string;
+  rawSourcePublished?: boolean;
+  omittedDetails?: string[];
+  [key: string]: unknown;
+};
+
 export type RocketProject = {
   id: string;
   slug: string;
@@ -120,6 +159,16 @@ export type RocketProject = {
     name: string;
     url: string;
   };
+  source?: string;
+  visibility?: string;
+  uploadedAt?: string;
+  publishedAt?: string;
+  summary?: ProjectSummary;
+  evidence?: Record<string, unknown>;
+  uploadedFiles?: UploadedFileSummary[];
+  accessPolicy?: ProjectAccessPolicy;
+  moderation?: ProjectModeration;
+  scaffoldNotice?: string;
 };
 
 export type SimulationWarning = {

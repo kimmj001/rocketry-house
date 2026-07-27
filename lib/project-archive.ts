@@ -1,4 +1,14 @@
-import type { Difficulty, RocketComponent, RocketProject, TelemetryDataset, VerificationStatus } from "@/lib/types";
+import type {
+  Difficulty,
+  ProjectAccessPolicy,
+  ProjectModeration,
+  ProjectSummary,
+  RocketComponent,
+  RocketProject,
+  TelemetryDataset,
+  UploadedFileSummary,
+  VerificationStatus
+} from "@/lib/types";
 
 type UploadedProjectPayload = Partial<RocketProject> & {
   name?: string;
@@ -10,6 +20,8 @@ type UploadedProjectPayload = Partial<RocketProject> & {
   referenceUrl?: string;
   referenceName?: string;
   uploadedAt?: string;
+  publishedAt?: string;
+  scaffoldNotice?: string;
   cad?: {
     components?: RocketComponent[];
     totalLength?: number;
@@ -18,24 +30,11 @@ type UploadedProjectPayload = Partial<RocketProject> & {
     cp?: number;
     stability?: number | string;
   };
-  summary?: {
-    predictedAltitudeM?: number;
-    actualAltitudeM?: number | null;
-    motorClass?: string;
-    propellantFamily?: string;
-    evidenceFileCount?: number;
-    lengthMm?: number;
-    dryMassG?: number;
-    cgMm?: number;
-    cpMm?: number;
-    stabilityMargin?: number;
-  };
+  summary?: ProjectSummary;
   evidence?: Record<string, unknown>;
-  accessPolicy?: {
-    priceCents?: number;
-    usageRights?: string;
-    forkPolicy?: string;
-  };
+  uploadedFiles?: UploadedFileSummary[];
+  accessPolicy?: ProjectAccessPolicy;
+  moderation?: ProjectModeration;
 };
 
 type ProjectRecordLike = {
@@ -136,6 +135,11 @@ function hasEvidence(project: UploadedProjectPayload, pattern: RegExp) {
   return pattern.test(`${evidenceText} ${tagsText}`);
 }
 
+function uploadedFilesFrom(project: UploadedProjectPayload): UploadedFileSummary[] {
+  if (Array.isArray(project.uploadedFiles)) return project.uploadedFiles;
+  return (project.files ?? []).map((name) => ({ name }));
+}
+
 export function archivedProjectToRocketProject(record: ProjectRecordLike, index = 0): RocketProject {
   const payload = record.payload ?? {};
   const slug = payload.slug ?? payload.id ?? record.record_key ?? slugFrom(payload.title ?? payload.name ?? `public-project-${index + 1}`);
@@ -183,6 +187,16 @@ export function archivedProjectToRocketProject(record: ProjectRecordLike, index 
     selectedMotorVersionId: payload.selectedMotorVersionId,
     motorMountPosition: payload.motorMountPosition,
     rocketSimulationResultJson: payload.rocketSimulationResultJson,
+    source: payload.source,
+    visibility: payload.visibility,
+    uploadedAt: payload.uploadedAt,
+    publishedAt: payload.publishedAt,
+    summary: payload.summary,
+    evidence: payload.evidence,
+    uploadedFiles: uploadedFilesFrom(payload),
+    accessPolicy: payload.accessPolicy,
+    moderation: payload.moderation,
+    scaffoldNotice: payload.scaffoldNotice,
     publicReference: publicReferenceUrl
       ? {
           name: payload.publicReference?.name ?? payload.referenceName ?? publicReferenceUrl,
