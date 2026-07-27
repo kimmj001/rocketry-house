@@ -3,6 +3,31 @@ import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import type { RocketProject } from "@/lib/types";
 
+const impulseClasses = [
+  { label: "1/4A", maxNs: 0.625 },
+  { label: "1/2A", maxNs: 1.25 },
+  { label: "A", maxNs: 2.5 },
+  { label: "B", maxNs: 5 },
+  { label: "C", maxNs: 10 },
+  { label: "D", maxNs: 20 },
+  { label: "E", maxNs: 40 },
+  { label: "F", maxNs: 80 },
+  { label: "G", maxNs: 160 },
+  { label: "H", maxNs: 320 },
+  { label: "I", maxNs: 640 },
+  { label: "J", maxNs: 1280 },
+  { label: "K", maxNs: 2560 },
+  { label: "L", maxNs: 5120 },
+  { label: "M", maxNs: 10240 },
+  { label: "N", maxNs: 20480 },
+  { label: "O", maxNs: 40960 },
+  { label: "P", maxNs: 81920 },
+  { label: "Q", maxNs: 163840 },
+  { label: "R", maxNs: 327680 },
+  { label: "S", maxNs: 655360 },
+  { label: "T", maxNs: 1310720 }
+];
+
 export function ProjectCard({ project }: { project: RocketProject }) {
   return (
     <Link href={`/projects/${project.slug}`} className="group block">
@@ -18,7 +43,7 @@ export function ProjectCard({ project }: { project: RocketProject }) {
           </div>
           <div className="mt-5 grid gap-2">
             <Metric label="Apogee" value={apogeeLabel(project)} />
-            <Metric label="Motor class" value={project.motorClass} />
+            <Metric label="Motor class" value={motorClassLabel(project)} />
             <Metric label="Mass" value={formatMass(project.specs.massG)} />
           </div>
         </div>
@@ -52,6 +77,32 @@ function apogeeLabel(project: RocketProject) {
   const value = project.actualAltitudeM ?? project.predictedAltitudeM;
   const suffix = project.actualAltitudeM ? "flown" : "est.";
   return `${formatNumber(value)} m ${suffix}`;
+}
+
+function motorClassLabel(project: RocketProject) {
+  const impulseClass = project.summary?.totalImpulseNs ? classFromImpulse(project.summary.totalImpulseNs) : undefined;
+  const parsedClass = classFromText(project.motorClass);
+  const label = impulseClass ?? parsedClass;
+  return label ? `${label} class` : "Class not stated";
+}
+
+function classFromImpulse(totalImpulseNs: number) {
+  const match = impulseClasses.find((item) => totalImpulseNs <= item.maxNs);
+  return match?.label ?? `>${impulseClasses[impulseClasses.length - 1].label}`;
+}
+
+function classFromText(value: string) {
+  const text = value.toUpperCase();
+  const range = text.match(/\b([A-T])\s*\/\s*([A-T])\b/);
+  if (range) return `${range[1]}/${range[2]}`;
+
+  const explicit = text.match(/\b(1\/4A|1\/2A|[A-T])\s*CLASS\b/);
+  if (explicit) return explicit[1];
+
+  const motorCode = text.match(/(?:^|[^A-Z0-9])([A-T])\s*[-]?\s*\d{1,5}\b/);
+  if (motorCode) return motorCode[1];
+
+  return undefined;
 }
 
 function formatMass(value: number) {
