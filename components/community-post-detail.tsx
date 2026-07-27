@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Bookmark, Eye, Flag, MessageSquare, MoreVertical, Share2, ThumbsUp } from "lucide-react";
+import { AccountProfileLink } from "@/components/account-profile-link";
 import { Card } from "@/components/ui/card";
 import {
   CommunityComment,
@@ -265,7 +266,20 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
                   <Avatar name={comment.author.name} avatarUrl={comment.author.avatarUrl} />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold">{comment.author.name}</p>
+                      <AccountProfileLink
+                        compact
+                        profile={{
+                          name: comment.author.name,
+                          avatarUrl: comment.author.avatarUrl,
+                          role: comment.author.role,
+                          team: comment.author.team,
+                          badge: comment.author.badge,
+                          profileType: comment.author.profileType
+                        }}
+                        className="font-semibold"
+                      >
+                        <span>{comment.author.name}</span>
+                      </AccountProfileLink>
                       <p className="text-sm text-slate-500">{comment.author.role}</p>
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{comment.author.profileType}</span>
                     </div>
@@ -342,7 +356,17 @@ export function CommunityPostDetail({ slug, initialPost, related }: { slug: stri
 
 function AuthorBlock({ post }: { post: CommunityPost }) {
   return (
-    <div className="mt-5 flex items-start gap-3">
+    <AccountProfileLink
+      profile={{
+        name: post.author.name,
+        avatarUrl: post.author.avatarUrl,
+        role: post.author.role,
+        team: post.author.team,
+        badge: post.author.badge,
+        profileType: post.author.profileType
+      }}
+      className="mt-5 w-full items-start p-0"
+    >
       <Avatar name={post.author.name} avatarUrl={post.author.avatarUrl} />
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
@@ -352,7 +376,7 @@ function AuthorBlock({ post }: { post: CommunityPost }) {
         </div>
         <p className="break-words text-sm text-slate-500">{post.author.role} / {post.author.team}</p>
       </div>
-    </div>
+    </AccountProfileLink>
   );
 }
 

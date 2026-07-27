@@ -17,6 +17,7 @@ import {
   UsersRound,
   X
 } from "lucide-react";
+import { AccountProfileLink } from "@/components/account-profile-link";
 import { Button } from "@/components/ui/button";
 import {
   CommunityPost,
@@ -252,9 +253,19 @@ function FeedPost({
         </div>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap items-center gap-3">
+      <AccountProfileLink
+        profile={{
+          name: post.author.name,
+          avatarUrl: post.author.avatarUrl,
+          role: post.author.role,
+          team: post.author.team,
+          badge: post.author.badge,
+          profileType: post.author.profileType
+        }}
+        className="mt-4 w-full p-0"
+      >
         <AuthorAvatar post={post} />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-slate-950">{post.author.name}</span>
             <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">{post.author.badge}</span>
@@ -264,7 +275,7 @@ function FeedPost({
             {post.author.role} / {post.author.team} / {post.time}
           </div>
         </div>
-      </div>
+      </AccountProfileLink>
 
       <div className="mt-4 flex items-center justify-between gap-3">
         <PostMetrics post={post} />

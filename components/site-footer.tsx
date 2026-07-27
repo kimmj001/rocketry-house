@@ -16,9 +16,6 @@ export function SiteFooter() {
           <Link href="/community" className="font-medium hover:text-orange-600">
             Community
           </Link>
-          <Link href="/messages" className="font-medium hover:text-orange-600">
-            Messages
-          </Link>
           <Link href="/upload" className="font-medium hover:text-orange-600">
             Upload
           </Link>

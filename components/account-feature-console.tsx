@@ -5,6 +5,7 @@ import Link from "next/link";
 import { BadgeCheck, BarChart3, FileDown, Mail, Megaphone, Newspaper, Plus, Send, ShieldCheck, Sparkles, Trophy, Users, type LucideIcon } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { openDmDock } from "@/components/dm-dock";
 import { UpgradeLimitCard, UsageCounter } from "@/components/usage-meter";
 import { savePersistentRecord, loadPersistentRecords } from "@/lib/cloud-persistence";
 import { checkoutHref } from "@/lib/checkout";
@@ -207,10 +208,10 @@ export function AccountFeatureConsole({ user, statuses, usageLoading, usageError
       {notice ? <p className="mt-3 text-sm font-semibold text-emerald-100/80">{notice}</p> : null}
 
       <div className="mt-6 grid gap-4 xl:grid-cols-3">
-        <FeatureCard icon={Send} title="Direct messaging" detail="Open the chat window, choose another account, and send tracked messages against your monthly DM quota.">
-          <Button href="/messages" asChild className="w-full">
+        <FeatureCard icon={Send} title="Direct messaging" detail="Use the floating DM panel or open a builder profile from Explore and Community, then send tracked messages against your monthly DM quota.">
+          <Button onClick={() => openDmDock()} className="w-full">
             <Send className="h-4 w-4" />
-            Open messages
+            Open DM panel
           </Button>
         </FeatureCard>
 

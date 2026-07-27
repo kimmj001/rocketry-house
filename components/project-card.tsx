@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { AccountProfileLink } from "@/components/account-profile-link";
 import { Card } from "@/components/ui/card";
 import type { RocketProject } from "@/lib/types";
 
@@ -30,25 +31,39 @@ const impulseClasses = [
 
 export function ProjectCard({ project }: { project: RocketProject }) {
   return (
-    <Link href={`/projects/${project.slug}`} className="group block">
-      <Card className="h-full overflow-hidden border-slate-200 bg-white text-slate-950 shadow-sm ring-1 ring-slate-950/[0.03] transition hover:-translate-y-1 hover:border-orange-300 hover:shadow-lg">
+    <Card className="h-full overflow-hidden border-slate-200 bg-white text-slate-950 shadow-sm ring-1 ring-slate-950/[0.03] transition hover:-translate-y-1 hover:border-orange-300 hover:shadow-lg">
+      <Link href={`/projects/${project.slug}`} className="group block">
         <div className="relative m-3 aspect-[16/10] overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-inner">
           <Image src={project.image} alt={project.title} fill className="object-contain p-3 transition duration-500 group-hover:scale-105" />
         </div>
-        <div className="px-5 pb-5 pt-2">
-          <h3 className="line-clamp-2 min-h-[2.75rem] text-base font-semibold leading-snug">{project.title}</h3>
-          <div className="mt-3 flex min-w-0 items-center gap-2">
-            <AccountAvatar name={project.creator} avatarUrl={project.creatorAvatarUrl} />
-            <p className="min-w-0 truncate text-sm font-medium text-slate-600">{project.creator}</p>
-          </div>
-          <div className="mt-5 grid gap-2">
-            <Metric label="Apogee" value={apogeeLabel(project)} />
-            <Metric label="Motor class" value={motorClassLabel(project)} />
-            <Metric label="Mass" value={formatMass(project.specs.massG)} />
-          </div>
+      </Link>
+      <div className="px-5 pb-5 pt-2">
+        <Link href={`/projects/${project.slug}`} className="group/title block">
+          <h3 className="line-clamp-2 min-h-[2.75rem] text-base font-semibold leading-snug group-hover/title:text-orange-600">{project.title}</h3>
+        </Link>
+        <AccountProfileLink
+          profile={{
+            name: project.creator,
+            avatarUrl: project.creatorAvatarUrl,
+            accountType: "team",
+            role: `${project.motorClass} publisher`,
+            team: project.creator,
+            badge: project.verifiedFlight ? "Flight verified" : project.verificationStatus,
+            rating: project.creatorRating,
+            projectCount: project.forkCount + 1
+          }}
+          className="mt-3 w-full p-0"
+        >
+          <AccountAvatar name={project.creator} avatarUrl={project.creatorAvatarUrl} />
+          <p className="min-w-0 truncate text-sm font-medium text-slate-600">{project.creator}</p>
+        </AccountProfileLink>
+        <div className="mt-5 grid gap-2">
+          <Metric label="Apogee" value={apogeeLabel(project)} />
+          <Metric label="Motor class" value={motorClassLabel(project)} />
+          <Metric label="Mass" value={formatMass(project.specs.massG)} />
         </div>
-      </Card>
-    </Link>
+      </div>
+    </Card>
   );
 }
 

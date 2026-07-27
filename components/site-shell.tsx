@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { DmDock } from "@/components/dm-dock";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav";
 
@@ -16,6 +17,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
       <SiteNav />
       {children}
       {!isFixedWorkspace && <SiteFooter />}
+      <DmDock />
     </div>
   );
 }
