@@ -2,6 +2,9 @@
 
 import { getSupabaseClient, isMockMode } from "@/lib/supabase";
 import { AUTH_STORAGE_KEY, type AuthUser } from "@/lib/auth";
+import { PUBLIC_COMMUNITY_OWNER_KEY, PUBLIC_PROJECTS_OWNER_KEY } from "@/lib/public-owner-keys";
+
+export { PUBLIC_COMMUNITY_OWNER_KEY, PUBLIC_PROJECTS_OWNER_KEY };
 
 const DEVICE_KEY = "rocketry-house.device-id";
 
@@ -16,9 +19,6 @@ export type CloudRecord<T> = {
 type PersistenceOptions = {
   ownerKey?: string;
 };
-
-export const PUBLIC_COMMUNITY_OWNER_KEY = "public:community";
-export const PUBLIC_PROJECTS_OWNER_KEY = "public:projects";
 
 function memoryId() {
   return `device-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import {
   BadgeCheck,
@@ -22,10 +22,11 @@ import {
 } from "@/components/build-workspace";
 import { FileUploadBox } from "@/components/file-upload-box";
 import { Button } from "@/components/ui/button";
+import { readMockUser, restoreAuthUserFromCloud, type AuthUser } from "@/lib/auth";
 import { totalLength as calculateRocketLength } from "@/lib/cad/geometry";
-import { savePersistentRecord } from "@/lib/cloud-persistence";
+import { PUBLIC_PROJECTS_OWNER_KEY, savePersistentRecord, type PersistentFileRecord } from "@/lib/cloud-persistence";
 import { runRocketEstimateWithMotor } from "@/lib/rocket-simulation";
-import type { RocketComponent, RocketComponentType } from "@/lib/types";
+import type { Difficulty, RocketComponent, RocketComponentType, VerificationStatus } from "@/lib/types";
 import { STANDARD_LIMITS } from "@/lib/usage-limits";
 
 type Step = { title: string; label: string; Icon: LucideIcon };
@@ -134,6 +135,131 @@ type EvidenceUploadItem = {
   acceptedSpecifiers: string[];
 };
 
+type ProjectFormState = {
+  title: string;
+  ownerAccount: string;
+  visibility: "Private project" | "Public project" | "Unlisted reference";
+  difficulty: "Beginner" | "Intermediate" | "Advanced" | "High Power";
+  category: string;
+  motorClass: string;
+  referenceUrl: string;
+  publishGoal: string;
+  description: string;
+};
+
+type FlightFormState = {
+  propellantFamily: string;
+  grainGeometry: string;
+  motorEvidenceSource: string;
+  disclosureLevel: string;
+  motorDesignation: string;
+  motorClass: string;
+  caseDiameter: string;
+  totalImpulse: string;
+  avgPeakThrust: string;
+  burnTime: string;
+  predictedApogee: string;
+  measuredApogee: string;
+};
+
+type ReleaseFormState = {
+  releaseType: "Private archive" | "Public project" | "Unlisted reference";
+  license: string;
+  forkPolicy: string;
+  dataAccess: string;
+  articleRequest: string;
+  contactEmail: string;
+  citation: string;
+  reviewState: string;
+};
+
+type EvidenceSelection = {
+  names: string[];
+  records: PersistentFileRecord[];
+};
+
+const defaultProjectForm: ProjectFormState = {
+  title: "",
+  ownerAccount: "",
+  visibility: "Private project",
+  difficulty: "Advanced",
+  category: "Sport model rocket",
+  motorClass: "",
+  referenceUrl: "",
+  publishGoal: "Share project",
+  description: "",
+};
+
+const defaultFlightForm: FlightFormState = {
+  propellantFamily: "Commercial certified motor",
+  grainGeometry: "Unknown / not published",
+  motorEvidenceSource: "Manufacturer thrust curve",
+  disclosureLevel: "Public performance metadata",
+  motorDesignation: "",
+  motorClass: "",
+  caseDiameter: "",
+  totalImpulse: "",
+  avgPeakThrust: "",
+  burnTime: "",
+  predictedApogee: "",
+  measuredApogee: "",
+};
+
+const defaultReleaseForm: ReleaseFormState = {
+  releaseType: "Private archive",
+  license: "Educational reference",
+  forkPolicy: "Allow attributed forks",
+  dataAccess: "Summary only",
+  articleRequest: "Not requested",
+  contactEmail: "",
+  citation: "",
+  reviewState: "Draft",
+};
+
+function slugFrom(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "uploaded-rocket-project";
+}
+
+function parseNumber(value: string) {
+  const match = value.replace(/,/g, "").match(/-?\d+(\.\d+)?/);
+  return match ? Number(match[0]) : undefined;
+}
+
+function referenceNameFromUrl(value: string) {
+  if (!value.trim()) return undefined;
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return "Public reference";
+  }
+}
+
+function resolveVisibility(projectVisibility: ProjectFormState["visibility"], releaseType: ReleaseFormState["releaseType"]) {
+  if (projectVisibility === "Public project" || releaseType === "Public project") return "public";
+  if (projectVisibility === "Unlisted reference" || releaseType === "Unlisted reference") return "unlisted";
+  return "private";
+}
+
+function verificationFromEvidence(files: Record<string, EvidenceSelection>, actualAltitude?: number): VerificationStatus {
+  if (files["telemetry-logs"]?.names.length) return "Telemetry attached";
+  if (files["media-proof"]?.names.length || actualAltitude) return "Media proof";
+  if (files["motor-thrust-source"]?.names.length) return "Static fire data";
+  if (files["cad-source"]?.names.length) return "Design reviewed";
+  return "Design uploaded";
+}
+
+function evidenceRecordCount(files: Record<string, EvidenceSelection>) {
+  return Object.values(files).reduce((sum, group) => sum + group.names.length, 0);
+}
+
+function flattenEvidenceRecords(files: Record<string, EvidenceSelection>) {
+  return Object.values(files).flatMap((group) => group.records);
+}
+
 const evidence: EvidenceUploadItem[] = [
   {
     key: "cad-source",
@@ -191,7 +317,35 @@ export default function UploadPage() {
   const [selectedId, setSelectedId] = useState("upload-body");
   const [status, setStatus] = useState("Draft is local until cloud sync is available.");
   const [safetyOpen, setSafetyOpen] = useState(false);
-  const [files, setFiles] = useState<Record<string, string[]>>({});
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [projectForm, setProjectForm] = useState<ProjectFormState>(defaultProjectForm);
+  const [flightForm, setFlightForm] = useState<FlightFormState>(defaultFlightForm);
+  const [releaseForm, setReleaseForm] = useState<ReleaseFormState>(defaultReleaseForm);
+  const [files, setFiles] = useState<Record<string, EvidenceSelection>>({});
+
+  useEffect(() => {
+    let mounted = true;
+
+    function applyUser(user: AuthUser | null) {
+      if (!mounted) return;
+      setCurrentUser(user);
+      if (user) {
+        setProjectForm((current) => current.ownerAccount ? current : { ...current, ownerAccount: user.name });
+        setReleaseForm((current) => current.contactEmail ? current : { ...current, contactEmail: user.email });
+      }
+    }
+
+    applyUser(readMockUser());
+    void restoreAuthUserFromCloud().then(applyUser);
+
+    const handleAuthChange = () => applyUser(readMockUser());
+    window.addEventListener("rocketry-auth-change", handleAuthChange);
+    return () => {
+      mounted = false;
+      window.removeEventListener("rocketry-auth-change", handleAuthChange);
+    };
+  }, []);
 
   const selected = parts.find((part) => part.id === selectedId) ?? parts[0];
   const simulationResult = useMemo(() => runRocketEstimateWithMotor(parts, undefined, { windSpeedMps: 0 }), [parts]);
@@ -200,16 +354,32 @@ export default function UploadPage() {
   const cg = Math.round(simulationResult.cgMm);
   const cp = Math.round(simulationResult.cpMm);
   const stability = simulationResult.stabilityMargin.toFixed(2);
+  const requestedVisibility = resolveVisibility(projectForm.visibility, releaseForm.releaseType);
+  const evidenceFiles = useMemo(() => flattenEvidenceRecords(files), [files]);
+  const evidenceFileCount = evidenceRecordCount(files);
 
   const payload = useMemo(
     () => ({
       version: "upload-workspace-v3",
       updatedAt: new Date().toISOString(),
       activeStep: active + 1,
+      project: projectForm,
+      flight: flightForm,
+      release: releaseForm,
       cad: { components: parts, totalLength, totalMass, cg, cp, stability, simulationResult },
-      evidence: files,
+      evidence: Object.fromEntries(
+        evidence.map((item) => [
+          item.key,
+          {
+            title: item.title,
+            names: files[item.key]?.names ?? [],
+            records: files[item.key]?.records ?? [],
+          },
+        ])
+      ),
+      evidenceFiles,
     }),
-    [active, cg, cp, files, parts, simulationResult, stability, totalLength, totalMass],
+    [active, cg, cp, evidenceFiles, files, flightForm, parts, projectForm, releaseForm, simulationResult, stability, totalLength, totalMass],
   );
 
   async function saveDraft() {
@@ -219,22 +389,62 @@ export default function UploadPage() {
 
   async function publishProject() {
     const now = new Date().toISOString();
-    const projectKey = `upload-project-${Date.now()}`;
-    const evidenceFileCount = Object.values(files).reduce((sum, names) => sum + names.length, 0);
+    const title = projectForm.title.trim() || "Untitled Rocket Project";
+    const projectKey = `${slugFrom(title)}-${Date.now()}`;
+    const referenceUrl = projectForm.referenceUrl.trim();
+    const predictedAltitudeM = Math.round(parseNumber(flightForm.predictedApogee) ?? simulationResult.predictedAltitudeM ?? 0);
+    const actualAltitudeM = parseNumber(flightForm.measuredApogee);
+    const verificationStatus = verificationFromEvidence(files, actualAltitudeM);
+    const motorClass = flightForm.motorClass.trim() || projectForm.motorClass.trim() || flightForm.motorDesignation.trim() || "Unspecified solid motor";
+    const evidenceFileNames = Object.values(files).flatMap((group) => group.names);
     const projectPackage = {
       ...payload,
       id: projectKey,
       slug: projectKey,
-      name: "Uploaded Rocket Project",
-      title: "Uploaded Rocket Project",
+      name: title,
+      title,
+      creator: projectForm.ownerAccount.trim() || currentUser?.name || "Rocketry House builder",
+      description:
+        projectForm.description.trim() ||
+        "A Rocketry House upload package with project metadata, editable Web CAD, motor context, evidence attachments, and release settings.",
       status: "published",
       source: "upload-workspace",
-      visibility: "private",
-      verificationStatus: "Design uploaded",
+      visibility: requestedVisibility,
+      difficulty: projectForm.difficulty as Difficulty,
+      motorClass,
+      predictedAltitudeM,
+      actualAltitudeM,
+      verificationStatus,
+      hasWebCad: parts.length > 0,
+      hasFlightLog: Boolean(actualAltitudeM || files["inspection-notes"]?.names.length || files["media-proof"]?.names.length),
+      hasTelemetry: Boolean(files["telemetry-logs"]?.names.length),
+      hasThrustData: Boolean(files["motor-thrust-source"]?.names.length || flightForm.motorEvidenceSource !== "No motor attached"),
+      hasStlStep: Boolean(files["cad-source"]?.names.some((name) => /\.(stl|step|stp)$/i.test(name))),
+      verifiedFlight: verificationStatus === "Telemetry attached" || Boolean(actualAltitudeM && files["media-proof"]?.names.length),
+      priceCents: 0,
+      tags: [projectForm.category, flightForm.propellantFamily, motorClass, requestedVisibility, projectForm.publishGoal].filter(Boolean),
+      image: "/placeholder.svg",
+      specs: {
+        lengthMm: totalLength,
+        diameterMm: Math.round(Math.max(...parts.map((part) => part.diameter), 1)),
+        massG: totalMass,
+        stabilityCalibers: Number(stability),
+      },
+      files: evidenceFileNames.length ? evidenceFileNames : ["design.rh.json", "project-summary.json", "evidence-index.json"],
+      components: parts,
+      publicReference: referenceUrl ? { name: referenceNameFromUrl(referenceUrl) ?? "Public reference", url: referenceUrl } : undefined,
+      referenceName: referenceUrl ? referenceNameFromUrl(referenceUrl) : undefined,
+      referenceUrl: referenceUrl || undefined,
+      marketplace: {
+        priceCents: 0,
+        license: releaseForm.license,
+        forkPolicy: releaseForm.forkPolicy,
+      },
       summary: {
-        predictedAltitudeM: Math.round(simulationResult.predictedAltitudeM ?? 0),
-        motorClass: "Unspecified solid motor",
-        propellantFamily: "Solid rocket motor",
+        predictedAltitudeM,
+        actualAltitudeM,
+        motorClass,
+        propellantFamily: flightForm.propellantFamily,
         evidenceFileCount,
         lengthMm: totalLength,
         dryMassG: totalMass,
@@ -242,16 +452,30 @@ export default function UploadPage() {
         cpMm: cp,
         stabilityMargin: Number(stability),
       },
+      release: releaseForm,
+      flight: flightForm,
+      evidenceFiles,
       publishedAt: now,
       updatedAt: now,
     };
+    const persistenceOptions = requestedVisibility === "public" ? { ownerKey: PUBLIC_PROJECTS_OWNER_KEY } : undefined;
     const [projectResult, rocketProjectResult] = await Promise.all([
-      savePersistentRecord("projects", projectKey, projectPackage),
-      savePersistentRecord("rocket_projects", projectKey, projectPackage),
+      savePersistentRecord("projects", projectKey, projectPackage, persistenceOptions),
+      savePersistentRecord("rocket_projects", projectKey, projectPackage, persistenceOptions),
     ]);
     const cloudSynced = projectResult.cloud && rocketProjectResult.cloud;
     const hasError = projectResult.error || rocketProjectResult.error;
-    setStatus(hasError ? "Published locally. Sign in is required for cloud archive." : cloudSynced ? "Project package published to your account archive." : "Project package published locally.");
+    setStatus(
+      hasError
+        ? requestedVisibility === "public"
+          ? "Saved locally. Sign in is required to publish to the public archive."
+          : "Published locally. Sign in is required for cloud archive."
+        : cloudSynced
+          ? requestedVisibility === "public"
+            ? `Published to the public archive: /projects/${projectKey}`
+            : "Project package published to your account archive."
+          : "Project package published locally."
+    );
     setSafetyOpen(false);
   }
 
@@ -278,10 +502,16 @@ export default function UploadPage() {
               </p>
             </div>
             <div className="flex shrink-0 gap-2">
-              <Button size="sm" variant="outline" className="rounded-xl border-amber-300 bg-amber-50 text-amber-800" asChild>
-                <a href="/auth/sign-in">Sign in</a>
-              </Button>
-              <Button size="sm" className="rounded-xl bg-orange-500 text-slate-950 hover:bg-orange-400"><Rocket className="mr-1 h-4 w-4" />Builder</Button>
+              {currentUser ? (
+                <Button size="sm" variant="outline" href="/profile" asChild className="rounded-xl border-emerald-300 bg-emerald-50 text-emerald-800">
+                  {currentUser.name}
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" href="/auth/sign-in" asChild className="rounded-xl border-amber-300 bg-amber-50 text-amber-800">
+                  Sign in
+                </Button>
+              )}
+              <Button size="sm" href="/build/rocket" asChild className="rounded-xl bg-orange-500 text-slate-950 hover:bg-orange-400"><Rocket className="mr-1 h-4 w-4" />Builder</Button>
             </div>
           </div>
           <nav className="mt-2 grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-5">
@@ -314,7 +544,7 @@ export default function UploadPage() {
           </div>
 
           <div className="p-2">
-            {active === 0 && <ProjectStep />}
+            {active === 0 && <ProjectStep form={projectForm} setForm={setProjectForm} />}
             {active === 1 && (
               <CadStep
                 parts={parts}
@@ -327,9 +557,9 @@ export default function UploadPage() {
                 stats={{ totalLength, totalMass, cg, cp, stability }}
               />
             )}
-            {active === 2 && <FlightStep />}
+            {active === 2 && <FlightStep form={flightForm} setForm={setFlightForm} />}
             {active === 3 && <EvidenceStep files={files} setFiles={setFiles} />}
-            {active === 4 && <ReleaseStep />}
+            {active === 4 && <ReleaseStep form={releaseForm} setForm={setReleaseForm} />}
           </div>
         </section>
 
@@ -337,12 +567,25 @@ export default function UploadPage() {
           <span className="truncate">{status} Contact: rocketryhouse@gmail.com</span>
           <div className="flex shrink-0 gap-1.5">
             <Button type="button" onClick={saveDraft} className="rounded-xl bg-orange-500 text-slate-950 hover:bg-orange-400">Save</Button>
-            <Button type="button" variant="outline" className="rounded-xl">Preview</Button>
+            <Button type="button" variant="outline" onClick={() => setPreviewOpen(true)} className="rounded-xl">Preview</Button>
             <Button type="button" onClick={() => setSafetyOpen(true)} className="rounded-xl bg-amber-300 text-slate-950 hover:bg-amber-200">Publish</Button>
           </div>
         </footer>
       </div>
 
+      {previewOpen ? (
+        <PreviewModal
+          project={projectForm}
+          flight={flightForm}
+          release={releaseForm}
+          visibility={requestedVisibility}
+          evidenceCount={evidenceFileCount}
+          evidenceFiles={evidenceFiles}
+          stats={{ totalLength, totalMass, cg, cp, stability }}
+          predictedAltitudeM={Math.round(parseNumber(flightForm.predictedApogee) ?? simulationResult.predictedAltitudeM ?? 0)}
+          onClose={() => setPreviewOpen(false)}
+        />
+      ) : null}
       {safetyOpen ? <SafetyModal onClose={() => setSafetyOpen(false)} onConfirm={publishProject} /> : null}
     </main>
   );
@@ -361,21 +604,27 @@ function StepControls({ active, setActive, compact = false }: { active: number; 
   );
 }
 
-function ProjectStep() {
+function ProjectStep({ form, setForm }: { form: ProjectFormState; setForm: Dispatch<SetStateAction<ProjectFormState>> }) {
   const projectLimit = STANDARD_LIMITS.personal.projectsCreatedCount;
+  const update = (patch: Partial<ProjectFormState>) => setForm((current) => ({ ...current, ...patch }));
   return (
     <Panel Icon={FileText} title="Project identity" detail="Name the repository, ownership, category, and publish goal.">
       <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2 xl:grid-cols-4">
-        <Field label="Project title" placeholder="Scout F-style TVC test rocket" wide />
-        <Field label="Owner account" placeholder="Personal, team, or organization" />
-        <Pick label="Visibility" options={["Private project", "Public project", "Unlisted reference"]} />
-        <Pick label="Difficulty" options={["Beginner", "Intermediate", "Advanced", "High power"]} />
-        <Pick label="Solid rocket category" options={["Sport model rocket", "High-power rocket", "Sounding rocket", "Static-fire article"]} />
-        <Field label="Motor class" placeholder="H178, J350, custom" />
-        <Field label="Reference URL" placeholder="Optional public reference" />
-        <Pick label="Publish goal" options={["Share project", "Archive flight record", "Request article coverage"]} />
+        <Field label="Project title" value={form.title} onChange={(title) => update({ title })} placeholder="Scout F-style TVC test rocket" wide />
+        <Field label="Owner account" value={form.ownerAccount} onChange={(ownerAccount) => update({ ownerAccount })} placeholder="Personal, team, or organization" />
+        <Pick label="Visibility" value={form.visibility} onChange={(visibility) => update({ visibility: visibility as ProjectFormState["visibility"] })} options={["Private project", "Public project", "Unlisted reference"]} />
+        <Pick label="Difficulty" value={form.difficulty} onChange={(difficulty) => update({ difficulty: difficulty as ProjectFormState["difficulty"] })} options={["Beginner", "Intermediate", "Advanced", "High Power"]} />
+        <Pick label="Solid rocket category" value={form.category} onChange={(category) => update({ category })} options={["Sport model rocket", "High-power rocket", "Sounding rocket", "Static-fire article"]} />
+        <Field label="Motor class" value={form.motorClass} onChange={(motorClass) => update({ motorClass })} placeholder="H178, J350, custom" />
+        <Field label="Reference URL" value={form.referenceUrl} onChange={(referenceUrl) => update({ referenceUrl })} placeholder="Optional public reference" />
+        <Pick label="Publish goal" value={form.publishGoal} onChange={(publishGoal) => update({ publishGoal })} options={["Share project", "Archive flight record", "Request article coverage"]} />
       </div>
-      <textarea className="mt-2 h-16 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold outline-none focus:border-orange-400" placeholder="Design goal, assumptions, safety constraints, flight history, and what a fork should preserve." />
+      <textarea
+        value={form.description}
+        onChange={(event) => update({ description: event.target.value })}
+        className="mt-2 h-16 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold outline-none focus:border-orange-400"
+        placeholder="Design goal, assumptions, safety constraints, flight history, and what a fork should preserve."
+      />
       <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
         Solid motor data is accepted for simulation and documentation only. Hazardous manufacturing instructions, harmful payload workflows, and weaponization content are not allowed.
       </div>
@@ -476,22 +725,23 @@ function CadStep({
   );
 }
 
-function FlightStep() {
+function FlightStep({ form, setForm }: { form: FlightFormState; setForm: Dispatch<SetStateAction<FlightFormState>> }) {
+  const update = (patch: Partial<FlightFormState>) => setForm((current) => ({ ...current, ...patch }));
   return (
     <Panel Icon={Calculator} title="Motor and flight analysis" detail="Attach non-hazardous motor metadata, thrust curve source, and trajectory results.">
       <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2 xl:grid-cols-4">
-        <Pick label="Propellant / fuel family" options={["Commercial certified motor", "Published performance only", "KNSB metadata", "Custom private metadata"]} />
-        <Pick label="Grain geometry" options={["Unknown / not published", "Hollow cylinder", "BATES", "Finocyl", "Moon burner", "C-slot", "Other"]} />
-        <Pick label="Motor evidence source" options={["Manufacturer thrust curve", "Measured static-fire CSV", "Educational simulation estimate", "No motor attached"]} />
-        <Pick label="Disclosure level" options={["Public performance metadata", "Private team record", "Internal review only"]} />
-        <Field label="Motor designation" placeholder="H178, J350, custom" />
-        <Field label="Motor class" placeholder="F, G, H, I, J..." />
-        <Field label="Case diameter" placeholder="29 / 38 / 54 mm" />
-        <Field label="Total impulse" placeholder="N-s, if known" />
-        <Field label="Avg / peak thrust" placeholder="N / N" />
-        <Field label="Burn time" placeholder="seconds" />
-        <Field label="Predicted apogee" placeholder="820 m" />
-        <Field label="Measured apogee" placeholder="Optional" />
+        <Pick label="Propellant / fuel family" value={form.propellantFamily} onChange={(propellantFamily) => update({ propellantFamily })} options={["Commercial certified motor", "Published performance only", "KNSB metadata", "Custom private metadata"]} />
+        <Pick label="Grain geometry" value={form.grainGeometry} onChange={(grainGeometry) => update({ grainGeometry })} options={["Unknown / not published", "Hollow cylinder", "BATES", "Finocyl", "Moon burner", "C-slot", "Other"]} />
+        <Pick label="Motor evidence source" value={form.motorEvidenceSource} onChange={(motorEvidenceSource) => update({ motorEvidenceSource })} options={["Manufacturer thrust curve", "Measured static-fire CSV", "Educational simulation estimate", "No motor attached"]} />
+        <Pick label="Disclosure level" value={form.disclosureLevel} onChange={(disclosureLevel) => update({ disclosureLevel })} options={["Public performance metadata", "Private team record", "Internal review only"]} />
+        <Field label="Motor designation" value={form.motorDesignation} onChange={(motorDesignation) => update({ motorDesignation })} placeholder="H178, J350, custom" />
+        <Field label="Motor class" value={form.motorClass} onChange={(motorClass) => update({ motorClass })} placeholder="F, G, H, I, J..." />
+        <Field label="Case diameter" value={form.caseDiameter} onChange={(caseDiameter) => update({ caseDiameter })} placeholder="29 / 38 / 54 mm" />
+        <Field label="Total impulse" value={form.totalImpulse} onChange={(totalImpulse) => update({ totalImpulse })} placeholder="N-s, if known" />
+        <Field label="Avg / peak thrust" value={form.avgPeakThrust} onChange={(avgPeakThrust) => update({ avgPeakThrust })} placeholder="N / N" />
+        <Field label="Burn time" value={form.burnTime} onChange={(burnTime) => update({ burnTime })} placeholder="seconds" />
+        <Field label="Predicted apogee" value={form.predictedApogee} onChange={(predictedApogee) => update({ predictedApogee })} placeholder="820 m" />
+        <Field label="Measured apogee" value={form.measuredApogee} onChange={(measuredApogee) => update({ measuredApogee })} placeholder="Optional" />
       </div>
       <div className="mt-2 grid grid-cols-1 gap-1.5 md:grid-cols-3">
         <Info title="CG / CP" value="Imported from CAD" />
@@ -502,16 +752,17 @@ function FlightStep() {
   );
 }
 
-function EvidenceStep({ files, setFiles }: { files: Record<string, string[]>; setFiles: Dispatch<SetStateAction<Record<string, string[]>>> }) {
-  const attachedCount = Object.values(files).reduce((sum, names) => sum + names.length, 0);
-  const coveredCount = evidence.filter((item) => files[item.key]?.length).length;
+function EvidenceStep({ files, setFiles }: { files: Record<string, EvidenceSelection>; setFiles: Dispatch<SetStateAction<Record<string, EvidenceSelection>>> }) {
+  const attachedCount = evidenceRecordCount(files);
+  const uploadedCount = flattenEvidenceRecords(files).filter((record) => record.publicUrl).length;
+  const coveredCount = evidence.filter((item) => files[item.key]?.names.length).length;
 
   return (
     <Panel Icon={UploadCloud} title="Evidence files" detail="Upload source files with clear format checks, review labels, and file feedback.">
       <div className="mb-2 grid grid-cols-1 gap-1.5 md:grid-cols-3">
         <Info title="Attached files" value={`${attachedCount} selected`} />
         <Info title="Coverage" value={`${coveredCount}/${evidence.length} evidence groups`} />
-        <Info title="Core formats" value=".ork, .eng/.rse, CSV, STEP/STL" />
+        <Info title="Cloud files" value={`${uploadedCount} synced`} />
       </div>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
         {evidence.map((item) => (
@@ -522,10 +773,13 @@ function EvidenceStep({ files, setFiles }: { files: Record<string, string[]>; se
             formats={item.formats}
             status={item.status}
             acceptedSpecifiers={item.acceptedSpecifiers}
-            onFilesSelected={(_, selectedFiles) => {
+            onFilesSelected={(_, selectedFiles, records) => {
               setFiles((current) => ({
                 ...current,
-                [item.key]: selectedFiles.map((file) => file.name),
+                [item.key]: {
+                  names: selectedFiles.map((file) => file.name),
+                  records: records ?? [],
+                },
               }));
             }}
           />
@@ -535,18 +789,19 @@ function EvidenceStep({ files, setFiles }: { files: Record<string, string[]>; se
   );
 }
 
-function ReleaseStep() {
+function ReleaseStep({ form, setForm }: { form: ReleaseFormState; setForm: Dispatch<SetStateAction<ReleaseFormState>> }) {
+  const update = (patch: Partial<ReleaseFormState>) => setForm((current) => ({ ...current, ...patch }));
   return (
     <Panel Icon={BadgeCheck} title="License and release" detail="Choose access, attribution, review state, and article request status before publishing.">
       <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2 xl:grid-cols-4">
-        <Pick label="Release type" options={["Private archive", "Public project", "Unlisted reference"]} />
-        <Pick label="License" options={["Educational reference", "Creative Commons", "Team permission required", "Custom"]} />
-        <Pick label="Fork policy" options={["Allow attributed forks", "Team approval required", "No public forks"]} />
-        <Pick label="Data access" options={["Summary only", "Files visible", "Telemetry visible", "Full evidence package"]} />
-        <Pick label="Article request" options={["Not requested", "Request coverage", "Coverage already published"]} />
-        <Field label="Contact email" placeholder="rocketryhouse@gmail.com" />
-        <Field label="Citation / DOI" placeholder="Optional public citation" />
-        <Pick label="Review state" options={["Draft", "Ready for review", "Publish after safety gate"]} />
+        <Pick label="Release type" value={form.releaseType} onChange={(releaseType) => update({ releaseType: releaseType as ReleaseFormState["releaseType"] })} options={["Private archive", "Public project", "Unlisted reference"]} />
+        <Pick label="License" value={form.license} onChange={(license) => update({ license })} options={["Educational reference", "Creative Commons", "Team permission required", "Custom"]} />
+        <Pick label="Fork policy" value={form.forkPolicy} onChange={(forkPolicy) => update({ forkPolicy })} options={["Allow attributed forks", "Team approval required", "No public forks"]} />
+        <Pick label="Data access" value={form.dataAccess} onChange={(dataAccess) => update({ dataAccess })} options={["Summary only", "Files visible", "Telemetry visible", "Full evidence package"]} />
+        <Pick label="Article request" value={form.articleRequest} onChange={(articleRequest) => update({ articleRequest })} options={["Not requested", "Request coverage", "Coverage already published"]} />
+        <Field label="Contact email" value={form.contactEmail} onChange={(contactEmail) => update({ contactEmail })} placeholder="rocketryhouse@gmail.com" />
+        <Field label="Citation / DOI" value={form.citation} onChange={(citation) => update({ citation })} placeholder="Optional public citation" />
+        <Pick label="Review state" value={form.reviewState} onChange={(reviewState) => update({ reviewState })} options={["Draft", "Ready for review", "Publish after safety gate"]} />
       </div>
       <div className="mt-2 grid grid-cols-1 gap-1.5 md:grid-cols-3">
         <Info title="Attribution" value="Forked projects retain lineage and original credit." />
@@ -574,18 +829,18 @@ function Panel({ Icon, title, detail, children }: { Icon: LucideIcon; title: str
 
 function Field({ label, placeholder, value, onChange, wide = false }: { label: string; placeholder?: string; value?: string | number; onChange?: (value: string) => void; wide?: boolean }) {
   return (
-    <label className={wide ? "col-span-2 min-w-0" : "min-w-0"}>
+    <label className={wide ? "min-w-0 md:col-span-2" : "min-w-0"}>
       <span className="mb-1 block truncate text-xs font-black text-slate-600">{label}</span>
       <input value={value ?? ""} onChange={(event) => onChange?.(event.target.value)} placeholder={placeholder} className="h-8 w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 text-sm font-bold outline-none focus:border-orange-400" />
     </label>
   );
 }
 
-function Pick({ label, options }: { label: string; options: string[] }) {
+function Pick({ label, options, value, onChange }: { label: string; options: string[]; value?: string; onChange?: (value: string) => void }) {
   return (
     <label className="min-w-0">
       <span className="mb-1 block truncate text-xs font-black text-slate-600">{label}</span>
-      <select className="h-8 w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 text-sm font-bold outline-none focus:border-orange-400">
+      <select value={value ?? options[0]} onChange={(event) => onChange?.(event.target.value)} className="h-8 w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 text-sm font-bold outline-none focus:border-orange-400">
         {options.map((option) => <option key={option}>{option}</option>)}
       </select>
     </label>
@@ -598,6 +853,74 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function Info({ title, value }: { title: string; value: string }) {
   return <div className="rounded-xl border border-slate-200 bg-slate-50 p-2"><p className="text-xs font-bold text-slate-500">{title}</p><p className="mt-1 text-sm font-black">{value}</p></div>;
+}
+
+function PreviewModal({
+  project,
+  flight,
+  release,
+  visibility,
+  evidenceCount,
+  evidenceFiles,
+  stats,
+  predictedAltitudeM,
+  onClose,
+}: {
+  project: ProjectFormState;
+  flight: FlightFormState;
+  release: ReleaseFormState;
+  visibility: string;
+  evidenceCount: number;
+  evidenceFiles: PersistentFileRecord[];
+  stats: { totalLength: number; totalMass: number; cg: number; cp: number; stability: string };
+  predictedAltitudeM: number;
+  onClose: () => void;
+}) {
+  const title = project.title.trim() || "Untitled Rocket Project";
+  const motorClass = flight.motorClass.trim() || project.motorClass.trim() || flight.motorDesignation.trim() || "Unspecified solid motor";
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+      <div className="w-full max-w-3xl rounded-3xl border border-slate-200 bg-white p-5 text-slate-950 shadow-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.28em] text-orange-600">Publish preview</p>
+            <h3 className="mt-1 text-2xl font-black">{title}</h3>
+            <p className="mt-2 text-sm font-semibold text-slate-600">{project.description || "No description added yet."}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full border border-slate-200 p-2"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <Info title="Visibility" value={visibility === "public" ? "Public archive" : visibility === "unlisted" ? "Unlisted" : "Private"} />
+          <Info title="Motor" value={motorClass} />
+          <Info title="Predicted apogee" value={`${predictedAltitudeM} m`} />
+          <Info title="Evidence" value={`${evidenceCount} files / ${evidenceFiles.filter((file) => file.publicUrl).length} cloud`} />
+          <Info title="Length" value={`${stats.totalLength} mm`} />
+          <Info title="Dry mass" value={`${stats.totalMass} g`} />
+          <Info title="CG / CP" value={`${stats.cg} / ${stats.cp} mm`} />
+          <Info title="Stability" value={`${stats.stability} cal`} />
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Release</p>
+            <p className="mt-2 text-sm font-bold text-slate-800">{release.license} / {release.forkPolicy}</p>
+            <p className="mt-1 text-sm font-semibold text-slate-600">{release.dataAccess} / {release.reviewState}</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Source</p>
+            <p className="mt-2 break-all text-sm font-bold text-slate-800">{project.referenceUrl || "No public reference URL attached."}</p>
+            <p className="mt-1 text-sm font-semibold text-slate-600">{project.publishGoal} / {release.articleRequest}</p>
+          </div>
+        </div>
+
+        <div className="mt-5 flex justify-end">
+          <Button type="button" onClick={onClose} className="rounded-xl bg-orange-500 text-slate-950 hover:bg-orange-400">Close preview</Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SafetyModal({ onClose, onConfirm }: { onClose: () => void; onConfirm: () => void }) {

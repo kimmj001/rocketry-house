@@ -90,17 +90,17 @@ function PostPreviewCard({ post }: { post: CommunityPost }) {
   );
 }
 
-export function HomePreviewSections() {
-  const [projects, setProjects] = useState<RocketProject[]>([]);
+export function HomePreviewSections({ initialProjects = [] }: { initialProjects?: RocketProject[] }) {
+  const [projects, setProjects] = useState<RocketProject[]>(initialProjects.slice(0, 3));
   const [posts, setPosts] = useState<CommunityPost[]>([]);
-  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [loadingProjects, setLoadingProjects] = useState(!initialProjects.length);
   const [loadingPosts, setLoadingPosts] = useState(true);
 
   useEffect(() => {
     let mounted = true;
 
     async function loadProjects() {
-      setLoadingProjects(true);
+      if (!initialProjects.length) setLoadingProjects(true);
       try {
         const records = await loadPersistentRecords("projects", { ownerKey: PUBLIC_PROJECTS_OWNER_KEY });
         if (!mounted) return;
@@ -135,7 +135,7 @@ export function HomePreviewSections() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [initialProjects.length]);
 
   const projectSkeletons = useMemo(() => Array.from({ length: 3 }, (_, index) => index), []);
   const postSkeletons = useMemo(() => Array.from({ length: 4 }, (_, index) => index), []);

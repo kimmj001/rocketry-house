@@ -2,7 +2,7 @@
 
 import { useId, useRef, useState, type DragEvent } from "react";
 import { AlertCircle, CheckCircle2, FileText, UploadCloud } from "lucide-react";
-import { uploadPersistentFiles } from "@/lib/cloud-persistence";
+import { uploadPersistentFiles, type PersistentFileRecord } from "@/lib/cloud-persistence";
 
 const DEFAULT_ACCEPTED_SPECIFIERS = [
   ".ork",
@@ -30,7 +30,7 @@ type FileUploadBoxProps = {
   compact?: boolean;
   acceptedSpecifiers?: string[];
   maxRecommendedSizeMb?: number;
-  onFilesSelected?: (title: string, files: File[]) => void;
+  onFilesSelected?: (title: string, files: File[], records?: PersistentFileRecord[]) => void;
 };
 
 function formatBytes(bytes: number) {
@@ -101,7 +101,7 @@ export function FileUploadBox({
 
     if (!accepted.length) {
       setSyncState(selected.length ? "No supported files were selected." : "");
-      onFilesSelected?.(title, []);
+      onFilesSelected?.(title, [], []);
       return;
     }
 
@@ -110,6 +110,7 @@ export function FileUploadBox({
     void uploadPersistentFiles(title, accepted)
       .then((records) => {
         const cloudCount = records.filter((record) => record.publicUrl).length;
+        onFilesSelected?.(title, accepted, records);
         setSyncState(cloudCount ? `${cloudCount} file${cloudCount === 1 ? "" : "s"} uploaded to cloud storage.` : "File metadata saved locally. Add Supabase env vars for cloud file storage.");
       })
       .catch(() => setSyncState("File names were kept in this session, but persistent upload failed."));
