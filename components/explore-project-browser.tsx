@@ -6,6 +6,7 @@ import { ProjectCard } from "@/components/project-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { loadPersistentRecords, PUBLIC_PROJECTS_OWNER_KEY, type CloudRecord } from "@/lib/cloud-persistence";
+import { isInternalTestProject } from "@/lib/internal-test-data";
 import { archivedProjectToRocketProject } from "@/lib/project-archive";
 import type { RocketProject } from "@/lib/types";
 
@@ -39,6 +40,7 @@ export function ExploreProjectBrowser({ initialProjects, initialLoadError }: { i
         setPublicProjects(
           (records as CloudRecord<Parameters<typeof archivedProjectToRocketProject>[0]["payload"]>[])
             .map((record, index) => archivedProjectToRocketProject(record, index))
+            .filter((project) => !isInternalTestProject(project))
         );
       } catch (error) {
         if (!mounted) return;

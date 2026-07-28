@@ -1,4 +1,5 @@
 import { archivedProjectToRocketProject } from "@/lib/project-archive";
+import { isInternalTestProject } from "@/lib/internal-test-data";
 import { PUBLIC_PROJECTS_OWNER_KEY } from "@/lib/public-owner-keys";
 import { getSupabaseClient, isMockMode } from "@/lib/supabase";
 import type { RocketProject } from "@/lib/types";
@@ -22,7 +23,9 @@ export async function loadPublicProjectArchive(limit?: number): Promise<{ projec
   if (error || !data) return { projects: [], error: error?.message ?? "Could not load public projects." };
 
   return {
-    projects: (data as PublicProjectRecord[]).map((record, index) => archivedProjectToRocketProject(record, index)),
+    projects: (data as PublicProjectRecord[])
+      .map((record, index) => archivedProjectToRocketProject(record, index))
+      .filter((project) => !isInternalTestProject(project)),
     error: null
   };
 }
@@ -40,5 +43,6 @@ export async function loadPublicProjectBySlug(slug: string): Promise<RocketProje
     .maybeSingle();
 
   if (error || !data) return undefined;
-  return archivedProjectToRocketProject(data as PublicProjectRecord);
+  const project = archivedProjectToRocketProject(data as PublicProjectRecord);
+  return isInternalTestProject(project) ? undefined : project;
 }

@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { MultiTelemetryChart, TelemetryChart } from "@/components/charts";
 import { RawDataPreview } from "@/components/raw-data-preview";
+import { isInternalTestProject } from "@/lib/internal-test-data";
 import { archivedProjectToRocketProject } from "@/lib/project-archive";
 import { discussions, mockProjects } from "@/lib/mock-data";
 import { getSupabaseClient, isMockMode } from "@/lib/supabase";
@@ -73,6 +74,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   if (canonicalSlug(slug) !== slug) redirect(`/projects/${canonicalSlug(slug)}`);
   const project = bySlug(mockProjects, slug) ?? await loadArchivedProject(slug);
   if (!project) notFound();
+  if (isInternalTestProject(project)) notFound();
 
   const originalProject = project.originalProjectId ? mockProjects.find((candidate) => candidate.id === project.originalProjectId) : undefined;
   const projectDiscussions = discussions.filter((discussion) => discussion.projectId === project.id);

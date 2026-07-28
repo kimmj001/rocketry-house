@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { containsInternalTestMarker, isInternalTestMessageBody } from "@/lib/internal-test-data";
 import { getServerSupabaseClient } from "@/lib/supabase-server";
 import { claimUsageForRequest } from "@/lib/usage-cloud";
 import { normalizeAccountType, normalizeSubscriptionTier, type AccountType, type SubscriptionTier } from "@/lib/usage-limits";
@@ -10,14 +11,6 @@ export const dynamic = "force-dynamic";
 const MESSAGES_COLLECTION = "direct_messages";
 const ACCOUNT_STATUS_OWNER_KEY = "admin:account-status";
 const ACCOUNT_STATUS_COLLECTION = "account_status";
-const internalTestAccountPatterns = [
-  /\bRH QA\b/i,
-  /\bQA (?:Sender|Receiver)\b/i
-];
-const internalTestMessagePatterns = [
-  /^RH QA UI direct message\b/i,
-  /^RH QA direct message\b/i
-];
 
 type MessageAccount = {
   id: string;
@@ -450,10 +443,5 @@ function isInternalTestAccount(account: Partial<MessageAccount>) {
 
 function isInternalTestMessage(message: DirectMessage) {
   return containsInternalTestMarker([message.senderId, message.senderName, message.recipientId, message.recipientName])
-    || internalTestMessagePatterns.some((pattern) => pattern.test(message.body));
-}
-
-function containsInternalTestMarker(values: Array<string | undefined>) {
-  const text = values.filter(Boolean).join(" ");
-  return internalTestAccountPatterns.some((pattern) => pattern.test(text));
+    || isInternalTestMessageBody(message.body);
 }
