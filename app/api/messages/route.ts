@@ -10,6 +10,14 @@ export const dynamic = "force-dynamic";
 const MESSAGES_COLLECTION = "direct_messages";
 const ACCOUNT_STATUS_OWNER_KEY = "admin:account-status";
 const ACCOUNT_STATUS_COLLECTION = "account_status";
+const internalTestAccountPatterns = [
+  /\bRH QA\b/i,
+  /\bQA (?:Sender|Receiver)\b/i
+];
+const internalTestMessagePatterns = [
+  /^RH QA UI direct message\b/i,
+  /^RH QA direct message\b/i
+];
 
 type MessageAccount = {
   id: string;
@@ -69,7 +77,8 @@ export async function GET(request: Request) {
   try {
     const { user, supabase } = await requireUser(request);
     const messages = await loadMessagesForUser(supabase, user.id);
-    const accounts = await loadMessageAccounts(supabase, user, messages, targetFromRequest(request));
+    const target = targetFromRequest(request);
+    const accounts = await loadMessageAccounts(supabase, user, messages, isInternalTestTarget(target) ? undefined : target);
     const currentUser = accounts.find((account) => account.id === user.id) ?? accountFromUser(user);
 
     return NextResponse.json({
@@ -106,6 +115,9 @@ export async function POST(request: Request) {
     const sender = accounts.find((account) => account.id === user.id) ?? accountFromUser(user);
     const recipient = accounts.find((account) => account.id === recipientId);
     if (!recipient) {
+      return NextResponse.json({ error: "Recipient account could not be found." }, { status: 404 });
+    }
+    if (isInternalTestAccount(recipient)) {
       return NextResponse.json({ error: "Recipient account could not be found." }, { status: 404 });
     }
 
@@ -195,6 +207,7 @@ async function loadMessagesForUser(supabase: SupabaseClient, userId: string) {
 function normalizeMessages(data: Array<{ payload?: unknown }>, userId: string) {
   return ((data ?? []) as Array<{ payload?: unknown }>).map((record) => normalizeMessage(record.payload))
     .filter((message): message is DirectMessage => Boolean(message && (message.senderId === userId || message.recipientId === userId)))
+    .filter((message) => !isInternalTestMessage(message))
     .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
 }
 
@@ -346,6 +359,7 @@ function applyStatus(account: MessageAccount, statuses: Map<string, Partial<Mess
 
 function addAccount(accounts: Map<string, MessageAccount>, account: MessageAccount & { suspended?: boolean }) {
   if (account.suspended) return;
+  if (isInternalTestAccount(account)) return;
   const existing = accounts.get(account.id);
   accounts.set(account.id, existing ? { ...existing, ...account, avatarUrl: account.avatarUrl ?? existing.avatarUrl } : account);
 }
@@ -423,4 +437,23 @@ function uniqueRecords(records: UserDataRecord[]) {
     if (!map.has(key)) map.set(key, record);
   }
   return Array.from(map.values());
+}
+
+function isInternalTestTarget(target: MessageTarget | undefined) {
+  if (!target) return false;
+  return containsInternalTestMarker([target.id, target.email, target.name]);
+}
+
+function isInternalTestAccount(account: Partial<MessageAccount>) {
+  return containsInternalTestMarker([account.id, account.email, account.name, account.organizationName, account.headline]);
+}
+
+function isInternalTestMessage(message: DirectMessage) {
+  return containsInternalTestMarker([message.senderId, message.senderName, message.recipientId, message.recipientName])
+    || internalTestMessagePatterns.some((pattern) => pattern.test(message.body));
+}
+
+function containsInternalTestMarker(values: Array<string | undefined>) {
+  const text = values.filter(Boolean).join(" ");
+  return internalTestAccountPatterns.some((pattern) => pattern.test(text));
 }
