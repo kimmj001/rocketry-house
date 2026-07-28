@@ -110,7 +110,7 @@ export function DmDock() {
       setCurrentUser(null);
       setAccounts([]);
       setMessages([]);
-      setError("Sign in to send direct messages.");
+      setError("");
       setLoading(false);
       return;
     }
@@ -152,11 +152,6 @@ export function DmDock() {
     window.addEventListener(OPEN_DM_EVENT, handleOpen);
     return () => window.removeEventListener(OPEN_DM_EVENT, handleOpen);
   }, [loadMessages]);
-
-  useEffect(() => {
-    if (!open || currentUser || loading) return;
-    void loadMessages();
-  }, [currentUser, loadMessages, loading, open]);
 
   async function sendMessage() {
     if (!selectedAccount) {
