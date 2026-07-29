@@ -10,6 +10,7 @@ type RocketryHouseLogoRevealProps = {
 
 const LOGO_WIDTH = 971;
 const LOGO_HEIGHT = 211;
+const LOOP_DURATION_MS = 4200;
 const ASSET_ROOT = "/logo-reveal";
 
 type LogoLayer = {
@@ -129,13 +130,13 @@ export function RocketryHouseLogoReveal({
 
         .rh-source-logo[data-mode="animated"] .rh-source-logo__stage,
         .rh-source-logo[data-mode="loop"] .rh-source-logo__stage {
-          animation: rh-source-logo-finish 2200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          animation: rh-source-logo-finish ${LOOP_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
         }
 
         .rh-source-logo[data-mode="animated"] .rh-source-logo__final,
         .rh-source-logo[data-mode="loop"] .rh-source-logo__final {
           opacity: 0;
-          animation: rh-source-logo-final-frame 2200ms linear both;
+          animation: rh-source-logo-final-frame ${LOOP_DURATION_MS}ms linear both;
         }
 
         .rh-source-logo[data-mode="loop"] .rh-source-logo__stage,
@@ -145,39 +146,39 @@ export function RocketryHouseLogoReveal({
         }
 
         .rh-source-logo__diamond--one {
-          animation: rh-source-logo-diamond-one 2200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+          animation: rh-source-logo-diamond-one ${LOOP_DURATION_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
         }
 
         .rh-source-logo__diamond--two {
-          animation: rh-source-logo-diamond-pop 2200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+          animation: rh-source-logo-diamond-pop ${LOOP_DURATION_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
         }
 
         .rh-source-logo__diamond--three {
-          animation: rh-source-logo-diamond-pop-three 2200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+          animation: rh-source-logo-diamond-pop-three ${LOOP_DURATION_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
         }
 
         .rh-source-logo__diamond--four {
-          animation: rh-source-logo-diamond-pop-four 2200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+          animation: rh-source-logo-diamond-pop-four ${LOOP_DURATION_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
         }
 
         .rh-source-logo__nozzle {
           clip-path: inset(0 100% 0 0);
-          animation: rh-source-logo-mask-reveal 2200ms cubic-bezier(0.55, 0, 0.1, 1) both;
+          animation: rh-source-logo-mask-reveal ${LOOP_DURATION_MS}ms cubic-bezier(0.55, 0, 0.1, 1) both;
         }
 
         .rh-source-logo__wordmark {
           clip-path: inset(0 50% 0 50%);
-          animation: rh-source-logo-wordmark-reveal 2200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          animation: rh-source-logo-wordmark-reveal ${LOOP_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
         }
 
         .rh-source-logo__period-proxy {
           opacity: 0;
-          animation: rh-source-logo-period-proxy 2200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+          animation: rh-source-logo-period-proxy ${LOOP_DURATION_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
         }
 
         .rh-source-logo__period {
           opacity: 0;
-          animation: rh-source-logo-period 2200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          animation: rh-source-logo-period ${LOOP_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
         }
 
         @keyframes rh-source-logo-diamond-one {
@@ -185,162 +186,162 @@ export function RocketryHouseLogoReveal({
             opacity: 1;
             transform: scale(0.04);
           }
-          15% {
+          7.143% {
             opacity: 1;
             transform: scale(1.05);
           }
-          22%, 94% {
+          10.476%, 49.238% {
             opacity: 1;
             transform: scale(1);
           }
-          100% {
+          52.381%, 100% {
             opacity: 0;
             transform: scale(1);
           }
         }
 
         @keyframes rh-source-logo-diamond-pop {
-          0%, 10% {
+          0%, 5.238% {
             opacity: 0;
             transform: scale(0.35);
           }
-          20% {
+          10.476% {
             opacity: 1;
             transform: scale(1.05);
           }
-          28%, 94% {
+          14.667%, 49.238% {
             opacity: 1;
             transform: scale(1);
           }
-          100% {
+          52.381%, 100% {
             opacity: 0;
             transform: scale(1);
           }
         }
 
         @keyframes rh-source-logo-diamond-pop-three {
-          0%, 15.5% {
+          0%, 8.119% {
             opacity: 0;
             transform: scale(0.35);
           }
-          25.5% {
+          13.357% {
             opacity: 1;
             transform: scale(1.05);
           }
-          33.5%, 94% {
+          17.548%, 49.238% {
             opacity: 1;
             transform: scale(1);
           }
-          100% {
+          52.381%, 100% {
             opacity: 0;
             transform: scale(1);
           }
         }
 
         @keyframes rh-source-logo-diamond-pop-four {
-          0%, 21% {
+          0%, 11% {
             opacity: 0;
             transform: scale(0.35);
           }
-          31% {
+          16.238% {
             opacity: 1;
             transform: scale(1.05);
           }
-          39%, 94% {
+          20.429%, 49.238% {
             opacity: 1;
             transform: scale(1);
           }
-          100% {
+          52.381%, 100% {
             opacity: 0;
             transform: scale(1);
           }
         }
 
         @keyframes rh-source-logo-mask-reveal {
-          0%, 28% {
+          0%, 14.667% {
             opacity: 1;
             clip-path: inset(0 100% 0 0);
           }
-          56%, 94% {
+          29.333%, 49.238% {
             opacity: 1;
             clip-path: inset(0 0 0 0);
           }
-          100% {
+          52.381%, 100% {
             opacity: 0;
             clip-path: inset(0 0 0 0);
           }
         }
 
         @keyframes rh-source-logo-wordmark-reveal {
-          0%, 58% {
+          0%, 30.381% {
             opacity: 1;
             clip-path: inset(0 50% 0 50%);
           }
-          82%, 94% {
+          42.952%, 49.238% {
             opacity: 1;
             clip-path: inset(0 0 0 0);
           }
-          100% {
+          52.381%, 100% {
             opacity: 0;
             clip-path: inset(0 0 0 0);
           }
         }
 
         @keyframes rh-source-logo-period-proxy {
-          0%, 58% {
+          0%, 30.381% {
             opacity: 0;
             transform: translate(0, 0) scale(0.35);
           }
-          66% {
+          34.571% {
             opacity: 1;
             transform: translate(0, 0) scale(1);
           }
-          82% {
+          42.952% {
             opacity: 1;
             transform: translate(1666.667%, 88.889%) scale(0.78);
           }
-          90% {
+          47.143% {
             opacity: 0;
             transform: translate(1666.667%, 88.889%) scale(0.62);
           }
-          100% {
+          52.381%, 100% {
             opacity: 0;
             transform: translate(1666.667%, 88.889%) scale(0.62);
           }
         }
 
         @keyframes rh-source-logo-period {
-          0%, 82% {
+          0%, 42.952% {
             opacity: 0;
             transform: scale(0.55);
           }
-          90%, 94% {
+          47.143%, 49.238% {
             opacity: 1;
             transform: scale(1);
           }
-          100% {
+          52.381%, 100% {
             opacity: 0;
             transform: scale(1);
           }
         }
 
         @keyframes rh-source-logo-final-frame {
-          0%, 93% {
+          0%, 48.714% {
             opacity: 0;
           }
-          97%, 100% {
+          50.81%, 100% {
             opacity: 1;
           }
         }
 
         @keyframes rh-source-logo-finish {
-          0%, 84% {
+          0%, 44% {
             transform: scale(1);
           }
-          92% {
+          48.19% {
             transform: scale(1.02);
           }
-          100% {
+          52.381%, 100% {
             transform: scale(1);
           }
         }
