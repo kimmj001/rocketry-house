@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Rocket } from "lucide-react";
 import { AccountNav } from "@/components/account-nav";
+import { RocketryHouseLogoReveal } from "@/components/rocketry-house-logo-reveal";
 import { platformNav } from "@/lib/platform-content";
 
 export function SiteNav() {
@@ -12,9 +12,8 @@ export function SiteNav() {
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-black bg-black text-white shadow-sm">
       <nav className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
-        <Link href="/" className="flex min-w-0 items-center gap-2 text-[15px] font-bold">
-          <Rocket className="h-5 w-5 text-orange-400" />
-          <span className="truncate">Rocketry House</span>
+        <Link href="/" aria-label="Rocketry House home" className="flex shrink-0 items-center">
+          <RocketryHouseLogoReveal mode="loop" style={{ width: "clamp(132px, 24vw, 184px)" }} />
         </Link>
         <div className="hidden h-full max-w-[780px] items-center justify-center gap-5 lg:flex">
           {platformNav.map(([label, href]) => (

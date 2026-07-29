@@ -7,17 +7,19 @@ import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav";
 
 const fixedWorkspaceRoutes = ["/upload"];
+const immersiveRoutes = ["/logo-reveal"];
 
 export function SiteShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const isFixedWorkspace = fixedWorkspaceRoutes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+  const isImmersive = immersiveRoutes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
 
   return (
     <div className="site-scroll-root" data-site-scroll-root data-fixed-workspace={isFixedWorkspace ? "true" : "false"} tabIndex={-1}>
-      <SiteNav />
+      {!isImmersive && <SiteNav />}
       {children}
-      {!isFixedWorkspace && <SiteFooter />}
-      <DmDock />
+      {!isFixedWorkspace && !isImmersive && <SiteFooter />}
+      {!isImmersive && <DmDock />}
     </div>
   );
 }

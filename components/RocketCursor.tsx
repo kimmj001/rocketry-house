@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 type CursorMode = "following" | "charging";
@@ -99,6 +100,8 @@ let crackId = 0;
 let launchedRocketId = 0;
 
 export default function RocketCursor() {
+  const pathname = usePathname();
+  const disabled = pathname === "/logo-reveal" || pathname.startsWith("/logo-reveal/");
   const [enabled, setEnabled] = useState(false);
   const [view, setView] = useState<CursorView>({
     x: -100,
@@ -129,6 +132,13 @@ export default function RocketCursor() {
   }, [view]);
 
   useEffect(() => {
+    if (disabled) {
+      setEnabled(false);
+      document.documentElement.classList.remove("rocket-cursor-enabled");
+      document.body.classList.remove("rocket-cursor-impact");
+      return;
+    }
+
     const hasPointer = window.matchMedia("(pointer: fine)").matches;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     reducedMotionRef.current = reducedMotion;
@@ -460,9 +470,9 @@ export default function RocketCursor() {
       document.documentElement.classList.remove("rocket-cursor-enabled");
       document.body.classList.remove("rocket-cursor-impact");
     };
-  }, []);
+  }, [disabled]);
 
-  if (!enabled) {
+  if (disabled || !enabled) {
     return null;
   }
 
