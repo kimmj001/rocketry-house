@@ -82,7 +82,7 @@ export function RocketryHouseLogoReveal({
         <img
           className="rh-source-logo__final"
           draggable={false}
-          src={`${ASSET_ROOT}/original-logo.png`}
+          src={`${ASSET_ROOT}/final-logo.png`}
           width={LOGO_WIDTH}
           height={LOGO_HEIGHT}
           alt=""
@@ -101,7 +101,7 @@ export function RocketryHouseLogoReveal({
           width: 100%;
           aspect-ratio: ${LOGO_WIDTH} / ${LOGO_HEIGHT};
           overflow: hidden;
-          background: #000;
+          background: transparent;
           transform-origin: 50% 50%;
         }
 
