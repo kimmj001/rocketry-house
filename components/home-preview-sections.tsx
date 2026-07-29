@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, MessageSquareText, Rocket, Search, UsersRound } from "lucide-react";
+import { ArrowRight, MessageSquareText, Rocket, UsersRound } from "lucide-react";
 import { ProjectCard } from "@/components/project-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { loadCommunityPostsArchive } from "@/lib/community-archive";
 import type { CommunityPost } from "@/lib/community-data";
 import { loadPersistentRecords, PUBLIC_PROJECTS_OWNER_KEY, type CloudRecord } from "@/lib/cloud-persistence";
+import { isInternalTestProject } from "@/lib/internal-test-data";
 import { archivedProjectToRocketProject } from "@/lib/project-archive";
 import type { RocketProject } from "@/lib/types";
 
@@ -91,9 +92,10 @@ function PostPreviewCard({ post }: { post: CommunityPost }) {
 }
 
 export function HomePreviewSections({ initialProjects = [] }: { initialProjects?: RocketProject[] }) {
-  const [projects, setProjects] = useState<RocketProject[]>(initialProjects.slice(0, 3));
+  const initialVisibleProjects = initialProjects.filter((project) => !isInternalTestProject(project)).slice(0, 3);
+  const [projects, setProjects] = useState<RocketProject[]>(initialVisibleProjects);
   const [posts, setPosts] = useState<CommunityPost[]>([]);
-  const [loadingProjects, setLoadingProjects] = useState(!initialProjects.length);
+  const [loadingProjects, setLoadingProjects] = useState(!initialVisibleProjects.length);
   const [loadingPosts, setLoadingPosts] = useState(true);
 
   useEffect(() => {
@@ -107,6 +109,7 @@ export function HomePreviewSections({ initialProjects = [] }: { initialProjects?
         setProjects(
           (records as CloudRecord<Parameters<typeof archivedProjectToRocketProject>[0]["payload"]>[])
             .map((record, index) => archivedProjectToRocketProject(record, index))
+            .filter((project) => !isInternalTestProject(project))
             .slice(0, 3)
         );
       } catch {

@@ -17,7 +17,7 @@ export async function loadPublicProjectArchive(limit?: number): Promise<{ projec
     .eq("collection", "projects")
     .order("updated_at", { ascending: false });
 
-  if (limit) query = query.limit(limit);
+  if (limit) query = query.limit(Math.max(limit * 12, 60));
 
   const { data, error } = await query;
   if (error || !data) return { projects: [], error: error?.message ?? "Could not load public projects." };
@@ -25,7 +25,8 @@ export async function loadPublicProjectArchive(limit?: number): Promise<{ projec
   return {
     projects: (data as PublicProjectRecord[])
       .map((record, index) => archivedProjectToRocketProject(record, index))
-      .filter((project) => !isInternalTestProject(project)),
+      .filter((project) => !isInternalTestProject(project))
+      .slice(0, limit),
     error: null
   };
 }

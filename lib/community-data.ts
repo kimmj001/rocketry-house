@@ -1,3 +1,5 @@
+import { isHiddenCommunityComment, isHiddenCommunityPost } from "@/lib/internal-test-data";
+
 export type CommunityAuthor = {
   name: string;
   role: string;
@@ -430,11 +432,11 @@ function containsNonEnglishScript(value: unknown): boolean {
 }
 
 export function isEnglishCommunityPost(post: CommunityPost) {
-  return !containsNonEnglishScript(post);
+  return !containsNonEnglishScript(post) && !isHiddenCommunityPost(post);
 }
 
 export function isEnglishCommunityComment(comment: CommunityComment) {
-  return !containsNonEnglishScript(comment);
+  return !containsNonEnglishScript(comment) && !isHiddenCommunityComment(comment);
 }
 
 export const communityPosts: CommunityPost[] = seededCommunityPosts.filter(isEnglishCommunityPost);
