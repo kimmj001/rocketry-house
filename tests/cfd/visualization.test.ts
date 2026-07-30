@@ -58,4 +58,12 @@ test("pressure contrast ignores chamber extremes and separates pressure around a
   assert.equal(pressureContrastPosition(ambientPressurePa, ambientPressurePa, scale), 0.5);
   assert.ok(pressureContrastPosition(90000, ambientPressurePa, scale) < 0.5);
   assert.ok(pressureContrastPosition(120000, ambientPressurePa, scale) > 0.5);
+  assert.ok(
+    pressureContrastPosition(90000, ambientPressurePa, scale) > 0.15,
+    "moderate pressure deficits should not immediately saturate the palette"
+  );
+  assert.ok(
+    pressureContrastPosition(120000, ambientPressurePa, scale) < 0.85,
+    "moderate pressure rises should not immediately saturate the palette"
+  );
 });

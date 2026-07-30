@@ -18,9 +18,9 @@ export function pressureContrastScale(
   deviations.sort((left, right) => left - right);
   const percentileIndex = Math.floor(Math.max(0, deviations.length - 1) * 0.97);
   return Math.max(
-    ambientPressurePa * 0.1,
-    deviations[percentileIndex] ?? 0,
-    500
+    ambientPressurePa * 0.15,
+    (deviations[percentileIndex] ?? 0) * 1.75,
+    750
   );
 }
 
@@ -31,10 +31,10 @@ export function pressureContrastPosition(
 ) {
   const delta = pressurePa - ambientPressurePa;
   if (Math.abs(delta) < 1e-12) return 0.5;
-  const linearScalePa = Math.max(ambientPressurePa * 0.005, 100);
+  const linearScalePa = Math.max(ambientPressurePa * 0.03, 500);
   const denominator = Math.log1p(Math.max(contrastScalePa, linearScalePa) / linearScalePa);
   const magnitude = clamp01(Math.log1p(Math.abs(delta) / linearScalePa) / denominator);
-  const enhanced = magnitude ** 0.78;
+  const enhanced = magnitude ** 1.08;
   return 0.5 + 0.5 * Math.sign(delta) * enhanced;
 }
 

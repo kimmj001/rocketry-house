@@ -125,6 +125,11 @@ coordinates at display-pixel resolution. This removes cell-sized stair steps
 without changing the solver mesh, timestep, or stability characteristics. The
 `Mesh` overlay still shows the underlying finite-volume cells.
 
+The automatic pressure view uses a restrained, multi-stop cool-to-warm palette
+and a widened robust contrast range. Moderate pressure changes remain distinct
+without immediately saturating to the lowest or highest display color, while
+near-ambient moving flow retains a dim neutral bridge instead of a black seam.
+
 ## Diagnostics
 
 The UI reports continuity, axial momentum, radial momentum, energy, and

@@ -61,11 +61,15 @@ const VIRIDIS = [
 ] as const;
 
 const PRESSURE_DIVERGING = [
-  [28, 78, 170],
-  [38, 176, 216],
-  [8, 11, 20],
-  [255, 112, 35],
-  [255, 235, 59]
+  [45, 86, 132],
+  [54, 119, 151],
+  [74, 139, 158],
+  [60, 82, 88],
+  [31, 38, 42],
+  [88, 72, 53],
+  [164, 108, 61],
+  [207, 151, 76],
+  [232, 196, 99]
 ] as const;
 
 const STANDARD_ATMOSPHERE_PA = 101325;
@@ -267,7 +271,17 @@ function NozzleFieldCanvas({
           );
           const machVisibility = Math.max(0, Math.min(1, (sampledMach - 0.005) / 0.12));
           const fieldVisibility = fieldName === "pressure"
-            ? Math.max(0, Math.min(1, Math.abs(sampledValue - ambientPressurePa) / Math.max(ambientPressurePa * 0.02, 500)))
+            ? Math.max(
+                Math.min(0.2, machVisibility * 0.2),
+                Math.max(
+                  0,
+                  Math.min(
+                    0.9,
+                    Math.abs(sampledValue - ambientPressurePa) /
+                      Math.max(ambientPressurePa * 0.035, 750)
+                  )
+                )
+              )
             : fieldName === "temperature"
               ? Math.max(0, Math.min(1, Math.abs(sampledValue - 288.15) / 20))
               : fieldName === "density"
