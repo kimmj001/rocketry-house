@@ -146,6 +146,7 @@ export class AxisymmetricRansSolver {
   private pseudoTimeS = 0;
   private lastDtS = 0;
   private effectiveCfl = 0;
+  private cflScale = 1;
   private failed = false;
   private failureReason: string | undefined;
   private counters: Counters = {
@@ -646,9 +647,16 @@ export class AxisymmetricRansSolver {
   }
 
   private currentCfl() {
-    if (!this.config.cflRamp || this.counters.rejectedSteps > 0) return clamp(this.config.cfl, 0.005, 0.5);
-    const ramp = this.iteration < 150 ? 1 : this.iteration < 350 ? 2 : this.iteration < 700 ? 4 : 10;
-    return clamp(this.config.cfl * ramp, 0.005, 0.5);
+    const ramp = !this.config.cflRamp
+      ? 1
+      : this.iteration < 150
+        ? 1
+        : this.iteration < 350
+          ? 2
+          : this.iteration < 700
+            ? 4
+            : 10;
+    return clamp(this.config.cfl * ramp * this.cflScale, 0.001, 0.5);
   }
 
   private computeTimeStep() {
@@ -677,42 +685,62 @@ export class AxisymmetricRansSolver {
     const next = createConservativeState(this.mesh.cells);
     for (let index = 0; index < this.mesh.cells; index += 1) {
       const factor = dt / this.mesh.volumes[index];
-      next.rho[index] = this.state.rho[index] - factor * this.residual.rho[index];
-      next.rhoU[index] = this.state.rhoU[index] - factor * this.residual.rhoU[index];
-      next.rhoV[index] = this.state.rhoV[index] - factor * this.residual.rhoV[index];
-      next.rhoE[index] = this.state.rhoE[index] - factor * this.residual.rhoE[index];
-      next.rhoNuTilde[index] = this.state.rhoNuTilde[index] - factor * this.residual.rhoNuTilde[index];
-      if (next.rhoNuTilde[index] < 0 && Number.isFinite(next.rhoNuTilde[index])) {
-        next.rhoNuTilde[index] = 0;
-        this.counters.positivityCorrections += 1;
-      }
-      const xNormalized = this.thermoCoordinate(this.mesh.cellX[index]);
-      const thermo = thermodynamicProperties(xNormalized, this.primitive.temperature[index], this.config);
-      const decoded = primitiveFromConservative(
-        [next.rho[index], next.rhoU[index], next.rhoV[index], next.rhoE[index]],
-        thermo,
-        this.config
-      );
-      const rawValues = [
-        next.rho[index],
-        next.rhoU[index],
-        next.rhoV[index],
-        next.rhoE[index],
-        next.rhoNuTilde[index],
-        decoded.rawPressure,
-        decoded.rawTemperature
+      const proposed: [number, number, number, number, number] = [
+        this.state.rho[index] - factor * this.residual.rho[index],
+        this.state.rhoU[index] - factor * this.residual.rhoU[index],
+        this.state.rhoV[index] - factor * this.residual.rhoV[index],
+        this.state.rhoE[index] - factor * this.residual.rhoE[index],
+        this.state.rhoNuTilde[index] - factor * this.residual.rhoNuTilde[index]
       ];
-      if (rawValues.some((value) => !Number.isFinite(value))) {
+      if (proposed.some((value) => !Number.isFinite(value))) {
         this.counters.nanCount += 1;
         return null;
       }
-      if (
-        decoded.rawRho <= this.config.rhoMin ||
-        decoded.rawPressure <= this.config.pressureMin ||
-        decoded.rawTemperature <= this.config.temperatureMin
-      ) {
-        return null;
+      const xNormalized = this.thermoCoordinate(this.mesh.cellX[index]);
+      const thermo = thermodynamicProperties(xNormalized, this.primitive.temperature[index], this.config);
+      let accepted = proposed;
+      let decoded = primitiveFromConservative(
+        [accepted[0], accepted[1], accepted[2], accepted[3]],
+        thermo,
+        this.config
+      );
+      const isPhysical = () =>
+        Number.isFinite(decoded.rawPressure) &&
+        Number.isFinite(decoded.rawTemperature) &&
+        decoded.rawRho > this.config.rhoMin &&
+        decoded.rawPressure > this.config.pressureMin &&
+        decoded.rawTemperature > this.config.temperatureMin;
+      if (!isPhysical()) {
+        let theta = 0.5;
+        let recovered = false;
+        for (let correction = 0; correction < 18; correction += 1) {
+          accepted = [
+            this.state.rho[index] + theta * (proposed[0] - this.state.rho[index]),
+            this.state.rhoU[index] + theta * (proposed[1] - this.state.rhoU[index]),
+            this.state.rhoV[index] + theta * (proposed[2] - this.state.rhoV[index]),
+            this.state.rhoE[index] + theta * (proposed[3] - this.state.rhoE[index]),
+            this.state.rhoNuTilde[index] + theta * (proposed[4] - this.state.rhoNuTilde[index])
+          ];
+          decoded = primitiveFromConservative(
+            [accepted[0], accepted[1], accepted[2], accepted[3]],
+            thermo,
+            this.config
+          );
+          if (isPhysical()) {
+            recovered = true;
+            break;
+          }
+          theta *= 0.5;
+        }
+        if (!recovered) return null;
+        this.counters.positivityCorrections += 1;
       }
+      next.rho[index] = accepted[0];
+      next.rhoU[index] = accepted[1];
+      next.rhoV[index] = accepted[2];
+      next.rhoE[index] = accepted[3];
+      next.rhoNuTilde[index] = Math.max(accepted[4], 0);
+      if (accepted[4] < 0) this.counters.positivityCorrections += 1;
       this.lastUpdate[index] = Math.max(
         Math.abs(next.rho[index] - this.state.rho[index]) / Math.max(Math.abs(this.state.rho[index]), 1e-12),
         Math.abs(next.rhoU[index] - this.state.rhoU[index]) / Math.max(Math.abs(this.state.rhoU[index]), 1),
@@ -727,17 +755,26 @@ export class AxisymmetricRansSolver {
     this.computeResidual();
     let dt = this.computeTimeStep();
     const point = residualNorm(this.residual, this.state, this.mesh, dt, this.iteration + 1);
+    const correctionsBeforeStep = this.counters.positivityCorrections;
     let next: ConservativeState | null = null;
-    for (let retry = 0; retry < 5; retry += 1) {
+    let retries = 0;
+    for (; retries < 12; retries += 1) {
       next = this.attemptUpdate(dt);
       if (next) break;
       this.counters.rejectedSteps += 1;
+      this.cflScale = Math.max(this.cflScale * 0.5, 0.02);
+      this.effectiveCfl = Math.max(this.effectiveCfl * 0.5, 0.001);
       dt *= 0.5;
     }
     if (!next) {
       this.failed = true;
-      this.failureReason = "The timestep remained nonphysical after five CFL reductions.";
+      this.failureReason = "The timestep remained nonphysical after adaptive CFL and positivity recovery.";
       return;
+    }
+    if (this.counters.positivityCorrections > correctionsBeforeStep) {
+      this.cflScale = Math.max(this.cflScale * 0.8, 0.02);
+    } else if (retries === 0) {
+      this.cflScale = Math.min(this.cflScale * 1.002, 1);
     }
     this.state = next;
     this.iteration += 1;

@@ -45,14 +45,18 @@ const VIRIDIS = [
 
 const STANDARD_ATMOSPHERE_PA = 101325;
 
-function scientificColor(value: number) {
+function scientificColor(value: number, visibility = 1) {
   const t = Math.max(0, Math.min(1, value));
   const scaled = t * (VIRIDIS.length - 1);
   const index = Math.min(VIRIDIS.length - 2, Math.floor(scaled));
   const local = scaled - index;
   const left = VIRIDIS[index];
   const right = VIRIDIS[index + 1];
-  const channel = (component: number) => Math.round(left[component] + (right[component] - left[component]) * local);
+  const background = [5, 7, 11] as const;
+  const channel = (component: number) => {
+    const color = left[component] + (right[component] - left[component]) * local;
+    return Math.round(background[component] + (color - background[component]) * Math.max(0, Math.min(1, visibility)));
+  };
   return `rgb(${channel(0)}, ${channel(1)}, ${channel(2)})`;
 }
 
@@ -129,7 +133,16 @@ function NozzleFieldCanvas({
         for (let j = 0; j < nr; j += 1) {
           const index = i * nr + j;
           const normalized = (values[index] - min) / Math.max(max - min, 1e-20);
-          const fillColor = scientificColor(normalized);
+          const machVisibility = Math.max(
+            0,
+            Math.min(1, (snapshot.fields.mach[index] - 0.005) / 0.12)
+          );
+          const eta = (j + 0.5) / nr;
+          const farfieldFade = i <= nozzleExitIndex
+            ? 1
+            : Math.max(0, Math.min(1, (1 - eta) / 0.22));
+          const fade = farfieldFade * farfieldFade * (3 - 2 * farfieldFade);
+          const fillColor = scientificColor(normalized, machVisibility * fade);
           context.fillStyle = fillColor;
           context.strokeStyle = showMesh ? "rgba(255,255,255,0.14)" : fillColor;
           context.lineWidth = showMesh ? 0.45 : 0.8;

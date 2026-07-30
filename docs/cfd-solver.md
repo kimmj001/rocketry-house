@@ -43,7 +43,10 @@ terms. At the first radial cell, `v/r` uses the symmetry limit `dv/dr`.
 - Explicit Euler pseudo-time integration
 - Convective and viscous CFL limits
 - Optional CFL ramp from the configured starting value to 0.5
-- Step rejection and CFL reduction after a nonphysical update
+- Cell-local conservative-state blending to preserve positive density,
+  pressure, and temperature
+- Adaptive CFL reduction, extended step retry, and gradual CFL recovery after
+  a nonphysical proposal
 
 The internal initial state is a quasi-one-dimensional isentropic nozzle
 estimate: subsonic upstream of the throat and supersonic downstream. The
@@ -130,4 +133,5 @@ pnpm test:cfd
 The suite covers conservative/primitive conversion, ideal-gas identities,
 HLLC consistency, contact and Sod Riemann states, linear least-squares
 gradients, symmetry and wall ghost states, a low-resolution nozzle smoke test,
-axis finiteness, positivity, and a development-mesh performance check.
+axis finiteness, positivity, a long near-vacuum plume run at aggressive CFL,
+and a development-mesh performance check.

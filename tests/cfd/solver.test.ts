@@ -70,6 +70,39 @@ test("axisymmetric SA step has positive wall distance and no axis singularity", 
   assert.equal(snapshot.diagnostics.nanCount, 0);
 });
 
+test("long external-plume run survives an aggressive CFL and near-vacuum farfield", () => {
+  const solver = new AxisymmetricRansSolver({
+    ...DEFAULT_RANS_CONFIG,
+    nx: 48,
+    nr: 14,
+    ambientPressurePa: 1013.25,
+    cfl: 0.5,
+    cflRamp: false
+  });
+  const snapshot = solver.step(300);
+  assert.equal(snapshot.diagnostics.iteration, 300);
+  assert.equal(snapshot.diagnostics.failed, false, snapshot.diagnostics.failureReason);
+  assert.equal(snapshot.diagnostics.nanCount, 0);
+  assert.ok(snapshot.diagnostics.minDensityKgM3 > 0);
+  assert.ok(snapshot.diagnostics.minPressurePa > 0);
+  assert.ok(snapshot.fields.mach.every(Number.isFinite));
+});
+
+test("positivity recovery limits an oversized timestep instead of failing the run", () => {
+  const solver = new AxisymmetricRansSolver({
+    ...DEFAULT_RANS_CONFIG,
+    nx: 48,
+    nr: 14,
+    fixedTimeStepS: 1e-5
+  });
+  const snapshot = solver.step(3);
+  assert.equal(snapshot.diagnostics.failed, false, snapshot.diagnostics.failureReason);
+  assert.ok(snapshot.diagnostics.positivityCorrections > 0);
+  assert.ok(snapshot.diagnostics.minDensityKgM3 > 0);
+  assert.ok(snapshot.diagnostics.minPressurePa > 0);
+  assert.ok(snapshot.diagnostics.minTemperatureK > 0);
+});
+
 test("development iteration stays within the interactive performance envelope", () => {
   const solver = new AxisymmetricRansSolver({
     ...DEFAULT_RANS_CONFIG,
