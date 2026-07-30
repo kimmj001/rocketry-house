@@ -95,6 +95,19 @@ test("cold start applies chamber pressure at the inlet before it reaches the noz
   assert.equal(firstStep.diagnostics.failed, false, firstStep.diagnostics.failureReason);
 });
 
+test("cell-local positivity limiting does not collapse the global CFL", () => {
+  const solver = new AxisymmetricRansSolver({
+    ...DEFAULT_RANS_CONFIG,
+    nx: 48,
+    nr: 14
+  });
+  const snapshot = solver.step(200);
+  assert.equal(snapshot.diagnostics.failed, false, snapshot.diagnostics.failureReason);
+  assert.ok(snapshot.diagnostics.positivityCorrections > 0);
+  assert.equal(snapshot.diagnostics.rejectedSteps, 0);
+  assert.ok(snapshot.diagnostics.cfl >= 0.19, `CFL collapsed to ${snapshot.diagnostics.cfl}`);
+});
+
 test("axisymmetric SA step has positive wall distance and no axis singularity", () => {
   const solver = new AxisymmetricRansSolver({
     ...DEFAULT_RANS_CONFIG,

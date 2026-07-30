@@ -109,6 +109,12 @@ transient runs remain responsive:
 Server-side upload and published-project calculations retain the full
 production meshes.
 
+The browser lab defaults to first-order reconstruction with 16 iterations per
+display update for a stable fast preview. MUSCL with the Venkatakrishnan limiter
+remains selectable for accuracy-focused runs. Cold starts use an accelerated
+CFL ramp; the MUSCL path retains a lower CFL ceiling than the monotone
+first-order path.
+
 ## Diagnostics
 
 The UI reports continuity, axial momentum, radial momentum, energy, and

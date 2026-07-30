@@ -29,7 +29,12 @@ import { externalFieldVisibility } from "@/lib/cfd/rans/visualization";
 function createInteractiveConfig(): RansSolverConfig {
   const base = structuredClone(DEFAULT_RANS_CONFIG);
   const dimensions = INTERACTIVE_RANS_DIMENSIONS[base.resolution];
-  return { ...base, ...dimensions };
+  return {
+    ...base,
+    ...dimensions,
+    reconstruction: "firstOrder",
+    iterationsPerBatch: 16
+  };
 }
 
 const FIELD_OPTIONS: Array<{ name: CfdFieldName; label: string; unit: string }> = [
@@ -479,8 +484,8 @@ export function NozzleCfdLab() {
                   value={config.reconstruction}
                   onChange={(value) => updateConfig({ ...config, reconstruction: value as RansSolverConfig["reconstruction"] })}
                 >
-                  <option value="musclVenkatakrishnan">MUSCL + Venkatakrishnan</option>
-                  <option value="firstOrder">First order</option>
+                  <option value="firstOrder">First order - fast preview</option>
+                  <option value="musclVenkatakrishnan">MUSCL + Venkatakrishnan - accurate</option>
                 </SelectControl>
                 <SelectControl
                   label="Resolution"

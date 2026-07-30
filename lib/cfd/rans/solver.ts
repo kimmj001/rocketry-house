@@ -679,16 +679,23 @@ export class AxisymmetricRansSolver {
   }
 
   private currentCfl() {
+    const coldStart = this.config.initializationMode === "coldStart";
+    const firstRampEnd = coldStart ? 40 : 150;
+    const secondRampEnd = coldStart ? 120 : 350;
+    const thirdRampEnd = coldStart ? 240 : 700;
     const ramp = !this.config.cflRamp
       ? 1
-      : this.iteration < 150
+      : this.iteration < firstRampEnd
         ? 1
-        : this.iteration < 350
+        : this.iteration < secondRampEnd
           ? 2
-          : this.iteration < 700
+          : this.iteration < thirdRampEnd
             ? 4
             : 10;
-    return clamp(this.config.cfl * ramp * this.cflScale, 0.001, 0.5);
+    const maximumCfl = coldStart && this.config.reconstruction === "musclVenkatakrishnan"
+      ? 0.2
+      : 0.5;
+    return clamp(this.config.cfl * ramp * this.cflScale, 0.001, maximumCfl);
   }
 
   private computeTimeStep() {
@@ -787,7 +794,6 @@ export class AxisymmetricRansSolver {
     this.computeResidual();
     let dt = this.computeTimeStep();
     const point = residualNorm(this.residual, this.state, this.mesh, dt, this.iteration + 1);
-    const correctionsBeforeStep = this.counters.positivityCorrections;
     let next: ConservativeState | null = null;
     let retries = 0;
     for (; retries < 12; retries += 1) {
@@ -803,11 +809,7 @@ export class AxisymmetricRansSolver {
       this.failureReason = "The timestep remained nonphysical after adaptive CFL and positivity recovery.";
       return;
     }
-    if (this.counters.positivityCorrections > correctionsBeforeStep) {
-      this.cflScale = Math.max(this.cflScale * 0.8, 0.02);
-    } else if (retries === 0) {
-      this.cflScale = Math.min(this.cflScale * 1.002, 1);
-    }
+    if (retries === 0) this.cflScale = Math.min(this.cflScale * 1.03, 1);
     this.state = next;
     this.iteration += 1;
     this.pseudoTimeS += dt;
