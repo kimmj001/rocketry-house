@@ -24,6 +24,7 @@ import {
   type SolverResidualPoint,
   type SolverSnapshot
 } from "@/lib/cfd/rans/types";
+import { externalFieldVisibility } from "@/lib/cfd/rans/visualization";
 
 function createInteractiveConfig(): RansSolverConfig {
   const base = structuredClone(DEFAULT_RANS_CONFIG);
@@ -132,6 +133,8 @@ function NozzleFieldCanvas({
         ? 0.46 * (plotBottom - plotTop) / maxRadiusM
         : 0.92 * (plotBottom - plotTop) / maxRadiusM;
       const xScale = (plotRight - plotLeft) / snapshot.mesh.lengthM;
+      const nozzleExitXM = xFaces[nozzleExitIndex + 1];
+      const exitRadiusM = wallFaces[nozzleExitIndex + 1];
 
       context.lineWidth = 0.45;
       for (let i = 0; i < nx; i += 1) {
@@ -139,6 +142,8 @@ function NozzleFieldCanvas({
         const x1 = plotLeft + xFaces[i + 1] * xScale;
         const wall0 = wallFaces[i];
         const wall1 = wallFaces[i + 1];
+        const cellXM = 0.5 * (xFaces[i] + xFaces[i + 1]);
+        const cellWallRadiusM = 0.5 * (wall0 + wall1);
         for (let j = 0; j < nr; j += 1) {
           const index = i * nr + j;
           const normalized = (values[index] - min) / Math.max(max - min, 1e-20);
@@ -156,11 +161,14 @@ function NozzleFieldCanvas({
                 : fieldName === "residual"
                   ? Math.max(0, Math.min(1, normalized))
                   : machVisibility;
-          const eta = (j + 0.5) / nr;
-          const farfieldFade = i <= nozzleExitIndex
-            ? 1
-            : Math.max(0, Math.min(1, (1 - eta) / 0.22));
-          const fade = farfieldFade * farfieldFade * (3 - 2 * farfieldFade);
+          const fade = externalFieldVisibility({
+            xM: cellXM,
+            radiusM: (j + 0.5) / nr * cellWallRadiusM,
+            nozzleExitXM,
+            exitRadiusM,
+            domainLengthM: snapshot.mesh.lengthM,
+            farfieldRadiusM: maxRadiusM
+          });
           const fillColor = scientificColor(normalized, fieldVisibility * fade);
           context.fillStyle = fillColor;
           context.strokeStyle = showMesh ? "rgba(255,255,255,0.14)" : fillColor;
