@@ -1,3 +1,9 @@
+/**
+ * Legacy inviscid solver retained for regression comparison.
+ *
+ * The production CFD path uses lib/cfd/rans. Do not import this module from
+ * user-facing routes.
+ */
 import { nozzleWallSlope, type NozzleGeometry } from "@/lib/cfd/axisymmetric/geometry";
 import {
   axialCellWidth,

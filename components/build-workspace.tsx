@@ -2486,6 +2486,7 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
               </select>
             </label>
             <Button onClick={runCfd} disabled={cfdRunning}><Wind className="h-4 w-4" />{cfdRunning ? `Solving... ${cfdElapsedSeconds}s` : "Run CFD"}</Button>
+            <Button asChild href="/build/motor/cfd" variant="outline"><Cpu className="h-4 w-4" />Open live CFD lab</Button>
           </div>
           <NozzleCfdViewer result={cfdResult} error={cfdError} running={cfdRunning} fieldName={cfdFieldName} debugView={cfdDebugView} />
           <p className="mt-4 rounded-md border border-amber-200/20 bg-amber-200/8 p-3 text-xs leading-5 text-amber-50/82">Rocketry House records nozzle geometry for analysis and data comparison. It does not provide manufacturing certification or hazardous build instructions.</p>

@@ -96,6 +96,7 @@ The repo includes `vercel.json` with the Next.js framework and build command.
 ## Architecture Notes
 
 - `lib/types.ts` defines `RocketProject`, `RocketComponent`, `SimulationResult`, and `TelemetryDataset`.
+- `lib/cfd/rans` contains the body-fitted axisymmetric nozzle RANS solver. See [`docs/cfd-solver.md`](docs/cfd-solver.md) for equations, numerical methods, validation scope, and limitations.
 - `lib/cad/geometry.ts` owns design sorting, JSON export, independent .ork-like XML export/import, and STL placeholder architecture.
 - `lib/cad/store.ts` owns browser CAD editing state with Zustand.
 - `lib/simulation/estimates.ts` isolates the engineering estimate layer. This boundary is where a higher-fidelity aerodynamic and flight simulation engine should be integrated later.

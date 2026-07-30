@@ -14,6 +14,12 @@ export type NozzleCfdInputs = {
   divergenceLengthMm: number;
   ambientPressurePa: number;
   meshDensity: "coarse" | "standard" | "fine" | "research";
+  thermoModel?: "constantGas" | "hydroloxFrozen";
+  turbulence?: "laminar" | "spalartAllmaras";
+  reconstruction?: "firstOrder" | "musclVenkatakrishnan";
+  cfl?: number;
+  cflRamp?: boolean;
+  turbulentPrandtl?: number;
 };
 
 export type NozzleCfdResidualPoint = {
@@ -22,6 +28,7 @@ export type NozzleCfdResidualPoint = {
   momentum: number;
   yMomentum?: number;
   energy: number;
+  turbulence?: number;
 };
 
 export type NozzleCfdCell = {
@@ -33,7 +40,19 @@ export type NozzleCfdCell = {
   value: number;
 };
 
-export type NozzleCfdFieldName = "mach" | "pressure" | "temperature" | "density" | "velocity" | "schlieren" | "faceFlux" | "totalPressure" | "totalTemperature";
+export type NozzleCfdFieldName =
+  | "mach"
+  | "pressure"
+  | "temperature"
+  | "density"
+  | "velocity"
+  | "axialVelocity"
+  | "turbulentViscosityRatio"
+  | "residualMagnitude"
+  | "schlieren"
+  | "faceFlux"
+  | "totalPressure"
+  | "totalTemperature";
 
 export type NozzleCfdField = {
   name: NozzleCfdFieldName;
@@ -56,7 +75,11 @@ export type NozzleCfdCenterlinePoint = {
 export type NozzleCfdResult = {
   id: string;
   status: "queued" | "running" | "converged" | "failed";
-  solver: "Rocketry House 2D axisymmetric finite-volume CFD" | "Rocketry House internal density-based nozzle CFD" | "OpenFOAM rhoCentralFoam";
+  solver:
+    | "Rocketry House axisymmetric RANS CFD"
+    | "Rocketry House 2D axisymmetric finite-volume CFD"
+    | "Rocketry House internal density-based nozzle CFD"
+    | "OpenFOAM rhoCentralFoam";
   mesh: {
     nx?: number;
     ny?: number;
@@ -75,6 +98,7 @@ export type NozzleCfdResult = {
       xMomentum: number;
       yMomentum: number;
       energy: number;
+      turbulence?: number;
     };
     numericalSteps: {
       computePrimitive: boolean;
@@ -87,6 +111,10 @@ export type NozzleCfdResult = {
       applyBoundaryConditions: boolean;
       updateConservativeStateByFluxDivergence: boolean;
       computeResiduals: boolean;
+      weightedLeastSquaresGradients?: boolean;
+      musclVenkatakrishnan?: boolean;
+      viscousFlux?: boolean;
+      spalartAllmaras?: boolean;
     };
     runtimeMs: number;
     physicalTimeS?: number;
@@ -94,6 +122,21 @@ export type NozzleCfdResult = {
     maximumCfl: number;
     minimumDensityKgM3: number;
     minimumPressurePa: number;
+    minimumTemperatureK?: number;
+    maximumMach?: number;
+    maximumTurbulentViscosityRatio?: number;
+    limitedFaces?: number;
+    hllcFallbacks?: number;
+    firstOrderFallbacks?: number;
+    positivityCorrections?: number;
+    rejectedSteps?: number;
+    nanCount?: number;
+    floorApplications?: number;
+    massFlowStations?: Array<{
+      station: "chamber" | "preThroat" | "throat" | "midDivergent" | "exit";
+      xM: number;
+      massFlowKgS: number;
+    }>;
     conservationError: number;
     positivityAbort: boolean;
     nanDetected: boolean;

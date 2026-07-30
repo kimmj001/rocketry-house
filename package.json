@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "node scripts/build-for-hosting.mjs",
     "build:next": "next build",
+    "test:cfd": "tsx --test tests/cfd/*.test.ts",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
@@ -44,6 +45,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.1",
     "typescript": "^5.7.2"
   }
 }

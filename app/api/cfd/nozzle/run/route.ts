@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { solveInternalNozzleCfd } from "@/lib/cfd/internal-nozzle-solver";
+import { solveRansNozzleCfd } from "@/lib/cfd/rans/adapter";
 import { claimUsageForRequest } from "@/lib/usage-cloud";
 import type { NozzleCfdInputs } from "@/types/cfd";
 
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
       return NextResponse.json(usageClaim, { status: 402 });
     }
 
-    const result = solveInternalNozzleCfd(body as NozzleCfdInputs);
+    const result = solveRansNozzleCfd(body as NozzleCfdInputs);
     return NextResponse.json({ ...result, usage: usageClaim.usage, usageStatuses: usageClaim.statuses });
   } catch (error) {
     return NextResponse.json(

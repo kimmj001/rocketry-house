@@ -1,5 +1,5 @@
 import { cellIndex, isInside, type CfdMesh } from "@/lib/cfd/axisymmetric/mesh";
-import { primitiveCell, type ConservativeState, type SolverResult } from "@/lib/cfd/axisymmetric/solver";
+import { primitiveCell, type ConservativeState, type SolverResult } from "@/lib/cfd/legacy/inviscid-nozzle-solver";
 import type { NozzleCfdCell, NozzleCfdField, NozzleCfdInputs, NozzleCfdResult } from "@/types/cfd";
 
 const G0 = 9.80665;
