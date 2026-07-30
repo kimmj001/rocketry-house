@@ -63,12 +63,39 @@ test("default mesh includes a long, finite external plume domain at one atmosphe
   assert.equal(solver.config.initializationMode, "coldStart");
   assert.ok(snapshot.mesh.lengthM / snapshot.mesh.nozzleLengthM > 6);
   assert.ok(snapshot.mesh.nozzleExitIndex < snapshot.mesh.nx - 2);
+  assert.ok(snapshot.mesh.nozzleExitIndex + 1 < snapshot.mesh.nx * 0.45);
   assert.ok(snapshot.mesh.wallFaces.at(-1)! > solver.config.geometry.exitRadiusM * 3);
+  assert.ok(
+    snapshot.mesh.wallFaces[snapshot.mesh.nozzleExitIndex + 2] >
+      solver.config.geometry.exitRadiusM * 1.2
+  );
   const externalIndex = (snapshot.mesh.nozzleExitIndex + 4) * snapshot.mesh.nr;
   assert.ok(Number.isFinite(snapshot.fields.mach[externalIndex]));
   assert.equal(snapshot.fields.velocity[externalIndex], 0);
   assert.ok(snapshot.fields.velocity.every((value) => value === 0));
   assert.ok(snapshot.fields.pressure.every((value) => Math.abs(value - 101325) < 1));
+});
+
+test("external mesh provides an ambient annulus immediately around the initialized jet", () => {
+  const solver = new AxisymmetricRansSolver({
+    ...DEFAULT_RANS_CONFIG,
+    nx: 48,
+    nr: 14,
+    initializationMode: "quasiSteady",
+    turbulence: "laminar",
+    reconstruction: "firstOrder"
+  });
+  const snapshot = solver.createSnapshot();
+  const i = Math.min(snapshot.mesh.nx - 1, snapshot.mesh.nozzleExitIndex + 4);
+  const innerIndex = i * snapshot.mesh.nr;
+  const outerIndex = innerIndex + snapshot.mesh.nr - 1;
+
+  assert.ok(snapshot.fields.mach[innerIndex] > 1);
+  assert.ok(snapshot.fields.mach[outerIndex] < snapshot.fields.mach[innerIndex] * 0.1);
+  assert.ok(
+    Math.abs(snapshot.fields.pressure[outerIndex] - solver.config.ambientPressurePa) <
+      solver.config.ambientPressurePa * 0.02
+  );
 });
 
 test("cold start applies chamber pressure at the inlet before it reaches the nozzle", () => {

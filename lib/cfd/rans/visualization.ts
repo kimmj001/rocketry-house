@@ -43,25 +43,42 @@ export function externalFieldVisibility({
   radiusM,
   nozzleExitXM,
   exitRadiusM,
-  domainLengthM,
-  farfieldRadiusM
+  outerRadiusM,
+  flowActivity
 }: {
   xM: number;
   radiusM: number;
   nozzleExitXM: number;
   exitRadiusM: number;
-  domainLengthM: number;
-  farfieldRadiusM: number;
+  outerRadiusM: number;
+  flowActivity: number;
 }) {
   if (xM <= nozzleExitXM) return 1;
 
-  const externalLengthM = Math.max(domainLengthM - nozzleExitXM, 1e-8);
-  const downstreamDistanceM = xM - nozzleExitXM;
-  const targetCoreRadiusM = Math.max(exitRadiusM, farfieldRadiusM * 0.7);
-  const spreadSlope = (targetCoreRadiusM - exitRadiusM) / externalLengthM;
-  const coreRadiusM = exitRadiusM + downstreamDistanceM * spreadSlope;
-  if (radiusM <= coreRadiusM) return 1;
+  const edgeFeatherM = Math.max(exitRadiusM * 0.35, outerRadiusM * 0.12, 1e-6);
+  const edgeVisibility = smoothStep((outerRadiusM - radiusM) / edgeFeatherM);
+  return edgeVisibility * smoothStep((flowActivity - 0.015) / 0.985);
+}
 
-  const featherWidthM = Math.max(exitRadiusM * 0.2, farfieldRadiusM * 0.08, 1e-6);
-  return 1 - smoothStep((radiusM - coreRadiusM) / featherWidthM);
+export function externalFlowActivity({
+  mach,
+  pressurePa,
+  ambientPressurePa,
+  temperatureK,
+  ambientTemperatureK = 288.15
+}: {
+  mach: number;
+  pressurePa: number;
+  ambientPressurePa: number;
+  temperatureK: number;
+  ambientTemperatureK?: number;
+}) {
+  const machSignal = clamp01((mach - 0.015) / 0.42);
+  const pressureSignal = clamp01(
+    Math.abs(pressurePa - ambientPressurePa) / Math.max(ambientPressurePa * 0.12, 1200)
+  );
+  const temperatureSignal = clamp01(
+    Math.abs(temperatureK - ambientTemperatureK) / Math.max(ambientTemperatureK * 0.55, 120)
+  );
+  return Math.max(machSignal, pressureSignal * 0.72, temperatureSignal);
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   externalFieldVisibility,
+  externalFlowActivity,
   pressureContrastPosition,
   pressureContrastScale
 } from "../../lib/cfd/rans/visualization";
@@ -9,11 +10,11 @@ import {
 const domain = {
   nozzleExitXM: 0.265,
   exitRadiusM: 0.03,
-  domainLengthM: 2.065,
-  farfieldRadiusM: 0.16
+  outerRadiusM: 0.16,
+  flowActivity: 1
 };
 
-test("external visualization joins the full nozzle exit without contracting", () => {
+test("external visualization keeps the nozzle interior and active exit connected", () => {
   assert.equal(externalFieldVisibility({
     ...domain,
     xM: domain.nozzleExitXM,
@@ -26,19 +27,45 @@ test("external visualization joins the full nozzle exit without contracting", ()
   }), 1);
 });
 
-test("external visualization expands monotonically and fades before the farfield boundary", () => {
-  const earlyX = domain.nozzleExitXM + 0.1;
-  const laterX = domain.nozzleExitXM + 0.8;
-  const probeRadiusM = 0.055;
-  const earlyVisibility = externalFieldVisibility({ ...domain, xM: earlyX, radiusM: probeRadiusM });
-  const laterVisibility = externalFieldVisibility({ ...domain, xM: laterX, radiusM: probeRadiusM });
-
-  assert.ok(laterVisibility >= earlyVisibility);
+test("external visualization follows flow activity and fades only at the farfield boundary", () => {
+  const activeVisibility = externalFieldVisibility({
+    ...domain,
+    xM: domain.nozzleExitXM + 0.2,
+    radiusM: 0.07
+  });
+  assert.ok(activeVisibility > 0.9);
   assert.equal(externalFieldVisibility({
     ...domain,
-    xM: domain.domainLengthM,
-    radiusM: domain.farfieldRadiusM
+    xM: domain.nozzleExitXM + 0.2,
+    radiusM: 0.07,
+    flowActivity: 0
   }), 0);
+  assert.equal(externalFieldVisibility({
+    ...domain,
+    xM: domain.nozzleExitXM + 0.2,
+    radiusM: domain.outerRadiusM
+  }), 0);
+});
+
+test("external flow activity rejects still ambient gas and retains moving thermal flow", () => {
+  assert.equal(externalFlowActivity({
+    mach: 0,
+    pressurePa: 101325,
+    ambientPressurePa: 101325,
+    temperatureK: 288.15
+  }), 0);
+  assert.ok(externalFlowActivity({
+    mach: 0.5,
+    pressurePa: 101325,
+    ambientPressurePa: 101325,
+    temperatureK: 288.15
+  }) > 0.9);
+  assert.ok(externalFlowActivity({
+    mach: 0,
+    pressurePa: 101325,
+    ambientPressurePa: 101325,
+    temperatureK: 900
+  }) > 0.9);
 });
 
 test("pressure contrast ignores chamber extremes and separates pressure around ambient", () => {

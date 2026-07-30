@@ -130,6 +130,17 @@ and a widened robust contrast range. Moderate pressure changes remain distinct
 without immediately saturating to the lowest or highest display color, while
 near-ambient moving flow retains a dim neutral bridge instead of a black seam.
 
+The external body-fitted mesh opens rapidly after the nozzle lip and assigns a
+larger share of a fixed interactive cell budget to the long plume direction.
+Display opacity outside the nozzle is derived from local Mach number, pressure
+departure, and temperature departure rather than from a prescribed widening
+plume silhouette. Only the numerical farfield edge receives a geometric fade.
+
+The default `Flow structure` view is a derived diagnostic rather than a new
+solver variable. It combines normalized static temperature and Mach number for
+the jet core with finite-difference pressure gradients for shocks and shear
+features. Every raw cell-centered field remains selectable independently.
+
 ## Diagnostics
 
 The UI reports continuity, axial momentum, radial momentum, energy, and

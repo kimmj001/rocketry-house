@@ -40,7 +40,8 @@ export function outerRadiusAt(xM: number, geometry: NozzleGeometryConfig) {
     Math.max(nozzleLengthM * 1.6, (farfieldRadiusM - geometry.exitRadiusM) * 2.5)
   );
   const t = Math.max(0, Math.min(1, (xM - nozzleLengthM) / Math.max(expansionLengthM, 1e-8)));
-  return geometry.exitRadiusM + (farfieldRadiusM - geometry.exitRadiusM) * smoothStep(t);
+  const rapidOpening = smoothStep(Math.sqrt(t));
+  return geometry.exitRadiusM + (farfieldRadiusM - geometry.exitRadiusM) * rapidOpening;
 }
 
 export function wallSlopeAt(xM: number, geometry: NozzleGeometryConfig) {
@@ -73,7 +74,7 @@ export function createBodyFittedMesh(
   const nozzleLengthM = nozzleLength(geometry);
   const lengthM = domainLength(geometry);
   const nozzleNx = nxOverride
-    ? Math.max(16, Math.min(nx - 16, Math.round(nx * 0.5)))
+    ? Math.max(16, Math.min(nx - 16, Math.round(nx * 0.38)))
     : preset.nozzleNx;
   const externalNx = nx - nozzleNx;
   const externalLengthM = lengthM - nozzleLengthM;
@@ -81,7 +82,7 @@ export function createBodyFittedMesh(
   for (let i = 0; i <= nozzleNx; i += 1) xFaces[i] = nozzleLengthM * i / nozzleNx;
   for (let i = 1; i <= externalNx; i += 1) {
     const fraction = i / externalNx;
-    xFaces[nozzleNx + i] = nozzleLengthM + externalLengthM * fraction ** 1.28;
+    xFaces[nozzleNx + i] = nozzleLengthM + externalLengthM * fraction ** 1.18;
   }
   const xCenters = Float64Array.from({ length: nx }, (_, i) => 0.5 * (xFaces[i] + xFaces[i + 1]));
   const etaFaces = Float64Array.from({ length: nr + 1 }, (_, j) => j / nr);
