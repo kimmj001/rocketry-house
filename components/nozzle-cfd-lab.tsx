@@ -16,6 +16,7 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 import { Button } from "@/components/ui/button";
 import {
   DEFAULT_RANS_CONFIG,
+  INTERACTIVE_RANS_DIMENSIONS,
   type CfdFieldName,
   type CfdWorkerRequest,
   type CfdWorkerResponse,
@@ -23,6 +24,12 @@ import {
   type SolverResidualPoint,
   type SolverSnapshot
 } from "@/lib/cfd/rans/types";
+
+function createInteractiveConfig(): RansSolverConfig {
+  const base = structuredClone(DEFAULT_RANS_CONFIG);
+  const dimensions = INTERACTIVE_RANS_DIMENSIONS[base.resolution];
+  return { ...base, ...dimensions };
+}
 
 const FIELD_OPTIONS: Array<{ name: CfdFieldName; label: string; unit: string }> = [
   { name: "mach", label: "Mach number", unit: "" },
@@ -303,8 +310,8 @@ function NumberControl({
 
 export function NozzleCfdLab() {
   const workerRef = useRef<Worker | null>(null);
-  const initialConfigRef = useRef<RansSolverConfig>(structuredClone(DEFAULT_RANS_CONFIG));
-  const [config, setConfig] = useState<RansSolverConfig>(() => structuredClone(DEFAULT_RANS_CONFIG));
+  const initialConfigRef = useRef<RansSolverConfig>(createInteractiveConfig());
+  const [config, setConfig] = useState<RansSolverConfig>(createInteractiveConfig);
   const [snapshot, setSnapshot] = useState<SolverSnapshot | null>(null);
   const [running, setRunning] = useState(false);
   const [ready, setReady] = useState(false);
@@ -470,11 +477,14 @@ export function NozzleCfdLab() {
                 <SelectControl
                   label="Resolution"
                   value={config.resolution}
-                  onChange={(value) => updateConfig({ ...config, resolution: value as RansSolverConfig["resolution"], nx: undefined, nr: undefined })}
+                  onChange={(value) => {
+                    const resolution = value as RansSolverConfig["resolution"];
+                    updateConfig({ ...config, resolution, ...INTERACTIVE_RANS_DIMENSIONS[resolution] });
+                  }}
                 >
-                  <option value="development">Development - 192 x 36</option>
-                  <option value="standard">Standard - 288 x 56</option>
-                  <option value="high">High - 416 x 80</option>
+                  <option value="development">Development - 96 x 18</option>
+                  <option value="standard">Standard - 144 x 28</option>
+                  <option value="high">High - 208 x 40</option>
                 </SelectControl>
                 <NumberControl label="Initial CFL" value={config.cfl} step={0.01} min={0.005} max={0.5} onChange={(value) => updateConfig({ ...config, cfl: value })} />
                 <NumberControl label="Iterations per batch" value={config.iterationsPerBatch} step={1} min={1} max={20} onChange={(value) => updateConfig({ ...config, iterationsPerBatch: value })} />

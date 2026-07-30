@@ -1,8 +1,23 @@
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 import test from "node:test";
+import { resolutionDimensions } from "../../lib/cfd/rans/geometry";
 import { AxisymmetricRansSolver } from "../../lib/cfd/rans/solver";
-import { DEFAULT_RANS_CONFIG } from "../../lib/cfd/rans/types";
+import {
+  DEFAULT_RANS_CONFIG,
+  INTERACTIVE_RANS_DIMENSIONS,
+  type ResolutionPreset
+} from "../../lib/cfd/rans/types";
+
+test("interactive resolution presets use one quarter of the production cell count", () => {
+  const presets: ResolutionPreset[] = ["development", "standard", "high"];
+  for (const preset of presets) {
+    const production = resolutionDimensions(preset);
+    const interactive = INTERACTIVE_RANS_DIMENSIONS[preset];
+    const productionCells = (production.nozzleNx + production.externalNx) * production.nr;
+    assert.equal(interactive.nx * interactive.nr, productionCells / 4);
+  }
+});
 
 test("low-resolution nozzle remains finite and accelerates downstream", () => {
   const solver = new AxisymmetricRansSolver({

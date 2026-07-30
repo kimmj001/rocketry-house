@@ -99,11 +99,15 @@ the main thread. The canvas mirrors the computed `r >= 0` field only for
 presentation. Start, pause, resume, reset, and single-step controls do not
 block the page.
 
-Default meshes:
+Interactive meshes use one quarter of the production cell count so long
+transient runs remain responsive:
 
-- Development: `192 x 36`
-- Standard: `288 x 56`
-- High: `416 x 80`
+- Development: `96 x 18`
+- Standard: `144 x 28`
+- High: `208 x 40`
+
+Server-side upload and published-project calculations retain the full
+production meshes.
 
 ## Diagnostics
 
