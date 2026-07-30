@@ -244,6 +244,7 @@ export function solveRansNozzleCfd(inputs: NozzleCfdInputs): NozzleCfdResult {
       hllcFallbacks: diagnostics.hllcFallbacks,
       firstOrderFallbacks: diagnostics.firstOrderFallbacks,
       positivityCorrections: diagnostics.positivityCorrections,
+      turbulenceClips: diagnostics.turbulenceClips,
       rejectedSteps: diagnostics.rejectedSteps,
       nanCount: diagnostics.nanCount,
       floorApplications: diagnostics.floorApplications,

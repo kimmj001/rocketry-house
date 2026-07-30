@@ -25,12 +25,8 @@ import {
   type SolverSnapshot
 } from "@/lib/cfd/rans/types";
 import {
-  externalFieldVisibility,
-  externalFlowActivity,
-  flowStructureColorPosition,
   pressureContrastPosition,
-  pressureContrastScale,
-  transportedThermalEnergy
+  pressureContrastScale
 } from "@/lib/cfd/rans/visualization";
 
 function createInteractiveConfig(): RansSolverConfig {
@@ -39,15 +35,14 @@ function createInteractiveConfig(): RansSolverConfig {
   return {
     ...base,
     ...dimensions,
-    reconstruction: "firstOrder",
-    iterationsPerBatch: 16
+    reconstruction: "musclVenkatakrishnan",
+    iterationsPerBatch: 4
   };
 }
 
-type DisplayFieldName = CfdFieldName | "flowStructure";
+type DisplayFieldName = CfdFieldName;
 
 const FIELD_OPTIONS: Array<{ name: DisplayFieldName; label: string; unit: string }> = [
-  { name: "flowStructure", label: "Flow structure (derived)", unit: "" },
   { name: "mach", label: "Mach number", unit: "" },
   { name: "pressure", label: "Static pressure", unit: "Pa" },
   { name: "temperature", label: "Static temperature", unit: "K" },
@@ -78,18 +73,6 @@ const PRESSURE_DIVERGING = [
   [232, 196, 99]
 ] as const;
 
-const FLOW_STRUCTURE_PALETTE = [
-  [38, 54, 104],
-  [42, 92, 136],
-  [54, 132, 154],
-  [84, 145, 150],
-  [128, 91, 72],
-  [185, 72, 43],
-  [222, 105, 40],
-  [242, 151, 55],
-  [250, 202, 92]
-] as const;
-
 const STANDARD_ATMOSPHERE_PA = 101325;
 const FIELD_BACKGROUND = [5, 7, 11] as const;
 
@@ -116,19 +99,42 @@ function writeScientificColor(
   target[offset + 3] = 255;
 }
 
-function bilinearSample(
+function radialSample(
+  field: ArrayLike<number>,
+  column: number,
+  radiusM: number,
+  snapshot: SolverSnapshot
+): number | null {
+  const { nr, columnOuterRadius, cellR } = snapshot.mesh;
+  if (radiusM > columnOuterRadius[column]) return null;
+  const offset = column * nr;
+  if (radiusM <= cellR[offset]) return field[offset];
+  if (radiusM >= cellR[offset + nr - 1]) return field[offset + nr - 1];
+  let low = 0;
+  let high = nr - 1;
+  while (low + 1 < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (cellR[offset + mid] <= radiusM) low = mid;
+    else high = mid;
+  }
+  const span = Math.max(cellR[offset + high] - cellR[offset + low], 1e-12);
+  const fraction = Math.max(0, Math.min(1, (radiusM - cellR[offset + low]) / span));
+  return field[offset + low] * (1 - fraction) + field[offset + high] * fraction;
+}
+
+function physicalSample(
   field: ArrayLike<number>,
   i0: number,
   i1: number,
-  j0: number,
-  j1: number,
   tx: number,
-  tr: number,
-  nr: number
+  radiusM: number,
+  snapshot: SolverSnapshot
 ) {
-  const lower = field[i0 * nr + j0] * (1 - tx) + field[i1 * nr + j0] * tx;
-  const upper = field[i0 * nr + j1] * (1 - tx) + field[i1 * nr + j1] * tx;
-  return lower * (1 - tr) + upper * tr;
+  const left = radialSample(field, i0, radiusM, snapshot);
+  const right = radialSample(field, i1, radiusM, snapshot);
+  if (left === null) return right;
+  if (right === null) return left;
+  return left * (1 - tx) + right * tx;
 }
 
 function formatNumber(value: number) {
@@ -182,14 +188,17 @@ function NozzleFieldCanvas({
       context.fillStyle = "#05070b";
       context.fillRect(0, 0, width, height);
 
-      const { nx, nr, xFaces, wallFaces, maxRadiusM, nozzleExitIndex } = snapshot.mesh;
-      const flowStructureActive = fieldName === "flowStructure";
-      const values = flowStructureActive
-        ? snapshot.fields.temperature
-        : snapshot.fields[fieldName];
-      const computed = flowStructureActive
-        ? { min: 0, max: 1 }
-        : snapshot.ranges[fieldName];
+      const {
+        nx,
+        nr,
+        xFaces,
+        wallFaces,
+        columnOuterRadius,
+        maxRadiusM,
+        nozzleExitIndex
+      } = snapshot.mesh;
+      const values = snapshot.fields[fieldName];
+      const computed = snapshot.ranges[fieldName];
       const min = autoRange ? computed.min : fixedMin;
       const max = autoRange ? computed.max : Math.max(fixedMax, fixedMin + 1e-12);
       const plotLeft = 20;
@@ -201,8 +210,6 @@ function NozzleFieldCanvas({
         ? 0.46 * (plotBottom - plotTop) / maxRadiusM
         : 0.92 * (plotBottom - plotTop) / maxRadiusM;
       const xScale = (plotRight - plotLeft) / snapshot.mesh.lengthM;
-      const nozzleExitXM = xFaces[nozzleExitIndex + 1];
-      const exitRadiusM = wallFaces[nozzleExitIndex + 1];
       const pressureContrastPa = pressureContrastScale(
         snapshot.fields.pressure,
         ambientPressurePa,
@@ -218,10 +225,6 @@ function NozzleFieldCanvas({
       const fieldContext = fieldCanvas.getContext("2d");
       if (!fieldContext) return;
       const image = fieldContext.createImageData(rasterWidth, rasterHeight);
-      const rasterPixels = rasterWidth * rasterHeight;
-      const structureBase = flowStructureActive ? new Float32Array(rasterPixels) : null;
-      const structurePressure = flowStructureActive ? new Float32Array(rasterPixels) : null;
-      const structureVisibility = flowStructureActive ? new Float32Array(rasterPixels) : null;
       const xSamples: Array<{
         xM: number;
         wallRadiusM: number;
@@ -235,8 +238,10 @@ function NozzleFieldCanvas({
         while (faceI < nx - 1 && xM >= xFaces[faceI + 1]) faceI += 1;
         const faceSpan = Math.max(xFaces[faceI + 1] - xFaces[faceI], 1e-12);
         const faceFraction = Math.max(0, Math.min(1, (xM - xFaces[faceI]) / faceSpan));
-        const wallRadiusM = wallFaces[faceI] +
-          (wallFaces[faceI + 1] - wallFaces[faceI]) * faceFraction;
+        const wallRadiusM = faceI <= nozzleExitIndex
+          ? wallFaces[faceI] +
+            (wallFaces[faceI + 1] - wallFaces[faceI]) * faceFraction
+          : columnOuterRadius[faceI];
         const center = 0.5 * (xFaces[faceI] + xFaces[faceI + 1]);
         let i0 = faceI;
         let i1 = faceI;
@@ -254,7 +259,6 @@ function NozzleFieldCanvas({
         xSamples.push({ xM, wallRadiusM, i0, i1, tx });
       }
 
-      const farfieldIndex = (nx - 1) * nr + (nr - 1);
       const palette = pressurePaletteActive ? PRESSURE_DIVERGING : VIRIDIS;
       for (let pixelY = 0; pixelY < rasterHeight; pixelY += 1) {
         const canvasY = plotTop + pixelY + 0.5;
@@ -269,194 +273,30 @@ function NozzleFieldCanvas({
             image.data[offset + 3] = 255;
             continue;
           }
-          const radialPosition = radiusM / Math.max(sample.wallRadiusM, 1e-12) * nr - 0.5;
-          const j0 = Math.max(0, Math.min(nr - 1, Math.floor(radialPosition)));
-          const j1 = Math.max(0, Math.min(nr - 1, j0 + 1));
-          const tr = Math.max(0, Math.min(1, radialPosition - j0));
-          const sampledValue = bilinearSample(
+          const sampledValue = physicalSample(
             values,
             sample.i0,
             sample.i1,
-            j0,
-            j1,
             sample.tx,
-            tr,
-            nr
+            radiusM,
+            snapshot
           );
+          if (sampledValue === null) {
+            image.data[offset] = FIELD_BACKGROUND[0];
+            image.data[offset + 1] = FIELD_BACKGROUND[1];
+            image.data[offset + 2] = FIELD_BACKGROUND[2];
+            image.data[offset + 3] = 255;
+            continue;
+          }
           const normalized = pressurePaletteActive
             ? pressureContrastPosition(sampledValue, ambientPressurePa, pressureContrastPa)
             : (sampledValue - min) / Math.max(max - min, 1e-20);
-          const sampledMach = bilinearSample(
-            snapshot.fields.mach,
-            sample.i0,
-            sample.i1,
-            j0,
-            j1,
-            sample.tx,
-            tr,
-            nr
-          );
-          const sampledTemperature = bilinearSample(
-            snapshot.fields.temperature,
-            sample.i0,
-            sample.i1,
-            j0,
-            j1,
-            sample.tx,
-            tr,
-            nr
-          );
-          const sampledAxialVelocity = bilinearSample(
-            snapshot.fields.axialVelocity,
-            sample.i0,
-            sample.i1,
-            j0,
-            j1,
-            sample.tx,
-            tr,
-            nr
-          );
-          const sampledPressure = fieldName === "pressure"
-            ? sampledValue
-            : bilinearSample(
-                snapshot.fields.pressure,
-                sample.i0,
-                sample.i1,
-                j0,
-                j1,
-                sample.tx,
-                tr,
-                nr
-              );
-          const flowActivity = externalFlowActivity({
-            mach: sampledMach,
-            pressurePa: sampledPressure,
-            ambientPressurePa,
-            temperatureK: sampledTemperature
-          });
-          const fade = externalFieldVisibility({
-            xM: sample.xM,
-            radiusM,
-            nozzleExitXM,
-            exitRadiusM,
-            outerRadiusM: sample.wallRadiusM,
-            flowActivity
-          });
-          if (
-            flowStructureActive &&
-            structureBase &&
-            structurePressure &&
-            structureVisibility
-          ) {
-            const pixelIndex = pixelY * rasterWidth + pixelX;
-            const temperatureSignal = Math.max(
-              0,
-              Math.min(
-                1,
-                (sampledTemperature - 288.15) /
-                  Math.max(snapshot.ranges.temperature.max - 288.15, 200)
-              )
-            );
-            const axialVelocitySignal = Math.max(
-              0,
-              Math.min(
-                1,
-                Math.max(sampledAxialVelocity, 0) /
-                  Math.max(snapshot.ranges.axialVelocity.max, 1)
-              )
-            );
-            structureBase[pixelIndex] = sample.xM <= nozzleExitXM
-              ? 0.72 * Math.sqrt(temperatureSignal) +
-                0.28 * Math.sqrt(axialVelocitySignal)
-              : transportedThermalEnergy({
-                  temperatureK: sampledTemperature,
-                  maximumTemperatureK: snapshot.ranges.temperature.max,
-                  axialVelocityMS: sampledAxialVelocity,
-                  maximumAxialVelocityMS: snapshot.ranges.axialVelocity.max
-                });
-            structurePressure[pixelIndex] =
-              (sampledPressure - ambientPressurePa) / Math.max(pressureContrastPa, 1);
-            structureVisibility[pixelIndex] = fade;
-            continue;
-          }
-          const machVisibility = Math.max(0, Math.min(1, (sampledMach - 0.005) / 0.12));
-          const fieldVisibility = fieldName === "pressure"
-            ? Math.max(
-                Math.min(0.42, flowActivity * 0.42),
-                Math.max(
-                  0,
-                  Math.min(
-                    0.9,
-                    Math.abs(sampledValue - ambientPressurePa) /
-                      Math.max(ambientPressurePa * 0.035, 750)
-                  )
-                )
-              )
-            : fieldName === "temperature"
-              ? Math.max(0, Math.min(1, Math.abs(sampledValue - 288.15) / 20))
-              : fieldName === "density"
-                ? Math.max(0, Math.min(1, Math.abs(sampledValue - values[farfieldIndex]) / Math.max(Math.abs(values[farfieldIndex]) * 0.05, 1e-6)))
-                : fieldName === "residual"
-                  ? Math.max(0, Math.min(1, normalized))
-                  : machVisibility;
-          writeScientificColor(image.data, offset, normalized, fieldVisibility * fade, palette);
-        }
-      }
-      if (
-        flowStructureActive &&
-        structureBase &&
-        structurePressure &&
-        structureVisibility
-      ) {
-        for (let pixelY = 0; pixelY < rasterHeight; pixelY += 1) {
-          const upY = Math.max(0, pixelY - 1);
-          const downY = Math.min(rasterHeight - 1, pixelY + 1);
-          for (let pixelX = 0; pixelX < rasterWidth; pixelX += 1) {
-            const leftX = Math.max(0, pixelX - 1);
-            const rightX = Math.min(rasterWidth - 1, pixelX + 1);
-            const pixelIndex = pixelY * rasterWidth + pixelX;
-            const offset = pixelIndex * 4;
-            const visibility = structureVisibility[pixelIndex];
-            if (visibility <= 0) continue;
-            const axialGradient = 0.5 * Math.abs(
-              structurePressure[pixelY * rasterWidth + rightX] -
-                structurePressure[pixelY * rasterWidth + leftX]
-            );
-            const radialGradient = 0.5 * Math.abs(
-              structurePressure[downY * rasterWidth + pixelX] -
-                structurePressure[upY * rasterWidth + pixelX]
-            );
-            const shockSignal = 1 - Math.exp(
-              -14 * Math.hypot(axialGradient, radialGradient)
-            );
-            const base = Math.max(0, Math.min(1, structureBase[pixelIndex]));
-            const pressurePa =
-              ambientPressurePa +
-              structurePressure[pixelIndex] * pressureContrastPa;
-            const normalized = flowStructureColorPosition({
-              pressurePa,
-              ambientPressurePa,
-              contrastScalePa: pressureContrastPa,
-              shockSignal
-            });
-            const structureOpacity = Math.max(
-              Math.pow(base, 0.65),
-              shockSignal * 0.68
-            );
-            writeScientificColor(
-              image.data,
-              offset,
-              normalized,
-              visibility * structureOpacity,
-              FLOW_STRUCTURE_PALETTE
-            );
-          }
+          writeScientificColor(image.data, offset, normalized, 1, palette);
         }
       }
       fieldContext.putImageData(image, 0, 0);
       context.save();
       context.imageSmoothingEnabled = true;
-      context.filter = "blur(0.45px)";
       context.drawImage(fieldCanvas, plotLeft, plotTop, rasterWidth, rasterHeight);
       context.restore();
 
@@ -466,21 +306,24 @@ function NozzleFieldCanvas({
         for (let i = 0; i < nx; i += 1) {
           const x0 = plotLeft + xFaces[i] * xScale;
           const x1 = plotLeft + xFaces[i + 1] * xScale;
+          const insideNozzle = i <= nozzleExitIndex;
+          const outerLeft = insideNozzle ? wallFaces[i] : columnOuterRadius[i];
+          const outerRight = insideNozzle ? wallFaces[i + 1] : columnOuterRadius[i];
           for (let j = 0; j < nr; j += 1) {
-            const eta0 = j / nr;
-            const eta1 = (j + 1) / nr;
+            const eta0 = insideNozzle ? j / nr : (j / nr) ** 1.7;
+            const eta1 = insideNozzle ? (j + 1) / nr : ((j + 1) / nr) ** 1.7;
             context.stroke(new Path2D(
-              `M ${x0} ${centerY - eta0 * wallFaces[i] * radialScale} ` +
-              `L ${x1} ${centerY - eta0 * wallFaces[i + 1] * radialScale} ` +
-              `L ${x1} ${centerY - eta1 * wallFaces[i + 1] * radialScale} ` +
-              `L ${x0} ${centerY - eta1 * wallFaces[i] * radialScale} Z`
+              `M ${x0} ${centerY - eta0 * outerLeft * radialScale} ` +
+              `L ${x1} ${centerY - eta0 * outerRight * radialScale} ` +
+              `L ${x1} ${centerY - eta1 * outerRight * radialScale} ` +
+              `L ${x0} ${centerY - eta1 * outerLeft * radialScale} Z`
             ));
             if (mirror) {
               context.stroke(new Path2D(
-                `M ${x0} ${centerY + eta0 * wallFaces[i] * radialScale} ` +
-                `L ${x1} ${centerY + eta0 * wallFaces[i + 1] * radialScale} ` +
-                `L ${x1} ${centerY + eta1 * wallFaces[i + 1] * radialScale} ` +
-                `L ${x0} ${centerY + eta1 * wallFaces[i] * radialScale} Z`
+                `M ${x0} ${centerY + eta0 * outerLeft * radialScale} ` +
+                `L ${x1} ${centerY + eta0 * outerRight * radialScale} ` +
+                `L ${x1} ${centerY + eta1 * outerRight * radialScale} ` +
+                `L ${x0} ${centerY + eta1 * outerLeft * radialScale} Z`
               ));
             }
           }
@@ -519,11 +362,7 @@ function NozzleFieldCanvas({
       const legendTop = height - 24;
       const legendWidth = Math.min(250, width * 0.34);
       const gradient = context.createLinearGradient(legendLeft, 0, legendLeft + legendWidth, 0);
-      const legendPalette = flowStructureActive
-        ? FLOW_STRUCTURE_PALETTE
-        : pressurePaletteActive
-          ? PRESSURE_DIVERGING
-          : VIRIDIS;
+      const legendPalette = pressurePaletteActive ? PRESSURE_DIVERGING : VIRIDIS;
       legendPalette.forEach((color, index) => {
         gradient.addColorStop(index / (legendPalette.length - 1), `rgb(${color.join(",")})`);
       });
@@ -532,27 +371,19 @@ function NozzleFieldCanvas({
       context.fillStyle = "rgba(248,250,252,0.78)";
       context.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
       context.textBaseline = "bottom";
-      const legendMin = flowStructureActive
-        ? 0
-        : pressurePaletteActive
-          ? Math.max(0, ambientPressurePa - pressureContrastPa)
-          : min;
-      const legendMax = flowStructureActive
-        ? 1
-        : pressurePaletteActive
-          ? ambientPressurePa + pressureContrastPa
-          : max;
-      context.fillText(
-        flowStructureActive ? "low p" : formatNumber(legendMin),
-        legendLeft,
-        legendTop - 2
-      );
-      if (pressurePaletteActive && !flowStructureActive) {
+      const legendMin = pressurePaletteActive
+        ? Math.max(0, ambientPressurePa - pressureContrastPa)
+        : min;
+      const legendMax = pressurePaletteActive
+        ? ambientPressurePa + pressureContrastPa
+        : max;
+      context.fillText(formatNumber(legendMin), legendLeft, legendTop - 2);
+      if (pressurePaletteActive) {
         const ambientText = formatNumber(ambientPressurePa);
         const ambientWidth = context.measureText(ambientText).width;
         context.fillText(ambientText, legendLeft + 0.5 * legendWidth - 0.5 * ambientWidth, legendTop - 2);
       }
-      const maxText = flowStructureActive ? "high p" : formatNumber(legendMax);
+      const maxText = formatNumber(legendMax);
       const maxWidth = context.measureText(maxText).width;
       context.fillText(maxText, legendLeft + legendWidth - maxWidth, legendTop - 2);
     };
@@ -640,7 +471,7 @@ export function NozzleCfdLab() {
   const [ready, setReady] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fieldName, setFieldName] = useState<DisplayFieldName>("flowStructure");
+  const [fieldName, setFieldName] = useState<DisplayFieldName>("pressure");
   const [mirror, setMirror] = useState(true);
   const [showMesh, setShowMesh] = useState(false);
   const [autoRange, setAutoRange] = useState(true);
@@ -845,17 +676,16 @@ export function NozzleCfdLab() {
               <SelectControl label="Field" value={fieldName} onChange={(value) => setFieldName(value as DisplayFieldName)}>
                 {FIELD_OPTIONS.map((field) => <option key={field.name} value={field.name}>{field.label}</option>)}
               </SelectControl>
-              <label className={`flex h-9 items-center gap-2 text-xs ${fieldName === "flowStructure" ? "text-white/28" : "text-white/58"}`}>
+              <label className="flex h-9 items-center gap-2 text-xs text-white/58">
                 <input
                   type="checkbox"
-                  checked={fieldName === "flowStructure" || autoRange}
-                  disabled={fieldName === "flowStructure"}
+                  checked={autoRange}
                   onChange={(event) => setAutoRange(event.target.checked)}
                   className="h-4 w-4 accent-orange-400"
                 />
                 Auto range
               </label>
-              {!autoRange && fieldName !== "flowStructure" ? (
+              {!autoRange ? (
                 <>
                   <NumberControl label="Minimum" value={fixedMin} step={0.1} min={-1e12} onChange={setFixedMin} />
                   <NumberControl label="Maximum" value={fixedMax} step={0.1} min={-1e12} onChange={setFixedMax} />
@@ -881,9 +711,7 @@ export function NozzleCfdLab() {
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 bg-[#0a0d12] px-5 py-2 text-xs text-white/48">
               <span>
                 {selectedField.label} {snapshot
-                  ? fieldName === "flowStructure"
-                    ? "0 to 1"
-                    : `${formatNumber(snapshot.ranges[fieldName].min)} to ${formatNumber(snapshot.ranges[fieldName].max)} ${selectedField.unit}`
+                  ? `${formatNumber(snapshot.ranges[fieldName].min)} to ${formatNumber(snapshot.ranges[fieldName].max)} ${selectedField.unit}`
                   : ""}
               </span>
               <span>Cell-centered axisymmetric field · r &gt;= 0</span>
@@ -904,7 +732,12 @@ export function NozzleCfdLab() {
               ["dt", diagnostics ? `${diagnostics.dtS.toExponential(2)} s` : "0 s"],
               ["Max Mach", diagnostics ? diagnostics.maxMach.toFixed(3) : "0.000"],
               ["Min pressure", diagnostics ? `${(diagnostics.minPressurePa / 1000).toFixed(2)} kPa` : "0 kPa"],
-              ["HLLC fallbacks", diagnostics?.hllcFallbacks.toLocaleString() ?? "0"]
+              [
+                "Mass-flow spread",
+                diagnostics && diagnostics.massFlowRelativeSpread < 1e8
+                  ? `${(diagnostics.massFlowRelativeSpread * 100).toFixed(2)}%`
+                  : "Not established"
+              ]
             ].map(([label, value]) => (
               <div key={label} className="border-b border-white/10 px-4 py-3 sm:border-r">
                 <p className="text-[11px] uppercase tracking-[0.12em] text-white/38">{label}</p>
@@ -958,6 +791,7 @@ export function NozzleCfdLab() {
                 ["First-order fallbacks", diagnostics?.firstOrderFallbacks.toLocaleString() ?? "0"],
                 ["Rejected steps", diagnostics?.rejectedSteps.toLocaleString() ?? "0"],
                 ["Positivity corrections", diagnostics?.positivityCorrections.toLocaleString() ?? "0"],
+                ["SA variable clips", diagnostics?.turbulenceClips.toLocaleString() ?? "0"],
                 ["NaN / Infinity", diagnostics?.nanCount ? diagnostics.nanCount.toLocaleString() : "0"]
               ].map(([label, value]) => (
                 <div key={label} className="border border-white/10 bg-white/[0.025] p-3">

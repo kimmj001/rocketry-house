@@ -129,6 +129,7 @@ export type NozzleCfdResult = {
     hllcFallbacks?: number;
     firstOrderFallbacks?: number;
     positivityCorrections?: number;
+    turbulenceClips?: number;
     rejectedSteps?: number;
     nanCount?: number;
     floorApplications?: number;

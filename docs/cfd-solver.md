@@ -21,16 +21,21 @@ The conserved state is stored in structure-of-arrays `Float64Array` buffers:
 ```
 
 The solver advances the two-dimensional axisymmetric compressible
-Navier-Stokes equations with a cell-centered finite-volume method. The mesh is
-body-fitted between the symmetry axis and a smooth converging-diverging wall
-inside the motor. Downstream of the nozzle lip, the same mesh expands to a
-finite farfield boundary. Cell volumes and face vectors are the exact
-ring/frustum measures, including radial weighting.
+Navier-Stokes equations with a cell-centered finite-volume method. The internal
+block is body-fitted between the symmetry axis and the smooth nozzle wall. A
+separate external block begins at the exit plane and spans the full farfield
+radius immediately, so the numerical domain does not prescribe a plume
+opening angle. Nonconformal annular faces at the exit are connected by their
+exact overlap area; the remaining external inlet annulus receives the ambient
+characteristic boundary condition.
 
-Because the finite-volume geometry already includes the radial weighting, the
-only separately applied geometric momentum source is the pressure/hoop-stress
-term `(p - tau_theta_theta) / r`. This avoids double-counting axisymmetric
-terms. At the first radial cell, `v/r` uses the symmetry limit `dv/dr`.
+Because the finite-volume geometry already includes radial weighting, the only
+separately applied geometric momentum source is the pressure/hoop-stress term.
+It is integrated with the exact cell measure
+`integral(1/r dV)`, rather than evaluating `V/r` at the cell center. This
+exactly cancels pressure face forces for a uniform quiescent state, including
+curved body-fitted cells. At the first radial cell, `v/r` uses the symmetry
+limit `dv/dr`.
 
 ## Numerical methods
 
@@ -40,11 +45,13 @@ terms. At the first radial cell, `v/r` uses the symmetry limit `dv/dr`.
 - Venkatakrishnan limiter and first-order positivity fallback
 - Gradient-based central viscous flux
 - Fourier heat conduction with molecular and turbulent conductivity
-- Explicit Euler pseudo-time integration
+- Explicit Euler time integration
 - Convective and viscous CFL limits
 - Optional CFL ramp from the configured starting value to 0.5
 - Cell-local conservative-state blending to preserve positive density,
   pressure, and temperature
+- SA source-timescale and diffusion limits, plus a separately counted bound on
+  the transported modified-viscosity ratio
 - Adaptive CFL reduction, extended step retry, and gradual CFL recovery after
   a nonphysical proposal
 
@@ -83,13 +90,13 @@ constants. Wall distance is measured to the actual smooth nozzle contour.
 
 Boundary conditions:
 
-- Inlet: controlled low-Mach chamber total-condition state
+- Inlet: stagnation pressure and temperature combined with the outgoing
+  interior Riemann invariant
 - Axis: reflected radial velocity and zero normal gradients
 - Wall: no-slip, adiabatic, `nuTilde = 0`
-- External farfield: ambient pressure and quiescent ambient state for incoming
-  or subsonic characteristics; extrapolation for supersonic outflow
-- Outlet: full extrapolation when supersonic; ambient static pressure with
-  compatible extrapolated variables when subsonic
+- External farfield: interior outgoing and ambient incoming Riemann invariants
+  for subsonic flow; complete extrapolation for supersonic outflow
+- Outlet: the same characteristic treatment in the axial direction
 
 ## Browser execution
 
@@ -109,11 +116,10 @@ transient runs remain responsive:
 Server-side upload and published-project calculations retain the full
 production meshes.
 
-The browser lab defaults to first-order reconstruction with 16 iterations per
-display update for a stable fast preview. MUSCL with the Venkatakrishnan limiter
-remains selectable for accuracy-focused runs. Cold starts use an accelerated
-CFL ramp; the MUSCL path retains a lower CFL ceiling than the monotone
-first-order path.
+The browser lab defaults to MUSCL reconstruction with four iterations per
+display update. First-order reconstruction remains selectable only as a
+debugging mode. Cold starts use an accelerated CFL ramp; the MUSCL path retains
+a lower CFL ceiling than the monotone first-order path.
 
 Automatic static-pressure coloring uses an ambient-centered diverging palette
 and a robust external-flow contrast scale. Chamber pressure saturates at the
@@ -130,30 +136,21 @@ and a widened robust contrast range. Moderate pressure changes remain distinct
 without immediately saturating to the lowest or highest display color, while
 near-ambient moving flow retains a dim neutral bridge instead of a black seam.
 
-The external body-fitted mesh opens rapidly after the nozzle lip and assigns a
-larger share of a fixed interactive cell budget to the long plume direction.
-Display opacity outside the nozzle is derived from local Mach number, pressure
-departure, and temperature departure rather than from a prescribed widening
-plume silhouette. Only the numerical farfield edge receives a geometric fade.
-
-The default `Flow structure` view is a derived diagnostic rather than a new
-solver variable. Outside the nozzle, its filled core is proportional to
-transported thermal energy: normalized temperature departure multiplied by
-positive axial velocity. Finite-difference pressure gradients add only thin
-shock and shear features, so a slow heated pressure wave cannot become an
-opaque plume. Hue is mapped independently from local static-pressure departure,
-with cool colors below ambient and warm colors above ambient. A continuous
-launch envelope starts at the physical nozzle-exit radius and limits the
-displayed expansion angle downstream, preventing the external mesh from
-creating a detached or oversized plume. Every raw cell-centered field remains
-selectable independently.
+The default view is the raw cell-centered static-pressure field. All selectable
+views are direct solver arrays. The renderer performs bilinear interpolation
+in physical radius only for display and does not apply a plume envelope,
+thermal-energy opacity mask, synthetic shock detector, or blur. Ambient cells
+remain visible because they are part of the external computational block.
 
 ## Diagnostics
 
-The UI reports continuity, axial momentum, radial momentum, energy, and
-turbulence residuals; CFL and timestep; positivity floors; limited faces;
+The UI reports dimensionless equation-rate norms for continuity, axial
+momentum, radial momentum, energy, and turbulence. These norms are independent
+of timestep, so reducing `dt` cannot create false convergence. It also reports
+CFL and timestep; mass-flow spread; positivity floors; limited faces;
 HLLC and first-order fallbacks; rejected steps; NaN count; extrema; and mass
-flow at five axial stations.
+flow at five axial stations. Convergence additionally requires less than two
+percent mass-flow spread across all five stations.
 
 ## Known limitations
 
@@ -162,7 +159,7 @@ flow at five axial stations.
 - The current time scheme is first-order explicit Euler.
 - The wall mesh is body-fitted but not locally clustered at the wall or throat.
 - The SA implementation is educational and has not been calibrated for wall
-  `y+`.
+  `y+`; modified viscosity clipping is exposed as a diagnostic.
 - The external domain is finite and uses a single frozen gas model for the
   exhaust/ambient mixture; species mixing and reacting chemistry are not
   solved.

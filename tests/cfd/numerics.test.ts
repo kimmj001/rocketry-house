@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createBodyFittedMesh } from "../../lib/cfd/rans/geometry";
 import {
+  characteristicAmbientFace,
+  stagnationInletFace
+} from "../../lib/cfd/rans/boundary";
+import {
   conservativeFromPrimitive,
   hllcFlux,
   noSlipAdiabaticWallGhost,
@@ -102,4 +106,41 @@ test("axis and adiabatic no-slip wall ghost states apply the required reflection
   assert.equal(wall.v, -interior.v);
   assert.equal(wall.temperature, interior.temperature);
   assert.equal(wall.nuTilde, 0);
+});
+
+test("stagnation inlet preserves total conditions and responds to the outgoing characteristic", () => {
+  const config = {
+    ...DEFAULT_RANS_CONFIG,
+    thermoModel: "constantGas" as const,
+    gamma: 1.4,
+    gasConstant: 287,
+    chamberPressurePa: 500000,
+    chamberTemperatureK: 900
+  };
+  const inlet = stagnationInletFace(face({ u: 100, v: 0 }), config);
+  const mach = inlet.u / Math.sqrt(inlet.thermo.gamma * inlet.thermo.gasConstant * inlet.temperature);
+  const totalFactor = 1 + 0.5 * (inlet.thermo.gamma - 1) * mach * mach;
+  const recoveredTotalTemperature = inlet.temperature * totalFactor;
+  const recoveredTotalPressure = inlet.p *
+    Math.pow(totalFactor, inlet.thermo.gamma / (inlet.thermo.gamma - 1));
+  assert.ok(mach >= 0 && mach < 1);
+  assert.ok(Math.abs(recoveredTotalTemperature - config.chamberTemperatureK) < 1e-8);
+  assert.ok(Math.abs(recoveredTotalPressure - config.chamberPressurePa) < 1e-6);
+});
+
+test("characteristic farfield extrapolates supersonic outflow and supplies ambient inflow", () => {
+  const config = {
+    ...DEFAULT_RANS_CONFIG,
+    thermoModel: "constantGas" as const,
+    gamma: 1.4,
+    gasConstant: 287,
+    ambientPressurePa: 101325
+  };
+  const supersonicOutflow = face({ u: 900, v: 0 });
+  assert.equal(characteristicAmbientFace(supersonicOutflow, 1, 0, config), supersonicOutflow);
+
+  const inflow = characteristicAmbientFace(face({ u: -900, v: 0 }), 1, 0, config);
+  assert.ok(Math.abs(inflow.p - config.ambientPressurePa) < 1e-8);
+  assert.equal(inflow.u, 0);
+  assert.equal(inflow.v, 0);
 });

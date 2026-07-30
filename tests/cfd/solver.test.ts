@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 import test from "node:test";
-import { resolutionDimensions } from "../../lib/cfd/rans/geometry";
+import {
+  radialFaceRadius,
+  resolutionDimensions
+} from "../../lib/cfd/rans/geometry";
 import { AxisymmetricRansSolver } from "../../lib/cfd/rans/solver";
 import {
   DEFAULT_RANS_CONFIG,
@@ -98,6 +101,50 @@ test("external mesh provides an ambient annulus immediately around the initializ
   );
 });
 
+test("nozzle exit interface conservatively partitions plume and ambient annular area", () => {
+  const solver = new AxisymmetricRansSolver({
+    ...DEFAULT_RANS_CONFIG,
+    nx: 48,
+    nr: 18,
+    turbulence: "laminar"
+  });
+  const { mesh } = solver;
+  const leftI = mesh.nozzleExitIndex;
+  const rightI = leftI + 1;
+  const exitRadius = solver.config.geometry.exitRadiusM;
+  const farfieldRadius = solver.config.geometry.farfieldRadiusM;
+  const internalArea = Math.PI * radialFaceRadius(mesh, leftI, "right", mesh.nr) ** 2;
+  const externalArea = Math.PI * radialFaceRadius(mesh, rightI, "left", mesh.nr) ** 2;
+  assert.ok(Math.abs(internalArea - Math.PI * exitRadius ** 2) < 1e-12);
+  assert.ok(Math.abs(externalArea - Math.PI * farfieldRadius ** 2) < 1e-12);
+  assert.ok(externalArea > internalArea * 20);
+});
+
+test("uniform quiescent flow is preserved to machine precision", () => {
+  const solver = new AxisymmetricRansSolver({
+    ...DEFAULT_RANS_CONFIG,
+    nx: 48,
+    nr: 14,
+    thermoModel: "constantGas",
+    gamma: 1.4,
+    gasConstant: 287,
+    chamberPressurePa: 101325,
+    chamberTemperatureK: 288.15,
+    ambientPressurePa: 101325,
+    turbulence: "laminar",
+    reconstruction: "musclVenkatakrishnan"
+  });
+  const snapshot = solver.step(100);
+  const primitive = solver.getPrimitive();
+  assert.ok(snapshot.diagnostics.maxVelocityMS < 1e-9);
+  assert.ok(
+    Math.max(...primitive.p) - Math.min(...primitive.p) < 1e-8,
+    "uniform pressure changed under the discrete geometric source"
+  );
+  assert.ok(snapshot.diagnostics.residual.continuity < 1e-10);
+  assert.ok(snapshot.diagnostics.residual.radialMomentum < 1e-10);
+});
+
 test("cold start applies chamber pressure at the inlet before it reaches the nozzle", () => {
   const solver = new AxisymmetricRansSolver({
     ...DEFAULT_RANS_CONFIG,
@@ -122,7 +169,7 @@ test("cold start applies chamber pressure at the inlet before it reaches the noz
   assert.equal(firstStep.diagnostics.failed, false, firstStep.diagnostics.failureReason);
 });
 
-test("cell-local positivity limiting does not collapse the global CFL", () => {
+test("SA roundoff limiting remains separate from conservative positivity recovery", () => {
   const solver = new AxisymmetricRansSolver({
     ...DEFAULT_RANS_CONFIG,
     nx: 48,
@@ -130,7 +177,8 @@ test("cell-local positivity limiting does not collapse the global CFL", () => {
   });
   const snapshot = solver.step(200);
   assert.equal(snapshot.diagnostics.failed, false, snapshot.diagnostics.failureReason);
-  assert.ok(snapshot.diagnostics.positivityCorrections > 0);
+  assert.equal(snapshot.diagnostics.positivityCorrections, 0);
+  assert.equal(snapshot.diagnostics.turbulenceClips, 0);
   assert.equal(snapshot.diagnostics.rejectedSteps, 0);
   assert.ok(snapshot.diagnostics.cfl >= 0.19, `CFL collapsed to ${snapshot.diagnostics.cfl}`);
 });

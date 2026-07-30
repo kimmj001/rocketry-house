@@ -1,11 +1,17 @@
 import {
+  axisymmetricSourceMeasure,
   axialFaceArea,
   createBodyFittedMesh,
   radialFaceAreaVector,
+  radialFaceRadius,
   ransCellIndex,
   ringAreaAtCell,
   throatX
 } from "./geometry";
+import {
+  characteristicAmbientFace,
+  stagnationInletFace
+} from "./boundary";
 import {
   conservativeFromPrimitive,
   createConservativeState,
@@ -58,6 +64,7 @@ type Counters = {
   hllcFallbacks: number;
   firstOrderFallbacks: number;
   positivityCorrections: number;
+  turbulenceClips: number;
   rejectedSteps: number;
   nanCount: number;
   floorApplications: number;
@@ -154,6 +161,7 @@ export class AxisymmetricRansSolver {
     hllcFallbacks: 0,
     firstOrderFallbacks: 0,
     positivityCorrections: 0,
+    turbulenceClips: 0,
     rejectedSteps: 0,
     nanCount: 0,
     floorApplications: 0
@@ -395,50 +403,12 @@ export class AxisymmetricRansSolver {
     };
   }
 
-  private inletFace(): FacePrimitive {
-    const mach = 0.03;
-    const thermo = thermodynamicProperties(0, this.config.chamberTemperatureK, this.config);
-    const factor = 1 + ((thermo.gamma - 1) / 2) * mach * mach;
-    const temperature = this.config.chamberTemperatureK / factor;
-    const pressure = this.config.chamberPressurePa / Math.pow(factor, thermo.gamma / (thermo.gamma - 1));
-    const rho = pressure / (thermo.gasConstant * temperature);
-    const u = mach * Math.sqrt(thermo.gamma * thermo.gasConstant * temperature);
-    const nuTilde = this.config.turbulence === "spalartAllmaras" ? 3 * thermo.viscosity / rho : 0;
-    return { rho, u, v: 0, p: pressure, temperature, nuTilde, thermo };
-  }
-
   private outletFace(interior: FacePrimitive): FacePrimitive {
-    const normalMach = interior.u / Math.sqrt(interior.thermo.gamma * interior.p / interior.rho);
-    if (normalMach >= 1) return interior;
-    const p = Math.max(this.config.ambientPressurePa, this.config.pressureMin);
-    const rho = interior.rho * Math.pow(p / Math.max(interior.p, this.config.pressureMin), 1 / interior.thermo.gamma);
-    const temperature = p / (rho * interior.thermo.gasConstant);
-    return {
-      ...interior,
-      rho,
-      p,
-      temperature,
-      thermo: thermodynamicProperties(1, temperature, this.config)
-    };
+    return characteristicAmbientFace(interior, 1, 0, this.config);
   }
 
   private farfieldFace(interior: FacePrimitive, normalX: number, normalR: number): FacePrimitive {
-    const soundSpeed = Math.sqrt(interior.thermo.gamma * interior.p / interior.rho);
-    const normalMach = (interior.u * normalX + interior.v * normalR) / Math.max(soundSpeed, 1e-8);
-    if (normalMach >= 1) return interior;
-    const temperature = 288.15;
-    const thermo = thermodynamicProperties(1, temperature, this.config);
-    const p = Math.max(this.config.ambientPressurePa, this.config.pressureMin);
-    const rho = p / (thermo.gasConstant * temperature);
-    return {
-      rho,
-      u: 0,
-      v: 0,
-      p,
-      temperature,
-      nuTilde: 0,
-      thermo
-    };
+    return characteristicAmbientFace(interior, normalX, normalR, this.config);
   }
 
   private viscousFlux(
@@ -556,8 +526,14 @@ export class AxisymmetricRansSolver {
   private addAxisymmetricAndTurbulenceSources() {
     for (let index = 0; index < this.mesh.cells; index += 1) {
       const i = Math.floor(index / this.mesh.nr);
-      const localDr = this.mesh.wallCenters[i] / this.mesh.nr;
-      const r = Math.max(this.mesh.cellR[index], 0.5 * localDr);
+      const j = index % this.mesh.nr;
+      const radialOffset = i * (this.mesh.nr + 1) + j;
+      const localDr = 0.5 * (
+        this.mesh.radialFaceLeft[radialOffset + 1] +
+        this.mesh.radialFaceRight[radialOffset + 1] -
+        this.mesh.radialFaceLeft[radialOffset] -
+        this.mesh.radialFaceRight[radialOffset]
+      );
       const muEff = this.primitive.mu[index] + this.primitive.muT[index];
       const vOverR = this.mesh.cellR[index] > 0.5 * localDr
         ? this.primitive.v[index] / this.mesh.cellR[index]
@@ -567,34 +543,105 @@ export class AxisymmetricRansSolver {
 
       // True ring volumes and face areas already contain the radial weighting.
       // Only the hoop-stress radial momentum term remains in this formulation.
-      const radialSource = (this.primitive.p[index] - tauTheta) / r;
-      this.residual.rhoV[index] -= radialSource * this.mesh.volumes[index];
+      const radialSource = this.primitive.p[index] - tauTheta;
+      this.residual.rhoV[index] -= radialSource *
+        axisymmetricSourceMeasure(this.mesh, i, j);
 
       if (this.config.turbulence !== "spalartAllmaras") continue;
-      const nuTilde = this.primitive.nuTilde[index];
-      const nu = this.primitive.nu[index];
-      const chi = nuTilde / Math.max(nu, 1e-20);
-      const chi3 = chi ** 3;
-      const fv1 = chi3 / Math.max(chi3 + SA_CV1 ** 3, 1e-30);
-      const fv2 = 1 - chi / Math.max(1 + chi * fv1, 1e-20);
-      const rotation = Math.abs(this.gradients.v.x[index] - this.gradients.u.r[index]);
-      const distance = this.mesh.wallDistance[index];
-      const sTilde = Math.max(
-        rotation + nuTilde * fv2 / Math.max(SA_KAPPA ** 2 * distance ** 2, 1e-20),
-        1e-10
-      );
-      const rTurbulence = clamp(
-        nuTilde / Math.max(sTilde * SA_KAPPA ** 2 * distance ** 2, 1e-20),
-        0,
-        10
-      );
-      const g = rTurbulence + SA_CW2 * (rTurbulence ** 6 - rTurbulence);
-      const fw = g * Math.pow((1 + SA_CW3 ** 6) / Math.max(g ** 6 + SA_CW3 ** 6, 1e-30), 1 / 6);
-      const gradientSquared = this.gradients.nuTilde.x[index] ** 2 + this.gradients.nuTilde.r[index] ** 2;
-      const source = SA_CB1 * sTilde * nuTilde +
-        SA_CB2 / SA_SIGMA * gradientSquared -
-        SA_CW1 * fw * (nuTilde / distance) ** 2;
+      const source = this.spalartAllmarasSource(index);
       this.residual.rhoNuTilde[index] -= this.primitive.rho[index] * source * this.mesh.volumes[index];
+    }
+  }
+
+  private spalartAllmarasSource(index: number) {
+    const nuTilde = this.primitive.nuTilde[index];
+    if (nuTilde <= 0) return 0;
+    const nu = this.primitive.nu[index];
+    const chi = nuTilde / Math.max(nu, 1e-20);
+    const chi3 = chi ** 3;
+    const fv1 = chi3 / Math.max(chi3 + SA_CV1 ** 3, 1e-30);
+    const fv2 = 1 - chi / Math.max(1 + chi * fv1, 1e-20);
+    const rotation = Math.abs(this.gradients.v.x[index] - this.gradients.u.r[index]);
+    const distance = this.mesh.wallDistance[index];
+    const sTilde = Math.max(
+      rotation + nuTilde * fv2 / Math.max(SA_KAPPA ** 2 * distance ** 2, 1e-20),
+      1e-10
+    );
+    const rTurbulence = clamp(
+      nuTilde / Math.max(sTilde * SA_KAPPA ** 2 * distance ** 2, 1e-20),
+      0,
+      10
+    );
+    const g = rTurbulence + SA_CW2 * (rTurbulence ** 6 - rTurbulence);
+    const fw = g * Math.pow(
+      (1 + SA_CW3 ** 6) / Math.max(g ** 6 + SA_CW3 ** 6, 1e-30),
+      1 / 6
+    );
+    const gradientSquared =
+      this.gradients.nuTilde.x[index] ** 2 +
+      this.gradients.nuTilde.r[index] ** 2;
+    return SA_CB1 * sTilde * nuTilde +
+      SA_CB2 / SA_SIGMA * gradientSquared -
+      SA_CW1 * fw * (nuTilde / distance) ** 2;
+  }
+
+  private accumulateNozzleExitInterface() {
+    const faceI = this.mesh.nozzleExitIndex + 1;
+    const leftI = faceI - 1;
+    const rightI = faceI;
+    const faceX = this.mesh.nozzleLengthM;
+    let leftJ = 0;
+    let rightJ = 0;
+
+    while (leftJ < this.mesh.nr && rightJ < this.mesh.nr) {
+      const leftInner = radialFaceRadius(this.mesh, leftI, "right", leftJ);
+      const leftOuter = radialFaceRadius(this.mesh, leftI, "right", leftJ + 1);
+      const rightInner = radialFaceRadius(this.mesh, rightI, "left", rightJ);
+      const rightOuter = radialFaceRadius(this.mesh, rightI, "left", rightJ + 1);
+      const overlapInner = Math.max(leftInner, rightInner);
+      const overlapOuter = Math.min(leftOuter, rightOuter);
+      if (overlapOuter > overlapInner + 1e-14) {
+        const area = PI * (overlapOuter * overlapOuter - overlapInner * overlapInner);
+        const faceR = Math.sqrt(0.5 * (
+          overlapInner * overlapInner + overlapOuter * overlapOuter
+        ));
+        const leftIndex = ransCellIndex(leftI, leftJ, this.mesh);
+        const rightIndex = ransCellIndex(rightI, rightJ, this.mesh);
+        this.accumulateFace(
+          leftIndex,
+          rightIndex,
+          this.cellFace(leftIndex, faceX, faceR),
+          this.cellFace(rightIndex, faceX, faceR),
+          1,
+          0,
+          area
+        );
+      }
+      if (leftOuter <= rightOuter + 1e-14) leftJ += 1;
+      if (rightOuter <= leftOuter + 1e-14) rightJ += 1;
+    }
+
+    const exitRadius = this.config.geometry.exitRadiusM;
+    for (let j = 0; j < this.mesh.nr; j += 1) {
+      const inner = radialFaceRadius(this.mesh, rightI, "left", j);
+      const outer = radialFaceRadius(this.mesh, rightI, "left", j + 1);
+      const exposedInner = Math.max(inner, exitRadius);
+      if (outer <= exposedInner + 1e-14) continue;
+      const area = PI * (outer * outer - exposedInner * exposedInner);
+      const faceR = Math.sqrt(0.5 * (
+        exposedInner * exposedInner + outer * outer
+      ));
+      const rightIndex = ransCellIndex(rightI, j, this.mesh);
+      const right = this.cellFace(rightIndex, faceX, faceR);
+      this.accumulateFace(
+        -1,
+        rightIndex,
+        characteristicAmbientFace(right, -1, 0, this.config),
+        right,
+        1,
+        0,
+        area
+      );
     }
   }
 
@@ -604,13 +651,30 @@ export class AxisymmetricRansSolver {
     this.gradients = this.computeGradients();
 
     for (let faceI = 0; faceI <= this.mesh.nx; faceI += 1) {
+      if (faceI === this.mesh.nozzleExitIndex + 1) {
+        this.accumulateNozzleExitInterface();
+        continue;
+      }
       for (let j = 0; j < this.mesh.nr; j += 1) {
         const area = axialFaceArea(this.mesh, faceI, j);
-        const wall = this.mesh.wallFaces[faceI];
-        const faceR = 0.5 * (this.mesh.etaFaces[j] + this.mesh.etaFaces[j + 1]) * wall;
+        const column = faceI === 0 ? 0 : faceI - 1;
+        const side = faceI === 0 ? "left" : "right";
+        const faceR = 0.5 * (
+          radialFaceRadius(this.mesh, column, side, j) +
+          radialFaceRadius(this.mesh, column, side, j + 1)
+        );
         if (faceI === 0) {
           const rightIndex = ransCellIndex(0, j, this.mesh);
-          this.accumulateFace(-1, rightIndex, this.inletFace(), this.cellFace(rightIndex, 0, faceR), 1, 0, area);
+          const right = this.cellFace(rightIndex, 0, faceR);
+          this.accumulateFace(
+            -1,
+            rightIndex,
+            stagnationInletFace(right, this.config),
+            right,
+            1,
+            0,
+            area
+          );
         } else if (faceI === this.mesh.nx) {
           const leftIndex = ransCellIndex(this.mesh.nx - 1, j, this.mesh);
           const left = this.cellFace(leftIndex, this.mesh.lengthM, faceR);
@@ -640,7 +704,11 @@ export class AxisymmetricRansSolver {
         if (area <= 1e-20) continue;
         const normalX = areaVector.x / area;
         const normalR = areaVector.r / area;
-        const faceR = this.mesh.etaFaces[faceJ] * this.mesh.wallCenters[i];
+        const radialOffset = i * (this.mesh.nr + 1) + faceJ;
+        const faceR = 0.5 * (
+          this.mesh.radialFaceLeft[radialOffset] +
+          this.mesh.radialFaceRight[radialOffset]
+        );
         const leftIndex = ransCellIndex(i, faceJ - 1, this.mesh);
         const rightIndex = ransCellIndex(i, faceJ, this.mesh);
         this.accumulateFace(
@@ -706,15 +774,32 @@ export class AxisymmetricRansSolver {
       const dx = this.mesh.xFaces[i + 1] - this.mesh.xFaces[i];
       for (let j = 0; j < this.mesh.nr; j += 1) {
         const index = ransCellIndex(i, j, this.mesh);
-        const localDr = this.mesh.wallCenters[i] / this.mesh.nr;
+        const radialOffset = i * (this.mesh.nr + 1) + j;
+        const localDr = 0.5 * (
+          this.mesh.radialFaceLeft[radialOffset + 1] +
+          this.mesh.radialFaceRight[radialOffset + 1] -
+          this.mesh.radialFaceLeft[radialOffset] -
+          this.mesh.radialFaceRight[radialOffset]
+        );
         const h = Math.min(dx, localDr);
         const speed = Math.hypot(this.primitive.u[index], this.primitive.v[index]) +
           this.primitive.soundSpeed[index];
         const convective = this.effectiveCfl * h / Math.max(speed, 1);
         const nuEffective = this.primitive.nu[index] +
           this.primitive.muT[index] / Math.max(this.primitive.rho[index], this.config.rhoMin);
-        const viscous = 0.22 * h * h / Math.max(nuEffective, 1e-20);
-        dt = Math.min(dt, convective, viscous);
+        const saDiffusivity = this.config.turbulence === "spalartAllmaras"
+          ? (this.primitive.nu[index] + this.primitive.nuTilde[index]) / SA_SIGMA
+          : 0;
+        const viscous = 0.22 * h * h / Math.max(nuEffective, saDiffusivity, 1e-20);
+        let turbulenceSource = Number.POSITIVE_INFINITY;
+        if (this.config.turbulence === "spalartAllmaras" && this.primitive.nuTilde[index] > 0) {
+          const source = this.spalartAllmarasSource(index);
+          if (source < 0) {
+            turbulenceSource = 0.5 * this.primitive.nuTilde[index] /
+              Math.max(-source, 1e-30);
+          }
+        }
+        dt = Math.min(dt, convective, viscous, turbulenceSource);
       }
     }
     return Math.max(Math.min(dt, 1e-3), 1e-12);
@@ -752,7 +837,7 @@ export class AxisymmetricRansSolver {
       if (!isPhysical()) {
         let theta = 0.5;
         let recovered = false;
-        for (let correction = 0; correction < 18; correction += 1) {
+        for (let correction = 0; correction < 48; correction += 1) {
           accepted = [
             this.state.rho[index] + theta * (proposed[0] - this.state.rho[index]),
             this.state.rhoU[index] + theta * (proposed[1] - this.state.rhoU[index]),
@@ -778,8 +863,23 @@ export class AxisymmetricRansSolver {
       next.rhoU[index] = accepted[1];
       next.rhoV[index] = accepted[2];
       next.rhoE[index] = accepted[3];
-      next.rhoNuTilde[index] = Math.max(accepted[4], 0);
-      if (accepted[4] < 0) this.counters.positivityCorrections += 1;
+      const nu = this.primitive.nu[index];
+      const maximumRhoNuTilde = next.rho[index] * nu *
+        this.config.maxModifiedViscosityRatio;
+      next.rhoNuTilde[index] = Math.min(
+        Math.max(accepted[4], 0),
+        maximumRhoNuTilde
+      );
+      const turbulenceTolerance = Math.max(
+        1e-20,
+        next.rho[index] * nu * 1e-8
+      );
+      if (
+        accepted[4] < -turbulenceTolerance ||
+        accepted[4] > maximumRhoNuTilde + turbulenceTolerance
+      ) {
+        this.counters.turbulenceClips += 1;
+      }
       this.lastUpdate[index] = Math.max(
         Math.abs(next.rho[index] - this.state.rho[index]) / Math.max(Math.abs(this.state.rho[index]), 1e-12),
         Math.abs(next.rhoU[index] - this.state.rhoU[index]) / Math.max(Math.abs(this.state.rhoU[index]), 1),
@@ -793,7 +893,23 @@ export class AxisymmetricRansSolver {
     if (this.failed) return;
     this.computeResidual();
     let dt = this.computeTimeStep();
-    const point = residualNorm(this.residual, this.state, this.mesh, dt, this.iteration + 1);
+    const chamberThermo = thermodynamicProperties(0, this.config.chamberTemperatureK, this.config);
+    const referenceDensity = this.config.chamberPressurePa /
+      (chamberThermo.gasConstant * this.config.chamberTemperatureK);
+    const referenceSoundSpeed = Math.sqrt(
+      chamberThermo.gamma * chamberThermo.gasConstant * this.config.chamberTemperatureK
+    );
+    const point = residualNorm(
+      this.residual,
+      this.mesh,
+      this.iteration + 1,
+      {
+        densityKgM3: referenceDensity,
+        soundSpeedMS: referenceSoundSpeed,
+        lengthM: this.config.geometry.throatRadiusM,
+        kinematicViscosityM2S: chamberThermo.viscosity / referenceDensity
+      }
+    );
     let next: ConservativeState | null = null;
     let retries = 0;
     for (; retries < 12; retries += 1) {
@@ -875,12 +991,23 @@ export class AxisymmetricRansSolver {
       energy: 0,
       turbulence: 0
     };
+    const massFlow = this.massFlowDiagnostics();
+    const positiveMassFlow = massFlow
+      .map((station) => station.massFlowKgS)
+      .filter((value) => value > 1e-12);
+    const meanMassFlow = positiveMassFlow.reduce((sum, value) => sum + value, 0) /
+      Math.max(positiveMassFlow.length, 1);
+    const massFlowRelativeSpread = positiveMassFlow.length === massFlow.length
+      ? (Math.max(...positiveMassFlow) - Math.min(...positiveMassFlow)) /
+        Math.max(Math.abs(meanMassFlow), 1e-12)
+      : 1e9;
     const converged = this.iteration > 50 &&
       residual.continuity < 1e-5 &&
       residual.axialMomentum < 1e-5 &&
       residual.radialMomentum < 1e-5 &&
       residual.energy < 1e-5 &&
-      (this.config.turbulence === "laminar" || residual.turbulence < 1e-5);
+      (this.config.turbulence === "laminar" || residual.turbulence < 1e-5) &&
+      massFlowRelativeSpread < 0.02;
     return {
       iteration: this.iteration,
       pseudoTimeS: this.pseudoTimeS,
@@ -892,12 +1019,13 @@ export class AxisymmetricRansSolver {
       maxMach,
       maxVelocityMS,
       maxTurbulentViscosityRatio,
+      massFlowRelativeSpread,
       ...this.counters,
       converged,
       failed: this.failed,
       failureReason: this.failureReason,
       residual,
-      massFlow: this.massFlowDiagnostics()
+      massFlow
     };
   }
 
@@ -957,7 +1085,9 @@ export class AxisymmetricRansSolver {
         nozzleExitIndex: this.mesh.nozzleExitIndex,
         maxRadiusM: this.mesh.maxRadiusM,
         xFaces: Float32Array.from(this.mesh.xFaces),
-        wallFaces: Float32Array.from(this.mesh.wallFaces)
+        wallFaces: Float32Array.from(this.mesh.wallFaces),
+        columnOuterRadius: Float32Array.from(this.mesh.wallCenters),
+        cellR: Float32Array.from(this.mesh.cellR)
       },
       fields,
       ranges,

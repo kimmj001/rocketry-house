@@ -20,6 +20,8 @@ function transferSnapshot(type: "ready" | "snapshot", snapshot: SolverSnapshot) 
   const transfers: Transferable[] = [
     snapshot.mesh.xFaces.buffer,
     snapshot.mesh.wallFaces.buffer,
+    snapshot.mesh.columnOuterRadius.buffer,
+    snapshot.mesh.cellR.buffer,
     ...Object.values(snapshot.fields).map((field) => field.buffer)
   ];
   self.postMessage(response, { transfer: transfers });

@@ -62,6 +62,31 @@ function cellIndex(i: number, j: number, nr: number) {
   return i * nr + j;
 }
 
+function nearestRadialCell(i: number, radiusM: number, mesh: BodyFittedMesh) {
+  let low = 0;
+  let high = mesh.nr - 1;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (mesh.cellR[cellIndex(i, mid, mesh.nr)] < radiusM) low = mid + 1;
+    else high = mid;
+  }
+  if (low === 0) return 0;
+  const lower = low - 1;
+  return Math.abs(mesh.cellR[cellIndex(i, lower, mesh.nr)] - radiusM) <=
+    Math.abs(mesh.cellR[cellIndex(i, low, mesh.nr)] - radiusM)
+    ? lower
+    : low;
+}
+
+export function adjacentRadialCell(
+  i: number,
+  j: number,
+  adjacentI: number,
+  mesh: BodyFittedMesh
+) {
+  return nearestRadialCell(adjacentI, mesh.cellR[cellIndex(i, j, mesh.nr)], mesh);
+}
+
 export function createBodyFittedMesh(
   geometry: NozzleGeometryConfig,
   resolution: ResolutionPreset,
@@ -88,8 +113,18 @@ export function createBodyFittedMesh(
   const etaFaces = Float64Array.from({ length: nr + 1 }, (_, j) => j / nr);
   const etaCenters = Float64Array.from({ length: nr }, (_, j) => 0.5 * (etaFaces[j] + etaFaces[j + 1]));
   const wallFaces = Float64Array.from(xFaces, (x) => outerRadiusAt(x, geometry));
-  const wallCenters = Float64Array.from(xCenters, (x) => outerRadiusAt(x, geometry));
+  const farfieldRadiusM = Math.max(
+    geometry.farfieldRadiusM,
+    geometry.exitRadiusM * 3,
+    geometry.chamberRadiusM * 1.5
+  );
+  const wallCenters = Float64Array.from(
+    xCenters,
+    (x, i) => i < nozzleNx ? wallRadiusAt(x, geometry) : farfieldRadiusM
+  );
   const cells = nx * nr;
+  const radialFaceLeft = new Float64Array(nx * (nr + 1));
+  const radialFaceRight = new Float64Array(nx * (nr + 1));
   const cellX = new Float64Array(cells);
   const cellR = new Float64Array(cells);
   const volumes = new Float64Array(cells);
@@ -98,22 +133,35 @@ export function createBodyFittedMesh(
 
   for (let i = 0; i < nx; i += 1) {
     const dx = xFaces[i + 1] - xFaces[i];
-    const wallLeft = wallFaces[i];
-    const wallRight = wallFaces[i + 1];
     const insideNozzle = i < nozzleNx;
+    const wallLeft = insideNozzle ? wallRadiusAt(xFaces[i], geometry) : farfieldRadiusM;
+    const wallRight = insideNozzle ? wallRadiusAt(xFaces[i + 1], geometry) : farfieldRadiusM;
     const slope = insideNozzle ? wallSlopeAt(xCenters[i], geometry) : 0;
+    for (let faceJ = 0; faceJ <= nr; faceJ += 1) {
+      const fraction = faceJ / nr;
+      const radialFraction = insideNozzle ? fraction : fraction ** 1.7;
+      radialFaceLeft[i * (nr + 1) + faceJ] = radialFraction * wallLeft;
+      radialFaceRight[i * (nr + 1) + faceJ] = radialFraction * wallRight;
+    }
     for (let j = 0; j < nr; j += 1) {
       const index = cellIndex(i, j, nr);
-      const etaInner2 = etaFaces[j] ** 2;
-      const etaOuter2 = etaFaces[j + 1] ** 2;
+      const radialIndex = i * (nr + 1) + j;
+      const innerLeft = radialFaceLeft[radialIndex];
+      const innerRight = radialFaceRight[radialIndex];
+      const outerLeft = radialFaceLeft[radialIndex + 1];
+      const outerRight = radialFaceRight[radialIndex + 1];
       cellX[index] = xCenters[i];
-      cellR[index] = etaCenters[j] * wallCenters[i];
-      volumes[index] = PI * dx * (wallLeft * wallLeft + wallLeft * wallRight + wallRight * wallRight) *
-        (etaOuter2 - etaInner2) / 3;
+      cellR[index] = 0.25 * (innerLeft + innerRight + outerLeft + outerRight);
+      volumes[index] = PI * dx / 3 * (
+        outerLeft * outerLeft + outerLeft * outerRight + outerRight * outerRight -
+        innerLeft * innerLeft - innerLeft * innerRight - innerRight * innerRight
+      );
       wallDistance[index] = insideNozzle
         ? Math.max((wallCenters[i] - cellR[index]) / Math.sqrt(1 + slope * slope), 1e-8)
         : Math.max(Math.hypot(xCenters[i] - nozzleLengthM, cellR[index] - geometry.exitRadiusM), 1e-8);
-      const localDr = wallCenters[i] / nr;
+      const localDr = 0.5 * (
+        outerLeft + outerRight - innerLeft - innerRight
+      );
       minCellLength = Math.min(minCellLength, dx, localDr);
     }
   }
@@ -143,6 +191,8 @@ export function createBodyFittedMesh(
     etaCenters,
     wallFaces,
     wallCenters,
+    radialFaceLeft,
+    radialFaceRight,
     cellX,
     cellR,
     volumes,
@@ -152,16 +202,19 @@ export function createBodyFittedMesh(
 }
 
 export function axialFaceArea(mesh: BodyFittedMesh, faceI: number, j: number) {
-  const wall = mesh.wallFaces[faceI];
-  const inner = mesh.etaFaces[j] * wall;
-  const outer = mesh.etaFaces[j + 1] * wall;
+  const side = faceI === 0 ? "left" : "right";
+  const column = faceI === 0 ? 0 : faceI - 1;
+  const faces = side === "left" ? mesh.radialFaceLeft : mesh.radialFaceRight;
+  const offset = column * (mesh.nr + 1);
+  const inner = faces[offset + j];
+  const outer = faces[offset + j + 1];
   return PI * (outer * outer - inner * inner);
 }
 
 export function radialFaceAreaVector(mesh: BodyFittedMesh, i: number, faceJ: number) {
-  const eta = mesh.etaFaces[faceJ];
-  const rLeft = eta * mesh.wallFaces[i];
-  const rRight = eta * mesh.wallFaces[i + 1];
+  const offset = i * (mesh.nr + 1) + faceJ;
+  const rLeft = mesh.radialFaceLeft[offset];
+  const rRight = mesh.radialFaceRight[offset];
   const dx = mesh.xFaces[i + 1] - mesh.xFaces[i];
   return {
     x: -PI * (rRight * rRight - rLeft * rLeft),
@@ -170,10 +223,33 @@ export function radialFaceAreaVector(mesh: BodyFittedMesh, i: number, faceJ: num
 }
 
 export function ringAreaAtCell(mesh: BodyFittedMesh, i: number, j: number) {
-  const wall = mesh.wallCenters[i];
-  const inner = mesh.etaFaces[j] * wall;
-  const outer = mesh.etaFaces[j + 1] * wall;
+  const offset = i * (mesh.nr + 1) + j;
+  const inner = 0.5 * (mesh.radialFaceLeft[offset] + mesh.radialFaceRight[offset]);
+  const outer = 0.5 * (
+    mesh.radialFaceLeft[offset + 1] + mesh.radialFaceRight[offset + 1]
+  );
   return PI * (outer * outer - inner * inner);
+}
+
+export function axisymmetricSourceMeasure(mesh: BodyFittedMesh, i: number, j: number) {
+  const offset = i * (mesh.nr + 1) + j;
+  const dx = mesh.xFaces[i + 1] - mesh.xFaces[i];
+  return PI * dx * (
+    mesh.radialFaceLeft[offset + 1] +
+    mesh.radialFaceRight[offset + 1] -
+    mesh.radialFaceLeft[offset] -
+    mesh.radialFaceRight[offset]
+  );
+}
+
+export function radialFaceRadius(
+  mesh: BodyFittedMesh,
+  i: number,
+  side: "left" | "right",
+  faceJ: number
+) {
+  const faces = side === "left" ? mesh.radialFaceLeft : mesh.radialFaceRight;
+  return faces[i * (mesh.nr + 1) + faceJ];
 }
 
 export function ransCellIndex(i: number, j: number, mesh: BodyFittedMesh) {

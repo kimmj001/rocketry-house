@@ -47,6 +47,7 @@ export type RansSolverConfig = {
   cfl: number;
   cflRamp: boolean;
   turbulentPrandtl: number;
+  maxModifiedViscosityRatio: number;
   iterationsPerBatch: number;
   snapshotInterval: number;
   fixedTimeStepS?: number;
@@ -79,6 +80,8 @@ export type BodyFittedMesh = {
   etaCenters: Float64Array;
   wallFaces: Float64Array;
   wallCenters: Float64Array;
+  radialFaceLeft: Float64Array;
+  radialFaceRight: Float64Array;
   cellX: Float64Array;
   cellR: Float64Array;
   volumes: Float64Array;
@@ -144,10 +147,12 @@ export type SolverDiagnostics = {
   maxMach: number;
   maxVelocityMS: number;
   maxTurbulentViscosityRatio: number;
+  massFlowRelativeSpread: number;
   limitedFaces: number;
   hllcFallbacks: number;
   firstOrderFallbacks: number;
   positivityCorrections: number;
+  turbulenceClips: number;
   rejectedSteps: number;
   nanCount: number;
   floorApplications: number;
@@ -168,6 +173,8 @@ export type SolverSnapshot = {
     maxRadiusM: number;
     xFaces: Float32Array;
     wallFaces: Float32Array;
+    columnOuterRadius: Float32Array;
+    cellR: Float32Array;
   };
   fields: Record<CfdFieldName, Float32Array>;
   ranges: Record<CfdFieldName, { min: number; max: number }>;
@@ -212,6 +219,7 @@ export const DEFAULT_RANS_CONFIG: RansSolverConfig = {
   cfl: 0.05,
   cflRamp: true,
   turbulentPrandtl: 0.9,
+  maxModifiedViscosityRatio: 10000,
   iterationsPerBatch: 4,
   snapshotInterval: 5,
   rhoMin: 1e-8,

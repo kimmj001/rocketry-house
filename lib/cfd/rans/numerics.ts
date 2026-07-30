@@ -1,4 +1,4 @@
-import { ransCellIndex } from "./geometry";
+import { adjacentRadialCell, ransCellIndex } from "./geometry";
 import type {
   BodyFittedMesh,
   ConservativeState,
@@ -228,8 +228,12 @@ function neighborIndices(index: number, mesh: BodyFittedMesh) {
   const i = Math.floor(index / mesh.nr);
   const j = index % mesh.nr;
   const neighbors: number[] = [];
-  if (i > 0) neighbors.push(ransCellIndex(i - 1, j, mesh));
-  if (i + 1 < mesh.nx) neighbors.push(ransCellIndex(i + 1, j, mesh));
+  if (i > 0) {
+    neighbors.push(ransCellIndex(i - 1, adjacentRadialCell(i, j, i - 1, mesh), mesh));
+  }
+  if (i + 1 < mesh.nx) {
+    neighbors.push(ransCellIndex(i + 1, adjacentRadialCell(i, j, i + 1, mesh), mesh));
+  }
   if (j > 0) neighbors.push(ransCellIndex(i, j - 1, mesh));
   if (j + 1 < mesh.nr) neighbors.push(ransCellIndex(i, j + 1, mesh));
   return neighbors;
@@ -269,8 +273,18 @@ export function weightedLeastSquaresGradient(values: Float64Array, mesh: BodyFit
 
     const i = Math.floor(index / mesh.nr);
     const j = index % mesh.nr;
-    const left = ransCellIndex(Math.max(i - 1, 0), j, mesh);
-    const right = ransCellIndex(Math.min(i + 1, mesh.nx - 1), j, mesh);
+    const leftI = Math.max(i - 1, 0);
+    const rightI = Math.min(i + 1, mesh.nx - 1);
+    const left = ransCellIndex(
+      leftI,
+      leftI === i ? j : adjacentRadialCell(i, j, leftI, mesh),
+      mesh
+    );
+    const right = ransCellIndex(
+      rightI,
+      rightI === i ? j : adjacentRadialCell(i, j, rightI, mesh),
+      mesh
+    );
     const bottom = ransCellIndex(i, Math.max(j - 1, 0), mesh);
     const top = ransCellIndex(i, Math.min(j + 1, mesh.nr - 1), mesh);
     gradient.x[index] = (values[right] - values[left]) /
@@ -316,23 +330,37 @@ export function reconstructScalar(
 
 export function residualNorm(
   residual: ConservativeState,
-  state: ConservativeState,
   mesh: BodyFittedMesh,
-  dt: number,
-  iteration: number
+  iteration: number,
+  reference: {
+    densityKgM3: number;
+    soundSpeedMS: number;
+    lengthM: number;
+    kinematicViscosityM2S: number;
+  }
 ) {
   let continuity = 0;
   let axialMomentum = 0;
   let radialMomentum = 0;
   let energy = 0;
   let turbulence = 0;
+  const densityScale = Math.max(reference.densityKgM3, 1e-12);
+  const velocityScale = Math.max(reference.soundSpeedMS, 1);
+  const lengthScale = Math.max(reference.lengthM, 1e-8);
+  const continuityScale = densityScale * velocityScale / lengthScale;
+  const momentumScale = densityScale * velocityScale * velocityScale / lengthScale;
+  const energyScale = densityScale * velocityScale ** 3 / lengthScale;
+  const turbulenceScale = densityScale *
+    Math.max(reference.kinematicViscosityM2S, 1e-12) *
+    velocityScale /
+    lengthScale;
   for (let index = 0; index < mesh.cells; index += 1) {
-    const scale = dt / mesh.volumes[index];
-    continuity += (scale * residual.rho[index] / Math.max(Math.abs(state.rho[index]), 1e-12)) ** 2;
-    axialMomentum += (scale * residual.rhoU[index] / Math.max(Math.abs(state.rhoU[index]), 1)) ** 2;
-    radialMomentum += (scale * residual.rhoV[index] / Math.max(Math.abs(state.rhoV[index]), 1)) ** 2;
-    energy += (scale * residual.rhoE[index] / Math.max(Math.abs(state.rhoE[index]), 1)) ** 2;
-    turbulence += (scale * residual.rhoNuTilde[index] / Math.max(Math.abs(state.rhoNuTilde[index]), 1e-12)) ** 2;
+    const inverseVolume = 1 / Math.max(mesh.volumes[index], 1e-30);
+    continuity += (residual.rho[index] * inverseVolume / continuityScale) ** 2;
+    axialMomentum += (residual.rhoU[index] * inverseVolume / momentumScale) ** 2;
+    radialMomentum += (residual.rhoV[index] * inverseVolume / momentumScale) ** 2;
+    energy += (residual.rhoE[index] * inverseVolume / energyScale) ** 2;
+    turbulence += (residual.rhoNuTilde[index] * inverseVolume / turbulenceScale) ** 2;
   }
   const divisor = Math.max(mesh.cells, 1);
   return {
