@@ -19,6 +19,8 @@ export type NozzleGeometryConfig = {
   chamberLengthM: number;
   convergentLengthM: number;
   divergentLengthM: number;
+  externalLengthM: number;
+  farfieldRadiusM: number;
 };
 
 export type RansSolverConfig = {
@@ -59,8 +61,10 @@ export type BodyFittedMesh = {
   nr: number;
   cells: number;
   lengthM: number;
+  nozzleLengthM: number;
   maxRadiusM: number;
   throatIndex: number;
+  nozzleExitIndex: number;
   xFaces: Float64Array;
   xCenters: Float64Array;
   etaFaces: Float64Array;
@@ -151,6 +155,8 @@ export type SolverSnapshot = {
     nx: number;
     nr: number;
     lengthM: number;
+    nozzleLengthM: number;
+    nozzleExitIndex: number;
     maxRadiusM: number;
     xFaces: Float32Array;
     wallFaces: Float32Array;
@@ -181,7 +187,9 @@ export const DEFAULT_RANS_CONFIG: RansSolverConfig = {
     exitRadiusM: 0.03,
     chamberLengthM: 0.08,
     convergentLengthM: 0.045,
-    divergentLengthM: 0.14
+    divergentLengthM: 0.14,
+    externalLengthM: 1.8,
+    farfieldRadiusM: 0.16
   },
   resolution: "development",
   chamberPressurePa: 4.826e6,

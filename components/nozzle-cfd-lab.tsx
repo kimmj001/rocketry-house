@@ -43,6 +43,8 @@ const VIRIDIS = [
   [253, 231, 37]
 ] as const;
 
+const STANDARD_ATMOSPHERE_PA = 101325;
+
 function scientificColor(value: number) {
   const t = Math.max(0, Math.min(1, value));
   const scaled = t * (VIRIDIS.length - 1);
@@ -103,7 +105,7 @@ function NozzleFieldCanvas({
       context.fillStyle = "#05070b";
       context.fillRect(0, 0, width, height);
 
-      const { nx, nr, xFaces, wallFaces, maxRadiusM } = snapshot.mesh;
+      const { nx, nr, xFaces, wallFaces, maxRadiusM, nozzleExitIndex } = snapshot.mesh;
       const values = snapshot.fields[fieldName];
       const computed = snapshot.ranges[fieldName];
       const min = autoRange ? computed.min : fixedMin;
@@ -127,7 +129,10 @@ function NozzleFieldCanvas({
         for (let j = 0; j < nr; j += 1) {
           const index = i * nr + j;
           const normalized = (values[index] - min) / Math.max(max - min, 1e-20);
-          context.fillStyle = scientificColor(normalized);
+          const fillColor = scientificColor(normalized);
+          context.fillStyle = fillColor;
+          context.strokeStyle = showMesh ? "rgba(255,255,255,0.14)" : fillColor;
+          context.lineWidth = showMesh ? 0.45 : 0.8;
           const eta0 = j / nr;
           const eta1 = (j + 1) / nr;
           const upper = new Path2D();
@@ -137,10 +142,7 @@ function NozzleFieldCanvas({
           upper.lineTo(x0, centerY - eta1 * wall0 * radialScale);
           upper.closePath();
           context.fill(upper);
-          if (showMesh) {
-            context.strokeStyle = "rgba(255,255,255,0.14)";
-            context.stroke(upper);
-          }
+          context.stroke(upper);
           if (mirror) {
             const lower = new Path2D();
             lower.moveTo(x0, centerY + eta0 * wall0 * radialScale);
@@ -149,7 +151,7 @@ function NozzleFieldCanvas({
             lower.lineTo(x0, centerY + eta1 * wall0 * radialScale);
             lower.closePath();
             context.fill(lower);
-            if (showMesh) context.stroke(lower);
+            context.stroke(lower);
           }
         }
       }
@@ -157,7 +159,7 @@ function NozzleFieldCanvas({
       context.strokeStyle = "#f8fafc";
       context.lineWidth = 1.2;
       context.beginPath();
-      for (let i = 0; i < xFaces.length; i += 1) {
+      for (let i = 0; i <= nozzleExitIndex + 1; i += 1) {
         const x = plotLeft + xFaces[i] * xScale;
         const y = centerY - wallFaces[i] * radialScale;
         if (i === 0) context.moveTo(x, y);
@@ -166,7 +168,7 @@ function NozzleFieldCanvas({
       context.stroke();
       if (mirror) {
         context.beginPath();
-        for (let i = 0; i < xFaces.length; i += 1) {
+        for (let i = 0; i <= nozzleExitIndex + 1; i += 1) {
           const x = plotLeft + xFaces[i] * xScale;
           const y = centerY + wallFaces[i] * radialScale;
           if (i === 0) context.moveTo(x, y);
@@ -424,7 +426,7 @@ export function NozzleCfdLab() {
                 </SelectControl>
                 <NumberControl label="Chamber pressure" value={config.chamberPressurePa / 1e6} step={0.1} min={0.1} onChange={(value) => updateConfig({ ...config, chamberPressurePa: value * 1e6 })} suffix="MPa" />
                 <NumberControl label="Chamber temperature" value={config.chamberTemperatureK} step={10} min={300} onChange={(value) => updateConfig({ ...config, chamberTemperatureK: value })} suffix="K" />
-                <NumberControl label="Ambient pressure" value={config.ambientPressurePa / 1000} step={1} min={0.001} onChange={(value) => updateConfig({ ...config, ambientPressurePa: value * 1000 })} suffix="kPa" />
+                <NumberControl label="Ambient pressure" value={config.ambientPressurePa / STANDARD_ATMOSPHERE_PA} step={0.05} min={0.001} max={10} onChange={(value) => updateConfig({ ...config, ambientPressurePa: value * STANDARD_ATMOSPHERE_PA })} suffix="atm" />
                 <NumberControl label="Turbulent Prandtl" value={config.turbulentPrandtl} step={0.05} min={0.1} max={2} onChange={(value) => updateConfig({ ...config, turbulentPrandtl: value })} />
               </div>
             </section>
@@ -445,9 +447,9 @@ export function NozzleCfdLab() {
                   value={config.resolution}
                   onChange={(value) => updateConfig({ ...config, resolution: value as RansSolverConfig["resolution"], nx: undefined, nr: undefined })}
                 >
-                  <option value="development">Development · 96 x 36</option>
-                  <option value="standard">Standard · 160 x 56</option>
-                  <option value="high">High · 240 x 80</option>
+                  <option value="development">Development - 192 x 36</option>
+                  <option value="standard">Standard - 288 x 56</option>
+                  <option value="high">High - 416 x 80</option>
                 </SelectControl>
                 <NumberControl label="Initial CFL" value={config.cfl} step={0.01} min={0.005} max={0.5} onChange={(value) => updateConfig({ ...config, cfl: value })} />
                 <NumberControl label="Iterations per batch" value={config.iterationsPerBatch} step={1} min={1} max={20} onChange={(value) => updateConfig({ ...config, iterationsPerBatch: value })} />
@@ -472,6 +474,8 @@ export function NozzleCfdLab() {
                 <NumberControl label="Chamber length" value={config.geometry.chamberLengthM * 1000} step={5} min={5} onChange={(value) => updateGeometry("chamberLengthM", value / 1000)} suffix="mm" />
                 <NumberControl label="Convergent length" value={config.geometry.convergentLengthM * 1000} step={5} min={5} onChange={(value) => updateGeometry("convergentLengthM", value / 1000)} suffix="mm" />
                 <NumberControl label="Divergent length" value={config.geometry.divergentLengthM * 1000} step={5} min={5} onChange={(value) => updateGeometry("divergentLengthM", value / 1000)} suffix="mm" />
+                <NumberControl label="External domain length" value={config.geometry.externalLengthM} step={0.1} min={0.1} max={20} onChange={(value) => updateGeometry("externalLengthM", value)} suffix="m" />
+                <NumberControl label="Farfield radius" value={config.geometry.farfieldRadiusM * 1000} step={10} min={10} max={2000} onChange={(value) => updateGeometry("farfieldRadiusM", value / 1000)} suffix="mm" />
               </div>
             </details>
           </div>

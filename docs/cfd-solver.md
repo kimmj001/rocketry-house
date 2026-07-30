@@ -6,9 +6,11 @@ The production nozzle CFD path is an educational, browser-compatible
 compressible-flow solver. It is not independently validated, certified, or a
 replacement for a controlled mesh-convergence study and experimental data.
 
-The solver computes the internal chamber, converging section, throat, and
-diverging section. It does not currently solve an external plume. The UI never
-draws a plume beyond the solved domain.
+The solver computes the internal chamber, converging section, throat,
+diverging section, and a long external free-jet domain. The default downstream
+domain extends `1.8 m`, approximately `6.8` internal-nozzle lengths, beyond the
+exit. Every plume cell shown in the UI belongs to the solved finite-volume
+domain.
 
 ## Equations and discretization
 
@@ -20,9 +22,10 @@ The conserved state is stored in structure-of-arrays `Float64Array` buffers:
 
 The solver advances the two-dimensional axisymmetric compressible
 Navier-Stokes equations with a cell-centered finite-volume method. The mesh is
-body-fitted between the symmetry axis and a smooth converging-diverging wall.
-Cell volumes and face vectors are the exact ring/frustum measures, including
-radial weighting.
+body-fitted between the symmetry axis and a smooth converging-diverging wall
+inside the motor. Downstream of the nozzle lip, the same mesh expands to a
+finite farfield boundary. Cell volumes and face vectors are the exact
+ring/frustum measures, including radial weighting.
 
 Because the finite-volume geometry already includes the radial weighting, the
 only separately applied geometric momentum source is the pressure/hoop-stress
@@ -42,10 +45,12 @@ terms. At the first radial cell, `v/r` uses the symmetry limit `dv/dr`.
 - Optional CFL ramp from the configured starting value to 0.5
 - Step rejection and CFL reduction after a nonphysical update
 
-The initial state is a quasi-one-dimensional isentropic nozzle estimate:
-subsonic upstream of the throat and supersonic downstream. This is only an
-initial guess; every displayed snapshot after iteration zero comes from the
-finite-volume residual and state update.
+The internal initial state is a quasi-one-dimensional isentropic nozzle
+estimate: subsonic upstream of the throat and supersonic downstream. The
+external domain starts from a smooth plume-informed guess blended into the
+ambient state to reduce browser convergence time. This is only an initial
+condition; subsequent snapshots come from the finite-volume residual and state
+update.
 
 ## Thermodynamics
 
@@ -72,6 +77,8 @@ Boundary conditions:
 - Inlet: controlled low-Mach chamber total-condition state
 - Axis: reflected radial velocity and zero normal gradients
 - Wall: no-slip, adiabatic, `nuTilde = 0`
+- External farfield: ambient pressure and quiescent ambient state for incoming
+  or subsonic characteristics; extrapolation for supersonic outflow
 - Outlet: full extrapolation when supersonic; ambient static pressure with
   compatible extrapolated variables when subsonic
 
@@ -85,9 +92,9 @@ block the page.
 
 Default meshes:
 
-- Development: `96 x 36`
-- Standard: `160 x 56`
-- High: `240 x 80`
+- Development: `192 x 36`
+- Standard: `288 x 56`
+- High: `416 x 80`
 
 ## Diagnostics
 
@@ -104,8 +111,11 @@ flow at five axial stations.
 - The wall mesh is body-fitted but not locally clustered at the wall or throat.
 - The SA implementation is educational and has not been calibrated for wall
   `y+`.
-- No external plume, reacting chemistry, conjugate heat transfer, radiation,
-  multiphase flow, or moving boundaries are solved.
+- The external domain is finite and uses a single frozen gas model for the
+  exhaust/ambient mixture; species mixing and reacting chemistry are not
+  solved.
+- Conjugate heat transfer, radiation, multiphase flow, and moving boundaries
+  are not solved.
 - Server-side quick runs use a finite iteration budget and may return before
   strict residual convergence; the UI labels that state explicitly.
 

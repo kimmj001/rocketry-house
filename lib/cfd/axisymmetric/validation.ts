@@ -40,13 +40,17 @@ export function validateAgainstIsentropicTheory(inputs: NozzleCfdInputs, result:
   const referenceExitMach = solveSupersonicMach(areaRatio, gamma);
   const referenceExitPressure = inputs.chamberPressurePa /
     Math.pow(1 + ((gamma - 1) / 2) * referenceExitMach * referenceExitMach, gamma / (gamma - 1));
-  const nozzleLength = inputs.convergenceLengthMm + inputs.divergenceLengthMm;
-  const chamberLength = Math.max((inputs.chamberDiameterMm / 2) * 3, inputs.convergenceLengthMm * 1.5);
-  const externalLength = Math.max(nozzleLength * 4.5, (inputs.exitDiameterMm / 2) * 16, (inputs.chamberDiameterMm / 2) * 5);
-  const totalLength = chamberLength + nozzleLength + externalLength;
-  const throatX = (chamberLength + inputs.convergenceLengthMm) / Math.max(totalLength, 1);
-  const exitX = (chamberLength + nozzleLength) / Math.max(totalLength, 1);
-  const throatWindowHalfWidth = Math.max(0.018, (inputs.throatDiameterMm / 2) / Math.max(totalLength, 1) * 3.2);
+  const chamberRadiusMm = Math.max(inputs.chamberDiameterMm / 2, inputs.throatDiameterMm / 2 * 1.2);
+  const chamberLengthMm = Math.max(chamberRadiusMm * 2.5, inputs.convergenceLengthMm);
+  const internalLengthMm = chamberLengthMm + inputs.convergenceLengthMm + inputs.divergenceLengthMm;
+  const exitX = result.mesh.nozzleExitX ?? 1;
+  const throatX = exitX *
+    (chamberLengthMm + inputs.convergenceLengthMm) /
+    Math.max(internalLengthMm, 1);
+  const throatWindowHalfWidth = Math.max(
+    0.008,
+    exitX * (inputs.throatDiameterMm / 2) / Math.max(internalLengthMm, 1) * 3.2
+  );
   const throatCandidates = result.centerline.filter((point) => Math.abs(point.x - throatX) <= throatWindowHalfWidth);
   const throatPoint = (throatCandidates.length ? throatCandidates : result.centerline).reduce((best, point) => {
     const pointScore = Math.abs(point.mach - 1) + Math.abs(point.x - throatX) * 0.35;

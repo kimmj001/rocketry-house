@@ -27,9 +27,29 @@ test("low-resolution nozzle remains finite and accelerates downstream", () => {
   const nr = snapshot.mesh.nr;
   const throatI = solver.mesh.throatIndex;
   const chamberMach = snapshot.fields.mach[Math.max(1, throatI - 8) * nr];
-  const downstreamMach = snapshot.fields.mach[Math.min(snapshot.mesh.nx - 2, throatI + 8) * nr];
+  const downstreamMach = snapshot.fields.mach[Math.min(solver.mesh.nozzleExitIndex, throatI + 8) * nr];
   assert.ok(downstreamMach > chamberMach, `${downstreamMach} should exceed ${chamberMach}`);
   assert.ok(downstreamMach > 1);
+});
+
+test("default mesh includes a long, finite external plume domain at one atmosphere", () => {
+  const solver = new AxisymmetricRansSolver({
+    ...DEFAULT_RANS_CONFIG,
+    nx: 48,
+    nr: 14,
+    turbulence: "laminar",
+    reconstruction: "firstOrder",
+    cfl: 0.01,
+    cflRamp: false
+  });
+  const snapshot = solver.createSnapshot();
+  assert.equal(solver.config.ambientPressurePa, 101325);
+  assert.ok(snapshot.mesh.lengthM / snapshot.mesh.nozzleLengthM > 6);
+  assert.ok(snapshot.mesh.nozzleExitIndex < snapshot.mesh.nx - 2);
+  assert.ok(snapshot.mesh.wallFaces.at(-1)! > solver.config.geometry.exitRadiusM * 3);
+  const externalIndex = (snapshot.mesh.nozzleExitIndex + 4) * snapshot.mesh.nr;
+  assert.ok(Number.isFinite(snapshot.fields.mach[externalIndex]));
+  assert.ok(snapshot.fields.velocity[externalIndex] > 0);
 });
 
 test("axisymmetric SA step has positive wall distance and no axis singularity", () => {

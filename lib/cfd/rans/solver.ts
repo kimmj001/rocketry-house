@@ -178,42 +178,85 @@ export class AxisymmetricRansSolver {
   private initializeQuasiOneDimensional() {
     const throatArea = PI * this.config.geometry.throatRadiusM ** 2;
     const throatXM = throatX(this.config.geometry);
+    const ambientTemperatureK = 288.15;
+    const ambientPressure = Math.max(this.config.ambientPressurePa, this.config.pressureMin);
+    const exitArea = PI * this.config.geometry.exitRadiusM ** 2;
+    const exitNominalThermo = thermodynamicProperties(1, this.config.chamberTemperatureK, this.config);
+    const exitMach = solveAreaMach(exitArea / throatArea, exitNominalThermo.gamma, true);
+    const exitTotalFactor = 1 + ((exitNominalThermo.gamma - 1) / 2) * exitMach * exitMach;
+    const exitTemperature = this.config.chamberTemperatureK / exitTotalFactor;
+    const exitThermo = thermodynamicProperties(1, exitTemperature, this.config);
+    const exitPressure = this.config.chamberPressurePa /
+      Math.pow(exitTotalFactor, exitThermo.gamma / (exitThermo.gamma - 1));
+    const exitU = exitMach * Math.sqrt(exitThermo.gamma * exitThermo.gasConstant * exitTemperature);
+    const externalLengthM = this.mesh.lengthM - this.mesh.nozzleLengthM;
+
     for (let i = 0; i < this.mesh.nx; i += 1) {
       const xM = this.mesh.xCenters[i];
-      const area = PI * this.mesh.wallCenters[i] ** 2;
-      const xNormalized = xM / this.mesh.lengthM;
-      const nominalThermo = thermodynamicProperties(xNormalized, this.config.chamberTemperatureK, this.config);
-      const mach = solveAreaMach(
-        Math.max(area / throatArea, 1),
-        nominalThermo.gamma,
-        xM > throatXM
-      );
-      const totalFactor = 1 + ((nominalThermo.gamma - 1) / 2) * mach * mach;
-      const temperature = this.config.chamberTemperatureK / totalFactor;
-      const thermo = thermodynamicProperties(xNormalized, temperature, this.config);
-      const pressure = this.config.chamberPressurePa /
-        Math.pow(totalFactor, thermo.gamma / (thermo.gamma - 1));
-      const rho = pressure / (thermo.gasConstant * temperature);
-      const soundSpeed = Math.sqrt(thermo.gamma * thermo.gasConstant * temperature);
-      const u = mach * soundSpeed;
-      const nu = thermo.viscosity / rho;
-      const nuTilde = this.config.turbulence === "spalartAllmaras" ? 3 * nu : 0;
+      const insideNozzle = i <= this.mesh.nozzleExitIndex;
+      let nozzleState: FacePrimitive | null = null;
+      if (insideNozzle) {
+        const area = PI * this.mesh.wallCenters[i] ** 2;
+        const xNormalized = this.thermoCoordinate(xM);
+        const nominalThermo = thermodynamicProperties(xNormalized, this.config.chamberTemperatureK, this.config);
+        const mach = solveAreaMach(
+          Math.max(area / throatArea, 1),
+          nominalThermo.gamma,
+          xM > throatXM
+        );
+        const totalFactor = 1 + ((nominalThermo.gamma - 1) / 2) * mach * mach;
+        const temperature = this.config.chamberTemperatureK / totalFactor;
+        const thermo = thermodynamicProperties(xNormalized, temperature, this.config);
+        const pressure = this.config.chamberPressurePa /
+          Math.pow(totalFactor, thermo.gamma / (thermo.gamma - 1));
+        const rho = pressure / (thermo.gasConstant * temperature);
+        const soundSpeed = Math.sqrt(thermo.gamma * thermo.gasConstant * temperature);
+        const u = mach * soundSpeed;
+        const nu = thermo.viscosity / rho;
+        const nuTilde = this.config.turbulence === "spalartAllmaras" ? 3 * nu : 0;
+        nozzleState = { rho, u, v: 0, p: pressure, temperature, nuTilde, thermo };
+      }
+
       for (let j = 0; j < this.mesh.nr; j += 1) {
         const index = ransCellIndex(i, j, this.mesh);
-        const face: FacePrimitive = { rho, u, v: 0, p: pressure, temperature, nuTilde, thermo };
+        let face = nozzleState;
+        if (!face) {
+          const distance = xM - this.mesh.nozzleLengthM;
+          const spreadRadius = this.config.geometry.exitRadiusM + 0.055 * distance;
+          const shearThickness = Math.max(this.config.geometry.exitRadiusM * 0.16 + 0.012 * distance, 1e-5);
+          const radialBlend = 1 / (1 + Math.exp((this.mesh.cellR[index] - spreadRadius) / shearThickness));
+          const axialBlend = Math.exp(-0.28 * distance / Math.max(externalLengthM, 1e-8));
+          const plumeBlend = clamp(radialBlend * axialBlend, 0, 1);
+          const temperature = ambientTemperatureK + (exitTemperature - ambientTemperatureK) * plumeBlend;
+          const pressureBlend = plumeBlend * Math.exp(-1.5 * distance / Math.max(externalLengthM, 1e-8));
+          const pressure = ambientPressure + (exitPressure - ambientPressure) * pressureBlend;
+          const thermo = thermodynamicProperties(1, temperature, this.config);
+          const rho = pressure / (thermo.gasConstant * temperature);
+          const u = exitU * plumeBlend;
+          const v = distance > 0
+            ? 0.035 * exitU * plumeBlend * this.mesh.cellR[index] / Math.max(spreadRadius, 1e-8)
+            : 0;
+          const nu = thermo.viscosity / Math.max(rho, this.config.rhoMin);
+          const nuTilde = this.config.turbulence === "spalartAllmaras" ? 3 * nu * plumeBlend : 0;
+          face = { rho, u, v, p: pressure, temperature, nuTilde, thermo };
+        }
         const conserved = conservativeFromPrimitive(face);
         this.state.rho[index] = conserved[0];
         this.state.rhoU[index] = conserved[1];
         this.state.rhoV[index] = conserved[2];
         this.state.rhoE[index] = conserved[3];
-        this.state.rhoNuTilde[index] = rho * nuTilde;
+        this.state.rhoNuTilde[index] = face.rho * face.nuTilde;
       }
     }
   }
 
+  private thermoCoordinate(xM: number) {
+    return clamp(xM / Math.max(this.mesh.nozzleLengthM, 1e-8), 0, 1);
+  }
+
   private decodeState(trackFloors = true) {
     for (let index = 0; index < this.mesh.cells; index += 1) {
-      const xNormalized = this.mesh.cellX[index] / this.mesh.lengthM;
+      const xNormalized = this.thermoCoordinate(this.mesh.cellX[index]);
       const preliminary = thermodynamicProperties(xNormalized, this.config.chamberTemperatureK, this.config);
       const conserved: [number, number, number, number] = [
         this.state.rho[index],
@@ -271,7 +314,7 @@ export class AxisymmetricRansSolver {
         p: this.primitive.p[index],
         temperature,
         nuTilde: this.primitive.nuTilde[index],
-        thermo: thermodynamicProperties(faceX / this.mesh.lengthM, temperature, this.config)
+        thermo: thermodynamicProperties(this.thermoCoordinate(faceX), temperature, this.config)
       };
     };
     if (this.config.reconstruction === "firstOrder") return firstOrder();
@@ -315,7 +358,7 @@ export class AxisymmetricRansSolver {
       p: p.value,
       temperature: temperature.value,
       nuTilde: Math.max(nuTilde.value, 0),
-      thermo: thermodynamicProperties(faceX / this.mesh.lengthM, temperature.value, this.config)
+      thermo: thermodynamicProperties(this.thermoCoordinate(faceX), temperature.value, this.config)
     };
   }
 
@@ -343,6 +386,25 @@ export class AxisymmetricRansSolver {
       p,
       temperature,
       thermo: thermodynamicProperties(1, temperature, this.config)
+    };
+  }
+
+  private farfieldFace(interior: FacePrimitive, normalX: number, normalR: number): FacePrimitive {
+    const soundSpeed = Math.sqrt(interior.thermo.gamma * interior.p / interior.rho);
+    const normalMach = (interior.u * normalX + interior.v * normalR) / Math.max(soundSpeed, 1e-8);
+    if (normalMach >= 1) return interior;
+    const temperature = 288.15;
+    const thermo = thermodynamicProperties(1, temperature, this.config);
+    const p = Math.max(this.config.ambientPressurePa, this.config.pressureMin);
+    const rho = p / (thermo.gasConstant * temperature);
+    return {
+      rho,
+      u: 0,
+      v: 0,
+      p,
+      temperature,
+      nuTilde: 0,
+      thermo
     };
   }
 
@@ -565,15 +627,18 @@ export class AxisymmetricRansSolver {
       const normalR = areaVector.r / Math.max(area, 1e-20);
       const leftIndex = ransCellIndex(i, this.mesh.nr - 1, this.mesh);
       const interior = this.cellFace(leftIndex, faceX, this.mesh.wallCenters[i]);
+      const isNozzleWall = i <= this.mesh.nozzleExitIndex;
       this.accumulateFace(
         leftIndex,
         -1,
         interior,
-        noSlipAdiabaticWallGhost(interior),
+        isNozzleWall
+          ? noSlipAdiabaticWallGhost(interior)
+          : this.farfieldFace(interior, normalX, normalR),
         normalX,
         normalR,
         area,
-        true
+        isNozzleWall
       );
     }
 
@@ -621,7 +686,7 @@ export class AxisymmetricRansSolver {
         next.rhoNuTilde[index] = 0;
         this.counters.positivityCorrections += 1;
       }
-      const xNormalized = this.mesh.cellX[index] / this.mesh.lengthM;
+      const xNormalized = this.thermoCoordinate(this.mesh.cellX[index]);
       const thermo = thermodynamicProperties(xNormalized, this.primitive.temperature[index], this.config);
       const decoded = primitiveFromConservative(
         [next.rho[index], next.rhoU[index], next.rhoV[index], next.rhoE[index]],
@@ -691,12 +756,13 @@ export class AxisymmetricRansSolver {
 
   private massFlowDiagnostics(): MassFlowDiagnostic[] {
     const throatIndex = this.mesh.throatIndex;
+    const exitIndex = this.mesh.nozzleExitIndex;
     const stations: Array<[MassFlowDiagnostic["station"], number]> = [
-      ["chamber", Math.max(0, Math.round(this.mesh.nx * 0.12))],
-      ["preThroat", Math.max(0, throatIndex - Math.max(2, Math.round(this.mesh.nx * 0.04)))],
+      ["chamber", Math.max(0, Math.round(throatIndex * 0.35))],
+      ["preThroat", Math.max(0, throatIndex - Math.max(2, Math.round(exitIndex * 0.04)))],
       ["throat", throatIndex],
-      ["midDivergent", Math.round(0.5 * (throatIndex + this.mesh.nx - 1))],
-      ["exit", this.mesh.nx - 1]
+      ["midDivergent", Math.round(0.5 * (throatIndex + exitIndex))],
+      ["exit", exitIndex]
     ];
     return stations.map(([station, i]) => {
       let massFlowKgS = 0;
@@ -816,6 +882,8 @@ export class AxisymmetricRansSolver {
         nx: this.mesh.nx,
         nr: this.mesh.nr,
         lengthM: this.mesh.lengthM,
+        nozzleLengthM: this.mesh.nozzleLengthM,
+        nozzleExitIndex: this.mesh.nozzleExitIndex,
         maxRadiusM: this.mesh.maxRadiusM,
         xFaces: Float32Array.from(this.mesh.xFaces),
         wallFaces: Float32Array.from(this.mesh.wallFaces)

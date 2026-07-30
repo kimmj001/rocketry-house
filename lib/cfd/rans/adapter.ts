@@ -15,6 +15,9 @@ const R_UNIVERSAL = 8314.462618;
 
 function configFromInputs(inputs: NozzleCfdInputs): Partial<RansSolverConfig> {
   const chamberRadiusM = Math.max(inputs.chamberDiameterMm / 2000, inputs.throatDiameterMm / 2000 * 1.2);
+  const chamberLengthM = Math.max(chamberRadiusM * 2.5, inputs.convergenceLengthMm / 1000);
+  const internalLengthM = chamberLengthM + inputs.convergenceLengthMm / 1000 + inputs.divergenceLengthMm / 1000;
+  const exitRadiusM = inputs.exitDiameterMm / 2000;
   const resolution = inputs.meshDensity === "research" || inputs.meshDensity === "fine"
     ? "high"
     : inputs.meshDensity === "standard"
@@ -24,10 +27,12 @@ function configFromInputs(inputs: NozzleCfdInputs): Partial<RansSolverConfig> {
     geometry: {
       chamberRadiusM,
       throatRadiusM: inputs.throatDiameterMm / 2000,
-      exitRadiusM: inputs.exitDiameterMm / 2000,
-      chamberLengthM: Math.max(chamberRadiusM * 2.5, inputs.convergenceLengthMm / 1000),
+      exitRadiusM,
+      chamberLengthM,
       convergentLengthM: inputs.convergenceLengthMm / 1000,
-      divergentLengthM: inputs.divergenceLengthMm / 1000
+      divergentLengthM: inputs.divergenceLengthMm / 1000,
+      externalLengthM: Math.max(internalLengthM * 6.8, exitRadiusM * 36),
+      farfieldRadiusM: Math.max(exitRadiusM * 5.3, chamberRadiusM * 4)
     },
     resolution,
     chamberPressurePa: inputs.chamberPressurePa,
@@ -78,7 +83,7 @@ function makeField(
         y: mesh.cellR[index] / mesh.maxRadiusM,
         physicalY: mesh.cellR[index] / mesh.maxRadiusM,
         wallY: mesh.cellR[index] / wall,
-        inNozzle: true,
+        inNozzle: mesh.cellX[index] <= mesh.nozzleLengthM,
         value: values[index] * scale
       });
     }
@@ -135,15 +140,17 @@ export function solveRansNozzleCfd(inputs: NozzleCfdInputs): NozzleCfdResult {
     };
   });
 
-  const exitI = mesh.nx - 1;
+  const exitI = mesh.nozzleExitIndex;
   let massFlowKgS = 0;
   let thrustN = 0;
+  let exitSampleArea = 0;
   let exitPressureWeighted = 0;
   let exitTemperatureWeighted = 0;
   let exitMachWeighted = 0;
   for (let j = 0; j < mesh.nr; j += 1) {
     const index = ransCellIndex(exitI, j, mesh);
     const area = ringAreaAtCell(mesh, exitI, j);
+    exitSampleArea += area;
     const mass = Math.max(primitive.rho[index] * primitive.u[index], 0) * area;
     massFlowKgS += mass;
     thrustN += mass * primitive.u[index] + (primitive.p[index] - inputs.ambientPressurePa) * area;
@@ -153,12 +160,35 @@ export function solveRansNozzleCfd(inputs: NozzleCfdInputs): NozzleCfdResult {
   }
   const exitArea = Math.PI * solver.config.geometry.exitRadiusM ** 2;
   const throatArea = Math.PI * solver.config.geometry.throatRadiusM ** 2;
-  const exitPressurePa = exitPressureWeighted / exitArea;
+  const exitPressurePa = exitPressureWeighted / Math.max(exitSampleArea, 1e-12);
   const exitTemperatureK = exitTemperatureWeighted / Math.max(massFlowKgS, 1e-12);
   const exitMach = exitMachWeighted / Math.max(massFlowKgS, 1e-12);
   const thrustCoefficient = thrustN / Math.max(inputs.chamberPressurePa * throatArea, 1e-12);
   const characteristicVelocityMS = inputs.chamberPressurePa * throatArea / Math.max(massFlowKgS, 1e-12);
   const specificImpulseS = thrustN / Math.max(massFlowKgS * G0, 1e-12);
+  const continuityProbe = Array.from(
+    { length: 5 },
+    (_, offset) => Math.max(0, Math.min(mesh.nx - 1, exitI - 2 + offset))
+  ).map((i) => {
+    const index = ransCellIndex(i, 0, mesh);
+    return {
+      x: Number((mesh.xCenters[i] / mesh.lengthM).toFixed(5)),
+      mach: primitive.mach[index],
+      pressurePa: primitive.p[index],
+      temperatureK: primitive.temperature[index],
+      densityKgM3: primitive.rho[index],
+      axialVelocityMS: primitive.u[index]
+    };
+  });
+  const maximumRelativeJump = (selector: (point: (typeof continuityProbe)[number]) => number) => {
+    let maximum = 0;
+    for (let i = 1; i < continuityProbe.length; i += 1) {
+      const left = selector(continuityProbe[i - 1]);
+      const right = selector(continuityProbe[i]);
+      maximum = Math.max(maximum, Math.abs(right - left) / Math.max(Math.abs(left), Math.abs(right), 1e-9));
+    }
+    return maximum;
+  };
 
   const result: NozzleCfdResult = {
     id: `rans-${Date.now()}`,
@@ -169,8 +199,8 @@ export function solveRansNozzleCfd(inputs: NozzleCfdInputs): NozzleCfdResult {
       ny: mesh.nr,
       cells: mesh.cells,
       throatRefinementRatio: 1,
-      nozzleExitX: 1,
-      domainLengthRatio: 1
+      nozzleExitX: mesh.nozzleLengthM / mesh.lengthM,
+      domainLengthRatio: mesh.lengthM / mesh.nozzleLengthM
     },
     solverAudit: {
       cells: mesh.cells,
@@ -261,6 +291,17 @@ export function solveRansNozzleCfd(inputs: NozzleCfdInputs): NozzleCfdResult {
       characteristicVelocityMS,
       areaRatio: exitArea / throatArea,
       expansionState: expansionState(exitPressurePa, inputs.ambientPressurePa)
+    },
+    continuityCheck: {
+      exitX: mesh.nozzleLengthM / mesh.lengthM,
+      probe: continuityProbe,
+      maxRelativeJump: {
+        mach: maximumRelativeJump((point) => point.mach),
+        staticPressure: maximumRelativeJump((point) => point.pressurePa),
+        staticTemperature: maximumRelativeJump((point) => point.temperatureK),
+        density: maximumRelativeJump((point) => point.densityKgM3),
+        axialVelocity: maximumRelativeJump((point) => point.axialVelocityMS)
+      }
     },
     createdAt: new Date().toISOString()
   };
