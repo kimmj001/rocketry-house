@@ -5,6 +5,39 @@ const smoothStep = (value: number) => {
   return clamped * clamped * (3 - 2 * clamped);
 };
 
+export function pressureContrastScale(
+  pressurePa: ArrayLike<number>,
+  ambientPressurePa: number,
+  firstExternalIndex: number
+) {
+  const deviations: number[] = [];
+  for (let index = Math.max(0, firstExternalIndex); index < pressurePa.length; index += 1) {
+    const deviation = Math.abs(pressurePa[index] - ambientPressurePa);
+    if (Number.isFinite(deviation)) deviations.push(deviation);
+  }
+  deviations.sort((left, right) => left - right);
+  const percentileIndex = Math.floor(Math.max(0, deviations.length - 1) * 0.97);
+  return Math.max(
+    ambientPressurePa * 0.1,
+    deviations[percentileIndex] ?? 0,
+    500
+  );
+}
+
+export function pressureContrastPosition(
+  pressurePa: number,
+  ambientPressurePa: number,
+  contrastScalePa: number
+) {
+  const delta = pressurePa - ambientPressurePa;
+  if (Math.abs(delta) < 1e-12) return 0.5;
+  const linearScalePa = Math.max(ambientPressurePa * 0.005, 100);
+  const denominator = Math.log1p(Math.max(contrastScalePa, linearScalePa) / linearScalePa);
+  const magnitude = clamp01(Math.log1p(Math.abs(delta) / linearScalePa) / denominator);
+  const enhanced = magnitude ** 0.78;
+  return 0.5 + 0.5 * Math.sign(delta) * enhanced;
+}
+
 export function externalFieldVisibility({
   xM,
   radiusM,

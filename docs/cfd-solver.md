@@ -115,6 +115,11 @@ remains selectable for accuracy-focused runs. Cold starts use an accelerated
 CFL ramp; the MUSCL path retains a lower CFL ceiling than the monotone
 first-order path.
 
+Automatic static-pressure coloring uses an ambient-centered diverging palette
+and a robust external-flow contrast scale. Chamber pressure saturates at the
+high end instead of flattening the much smaller expansion and compression
+variations in the plume.
+
 ## Diagnostics
 
 The UI reports continuity, axial momentum, radial momentum, energy, and

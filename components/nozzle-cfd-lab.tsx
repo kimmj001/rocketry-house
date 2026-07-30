@@ -24,7 +24,11 @@ import {
   type SolverResidualPoint,
   type SolverSnapshot
 } from "@/lib/cfd/rans/types";
-import { externalFieldVisibility } from "@/lib/cfd/rans/visualization";
+import {
+  externalFieldVisibility,
+  pressureContrastPosition,
+  pressureContrastScale
+} from "@/lib/cfd/rans/visualization";
 
 function createInteractiveConfig(): RansSolverConfig {
   const base = structuredClone(DEFAULT_RANS_CONFIG);
@@ -56,15 +60,27 @@ const VIRIDIS = [
   [253, 231, 37]
 ] as const;
 
+const PRESSURE_DIVERGING = [
+  [28, 78, 170],
+  [38, 176, 216],
+  [8, 11, 20],
+  [255, 112, 35],
+  [255, 235, 59]
+] as const;
+
 const STANDARD_ATMOSPHERE_PA = 101325;
 
-function scientificColor(value: number, visibility = 1) {
+function scientificColor(
+  value: number,
+  visibility = 1,
+  palette: ReadonlyArray<readonly [number, number, number]> = VIRIDIS
+) {
   const t = Math.max(0, Math.min(1, value));
-  const scaled = t * (VIRIDIS.length - 1);
-  const index = Math.min(VIRIDIS.length - 2, Math.floor(scaled));
+  const scaled = t * (palette.length - 1);
+  const index = Math.min(palette.length - 2, Math.floor(scaled));
   const local = scaled - index;
-  const left = VIRIDIS[index];
-  const right = VIRIDIS[index + 1];
+  const left = palette[index];
+  const right = palette[index + 1];
   const background = [5, 7, 11] as const;
   const channel = (component: number) => {
     const color = left[component] + (right[component] - left[component]) * local;
@@ -140,6 +156,12 @@ function NozzleFieldCanvas({
       const xScale = (plotRight - plotLeft) / snapshot.mesh.lengthM;
       const nozzleExitXM = xFaces[nozzleExitIndex + 1];
       const exitRadiusM = wallFaces[nozzleExitIndex + 1];
+      const pressureContrastPa = pressureContrastScale(
+        snapshot.fields.pressure,
+        ambientPressurePa,
+        (nozzleExitIndex + 1) * nr
+      );
+      const pressurePaletteActive = fieldName === "pressure" && autoRange;
 
       context.lineWidth = 0.45;
       for (let i = 0; i < nx; i += 1) {
@@ -151,7 +173,9 @@ function NozzleFieldCanvas({
         const cellWallRadiusM = 0.5 * (wall0 + wall1);
         for (let j = 0; j < nr; j += 1) {
           const index = i * nr + j;
-          const normalized = (values[index] - min) / Math.max(max - min, 1e-20);
+          const normalized = pressurePaletteActive
+            ? pressureContrastPosition(values[index], ambientPressurePa, pressureContrastPa)
+            : (values[index] - min) / Math.max(max - min, 1e-20);
           const machVisibility = Math.max(
             0,
             Math.min(1, (snapshot.fields.mach[index] - 0.005) / 0.12)
@@ -174,7 +198,11 @@ function NozzleFieldCanvas({
             domainLengthM: snapshot.mesh.lengthM,
             farfieldRadiusM: maxRadiusM
           });
-          const fillColor = scientificColor(normalized, fieldVisibility * fade);
+          const fillColor = scientificColor(
+            normalized,
+            fieldVisibility * fade,
+            pressurePaletteActive ? PRESSURE_DIVERGING : VIRIDIS
+          );
           context.fillStyle = fillColor;
           context.strokeStyle = showMesh ? "rgba(255,255,255,0.14)" : fillColor;
           context.lineWidth = showMesh ? 0.45 : 0.8;
@@ -233,16 +261,28 @@ function NozzleFieldCanvas({
       const legendTop = height - 24;
       const legendWidth = Math.min(250, width * 0.34);
       const gradient = context.createLinearGradient(legendLeft, 0, legendLeft + legendWidth, 0);
-      VIRIDIS.forEach((color, index) => {
-        gradient.addColorStop(index / (VIRIDIS.length - 1), `rgb(${color.join(",")})`);
+      const legendPalette = pressurePaletteActive ? PRESSURE_DIVERGING : VIRIDIS;
+      legendPalette.forEach((color, index) => {
+        gradient.addColorStop(index / (legendPalette.length - 1), `rgb(${color.join(",")})`);
       });
       context.fillStyle = gradient;
       context.fillRect(legendLeft, legendTop, legendWidth, 7);
       context.fillStyle = "rgba(248,250,252,0.78)";
       context.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
       context.textBaseline = "bottom";
-      context.fillText(formatNumber(min), legendLeft, legendTop - 2);
-      const maxText = formatNumber(max);
+      const legendMin = pressurePaletteActive
+        ? Math.max(0, ambientPressurePa - pressureContrastPa)
+        : min;
+      const legendMax = pressurePaletteActive
+        ? ambientPressurePa + pressureContrastPa
+        : max;
+      context.fillText(formatNumber(legendMin), legendLeft, legendTop - 2);
+      if (pressurePaletteActive) {
+        const ambientText = formatNumber(ambientPressurePa);
+        const ambientWidth = context.measureText(ambientText).width;
+        context.fillText(ambientText, legendLeft + 0.5 * legendWidth - 0.5 * ambientWidth, legendTop - 2);
+      }
+      const maxText = formatNumber(legendMax);
       const maxWidth = context.measureText(maxText).width;
       context.fillText(maxText, legendLeft + legendWidth - maxWidth, legendTop - 2);
     };
