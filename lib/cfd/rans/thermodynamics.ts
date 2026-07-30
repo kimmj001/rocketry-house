@@ -42,20 +42,23 @@ export const HYDROLOX_FROZEN_STATIONS: ThermoStation[] = [
 
 function interpolateStation(xNormalized: number) {
   const x = Math.max(0, Math.min(1, xNormalized));
-  const rightIndex = HYDROLOX_FROZEN_STATIONS.findIndex((station) => station.xNormalized >= x);
-  if (rightIndex <= 0) return HYDROLOX_FROZEN_STATIONS[0];
+  if (x <= HYDROLOX_FROZEN_STATIONS[0].xNormalized) {
+    return HYDROLOX_FROZEN_STATIONS[0];
+  }
+  const rightIndex = x <= HYDROLOX_FROZEN_STATIONS[1].xNormalized ? 1 : 2;
   const right = HYDROLOX_FROZEN_STATIONS[rightIndex];
   const left = HYDROLOX_FROZEN_STATIONS[rightIndex - 1];
   const t = (x - left.xNormalized) / Math.max(right.xNormalized - left.xNormalized, 1e-12);
-  const lerp = (a: number, b: number) => a + (b - a) * t;
   return {
     xNormalized: x,
-    gamma: lerp(left.gamma, right.gamma),
-    gasConstant: lerp(left.gasConstant, right.gasConstant),
-    viscosity: lerp(left.viscosity, right.viscosity),
-    conductivity: lerp(left.conductivity, right.conductivity),
-    prandtl: lerp(left.prandtl, right.prandtl),
-    referenceTemperatureK: lerp(left.referenceTemperatureK, right.referenceTemperatureK)
+    gamma: left.gamma + (right.gamma - left.gamma) * t,
+    gasConstant: left.gasConstant + (right.gasConstant - left.gasConstant) * t,
+    viscosity: left.viscosity + (right.viscosity - left.viscosity) * t,
+    conductivity: left.conductivity + (right.conductivity - left.conductivity) * t,
+    prandtl: left.prandtl + (right.prandtl - left.prandtl) * t,
+    referenceTemperatureK:
+      left.referenceTemperatureK +
+      (right.referenceTemperatureK - left.referenceTemperatureK) * t
   };
 }
 

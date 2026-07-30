@@ -19,11 +19,12 @@ import {
   hllcFlux,
   noSlipAdiabaticWallGhost,
   primitiveFromConservative,
-  reconstructScalar,
   residualNorm,
-  weightedLeastSquaresGradient,
+  venkatakrishnanLimiter,
+  weightedLeastSquaresReconstruction,
   type FacePrimitive,
-  type FluxVector
+  type FluxVector,
+  type ScalarReconstruction
 } from "./numerics";
 import { thermodynamicProperties } from "./thermodynamics";
 import {
@@ -34,10 +35,10 @@ import {
   type MassFlowDiagnostic,
   type PrimitiveArrays,
   type RansSolverConfig,
-  type ScalarGradient,
   type SolverDiagnostics,
   type SolverResidualPoint,
-  type SolverSnapshot
+  type SolverSnapshot,
+  type ThermoProperties
 } from "./types";
 
 const PI = Math.PI;
@@ -51,12 +52,12 @@ const SA_CW3 = 2;
 const SA_CW1 = SA_CB1 / (SA_KAPPA * SA_KAPPA) + (1 + SA_CB2) / SA_SIGMA;
 
 type GradientSet = {
-  rho: ScalarGradient;
-  u: ScalarGradient;
-  v: ScalarGradient;
-  p: ScalarGradient;
-  temperature: ScalarGradient;
-  nuTilde: ScalarGradient;
+  rho: ScalarReconstruction;
+  u: ScalarReconstruction;
+  v: ScalarReconstruction;
+  p: ScalarReconstruction;
+  temperature: ScalarReconstruction;
+  nuTilde: ScalarReconstruction;
 };
 
 type Counters = {
@@ -124,6 +125,32 @@ function clearState(state: ConservativeState) {
   state.rhoNuTilde.fill(0);
 }
 
+function isPhysicalConservative(
+  rho: number,
+  rhoU: number,
+  rhoV: number,
+  rhoE: number,
+  thermo: ThermoProperties,
+  config: RansSolverConfig
+) {
+  if (
+    !Number.isFinite(rho) ||
+    !Number.isFinite(rhoU) ||
+    !Number.isFinite(rhoV) ||
+    !Number.isFinite(rhoE) ||
+    rho <= config.rhoMin
+  ) {
+    return false;
+  }
+  const kinetic = 0.5 * (rhoU * rhoU + rhoV * rhoV) / rho;
+  const pressure = (thermo.gamma - 1) * (rhoE - kinetic);
+  const temperature = pressure / (rho * thermo.gasConstant);
+  return Number.isFinite(pressure) &&
+    Number.isFinite(temperature) &&
+    pressure > config.pressureMin &&
+    temperature > config.temperatureMin;
+}
+
 function addFlux(
   residual: ConservativeState,
   index: number,
@@ -144,10 +171,14 @@ export class AxisymmetricRansSolver {
   readonly config: RansSolverConfig;
   readonly mesh: BodyFittedMesh;
   private state: ConservativeState;
+  private nextState: ConservativeState;
   private primitive: PrimitiveArrays;
   private residual: ConservativeState;
   private gradients: GradientSet;
+  private saSource: Float64Array;
   private lastUpdate: Float64Array;
+  private limiterEpsilon2: number;
+  private faceWasLimited = false;
   private residualHistory: SolverResidualPoint[] = [];
   private iteration = 0;
   private pseudoTimeS = 0;
@@ -176,9 +207,13 @@ export class AxisymmetricRansSolver {
       this.config.nr
     );
     this.state = createConservativeState(this.mesh.cells);
+    this.nextState = createConservativeState(this.mesh.cells);
     this.primitive = createPrimitiveArrays(this.mesh.cells);
     this.residual = createConservativeState(this.mesh.cells);
+    this.saSource = new Float64Array(this.mesh.cells);
     this.lastUpdate = new Float64Array(this.mesh.cells);
+    const h3 = this.mesh.minCellLength ** 3;
+    this.limiterEpsilon2 = h3 * h3 + 1e-30;
     if (this.config.initializationMode === "coldStart") this.initializeQuiescentAmbient();
     else this.initializeQuasiOneDimensional();
     this.decodeState();
@@ -336,70 +371,93 @@ export class AxisymmetricRansSolver {
 
   private computeGradients(): GradientSet {
     return {
-      rho: weightedLeastSquaresGradient(this.primitive.rho, this.mesh),
-      u: weightedLeastSquaresGradient(this.primitive.u, this.mesh),
-      v: weightedLeastSquaresGradient(this.primitive.v, this.mesh),
-      p: weightedLeastSquaresGradient(this.primitive.p, this.mesh),
-      temperature: weightedLeastSquaresGradient(this.primitive.temperature, this.mesh),
-      nuTilde: weightedLeastSquaresGradient(this.primitive.nuTilde, this.mesh)
+      rho: weightedLeastSquaresReconstruction(this.primitive.rho, this.mesh),
+      u: weightedLeastSquaresReconstruction(this.primitive.u, this.mesh),
+      v: weightedLeastSquaresReconstruction(this.primitive.v, this.mesh),
+      p: weightedLeastSquaresReconstruction(this.primitive.p, this.mesh),
+      temperature: weightedLeastSquaresReconstruction(this.primitive.temperature, this.mesh),
+      nuTilde: weightedLeastSquaresReconstruction(this.primitive.nuTilde, this.mesh)
     };
   }
 
-  private cellFace(index: number, faceX: number, faceR: number): FacePrimitive {
-    const firstOrder = (): FacePrimitive => {
-      const temperature = this.primitive.temperature[index];
-      return {
-        rho: this.primitive.rho[index],
-        u: this.primitive.u[index],
-        v: this.primitive.v[index],
-        p: this.primitive.p[index],
-        temperature,
-        nuTilde: this.primitive.nuTilde[index],
-        thermo: thermodynamicProperties(this.thermoCoordinate(faceX), temperature, this.config)
-      };
+  private cellCenteredFace(index: number, faceX: number): FacePrimitive {
+    const temperature = this.primitive.temperature[index];
+    return {
+      rho: this.primitive.rho[index],
+      u: this.primitive.u[index],
+      v: this.primitive.v[index],
+      p: this.primitive.p[index],
+      temperature,
+      nuTilde: this.primitive.nuTilde[index],
+      thermo: thermodynamicProperties(this.thermoCoordinate(faceX), temperature, this.config)
     };
-    if (this.config.reconstruction === "firstOrder") return firstOrder();
+  }
 
-    const rho = reconstructScalar(this.primitive.rho, this.gradients.rho, index, faceX, faceR, this.mesh);
-    const u = reconstructScalar(this.primitive.u, this.gradients.u, index, faceX, faceR, this.mesh);
-    const v = reconstructScalar(this.primitive.v, this.gradients.v, index, faceX, faceR, this.mesh);
-    const p = reconstructScalar(this.primitive.p, this.gradients.p, index, faceX, faceR, this.mesh);
-    const temperature = reconstructScalar(
+  private reconstructFaceValue(
+    values: Float64Array,
+    reconstruction: ScalarReconstruction,
+    index: number,
+    dx: number,
+    dr: number
+  ) {
+    const center = values[index];
+    const delta = reconstruction.x[index] * dx + reconstruction.r[index] * dr;
+    const allowable = delta >= 0
+      ? reconstruction.maximum[index] - center
+      : reconstruction.minimum[index] - center;
+    const limiter = venkatakrishnanLimiter(delta, allowable, this.limiterEpsilon2);
+    if (limiter < 0.999999) this.faceWasLimited = true;
+    return center + limiter * delta;
+  }
+
+  private cellFace(index: number, faceX: number, faceR: number): FacePrimitive {
+    if (this.config.reconstruction === "firstOrder") return this.cellCenteredFace(index, faceX);
+
+    const dx = faceX - this.mesh.cellX[index];
+    const dr = faceR - this.mesh.cellR[index];
+    this.faceWasLimited = false;
+    const rho = this.reconstructFaceValue(
+      this.primitive.rho,
+      this.gradients.rho,
+      index,
+      dx,
+      dr
+    );
+    const u = this.reconstructFaceValue(this.primitive.u, this.gradients.u, index, dx, dr);
+    const v = this.reconstructFaceValue(this.primitive.v, this.gradients.v, index, dx, dr);
+    const p = this.reconstructFaceValue(this.primitive.p, this.gradients.p, index, dx, dr);
+    const temperature = this.reconstructFaceValue(
       this.primitive.temperature,
       this.gradients.temperature,
       index,
-      faceX,
-      faceR,
-      this.mesh
+      dx,
+      dr
     );
-    const nuTilde = reconstructScalar(
+    const nuTilde = this.reconstructFaceValue(
       this.primitive.nuTilde,
       this.gradients.nuTilde,
       index,
-      faceX,
-      faceR,
-      this.mesh
+      dx,
+      dr
     );
-    if (rho.limited || u.limited || v.limited || p.limited || temperature.limited || nuTilde.limited) {
-      this.counters.limitedFaces += 1;
-    }
+    if (this.faceWasLimited) this.counters.limitedFaces += 1;
     if (
-      !Number.isFinite(rho.value) || rho.value <= this.config.rhoMin ||
-      !Number.isFinite(p.value) || p.value <= this.config.pressureMin ||
-      !Number.isFinite(temperature.value) || temperature.value <= this.config.temperatureMin ||
-      !Number.isFinite(u.value) || !Number.isFinite(v.value)
+      !Number.isFinite(rho) || rho <= this.config.rhoMin ||
+      !Number.isFinite(p) || p <= this.config.pressureMin ||
+      !Number.isFinite(temperature) || temperature <= this.config.temperatureMin ||
+      !Number.isFinite(u) || !Number.isFinite(v)
     ) {
       this.counters.firstOrderFallbacks += 1;
-      return firstOrder();
+      return this.cellCenteredFace(index, faceX);
     }
     return {
-      rho: rho.value,
-      u: u.value,
-      v: v.value,
-      p: p.value,
-      temperature: temperature.value,
-      nuTilde: Math.max(nuTilde.value, 0),
-      thermo: thermodynamicProperties(this.thermoCoordinate(faceX), temperature.value, this.config)
+      rho,
+      u,
+      v,
+      p,
+      temperature,
+      nuTilde: Math.max(nuTilde, 0),
+      thermo: thermodynamicProperties(this.thermoCoordinate(faceX), temperature, this.config)
     };
   }
 
@@ -549,6 +607,7 @@ export class AxisymmetricRansSolver {
 
       if (this.config.turbulence !== "spalartAllmaras") continue;
       const source = this.spalartAllmarasSource(index);
+      this.saSource[index] = source;
       this.residual.rhoNuTilde[index] -= this.primitive.rho[index] * source * this.mesh.volumes[index];
     }
   }
@@ -793,7 +852,7 @@ export class AxisymmetricRansSolver {
         const viscous = 0.22 * h * h / Math.max(nuEffective, saDiffusivity, 1e-20);
         let turbulenceSource = Number.POSITIVE_INFINITY;
         if (this.config.turbulence === "spalartAllmaras" && this.primitive.nuTilde[index] > 0) {
-          const source = this.spalartAllmarasSource(index);
+          const source = this.saSource[index];
           if (source < 0) {
             turbulenceSource = 0.5 * this.primitive.nuTilde[index] /
               Math.max(-source, 1e-30);
@@ -806,51 +865,66 @@ export class AxisymmetricRansSolver {
   }
 
   private attemptUpdate(dt: number) {
-    const next = createConservativeState(this.mesh.cells);
+    const next = this.nextState;
     for (let index = 0; index < this.mesh.cells; index += 1) {
       const factor = dt / this.mesh.volumes[index];
-      const proposed: [number, number, number, number, number] = [
-        this.state.rho[index] - factor * this.residual.rho[index],
-        this.state.rhoU[index] - factor * this.residual.rhoU[index],
-        this.state.rhoV[index] - factor * this.residual.rhoV[index],
-        this.state.rhoE[index] - factor * this.residual.rhoE[index],
-        this.state.rhoNuTilde[index] - factor * this.residual.rhoNuTilde[index]
-      ];
-      if (proposed.some((value) => !Number.isFinite(value))) {
+      const proposedRho = this.state.rho[index] - factor * this.residual.rho[index];
+      const proposedRhoU = this.state.rhoU[index] - factor * this.residual.rhoU[index];
+      const proposedRhoV = this.state.rhoV[index] - factor * this.residual.rhoV[index];
+      const proposedRhoE = this.state.rhoE[index] - factor * this.residual.rhoE[index];
+      const proposedRhoNuTilde =
+        this.state.rhoNuTilde[index] - factor * this.residual.rhoNuTilde[index];
+      if (
+        !Number.isFinite(proposedRho) ||
+        !Number.isFinite(proposedRhoU) ||
+        !Number.isFinite(proposedRhoV) ||
+        !Number.isFinite(proposedRhoE) ||
+        !Number.isFinite(proposedRhoNuTilde)
+      ) {
         this.counters.nanCount += 1;
         return null;
       }
       const xNormalized = this.thermoCoordinate(this.mesh.cellX[index]);
       const thermo = thermodynamicProperties(xNormalized, this.primitive.temperature[index], this.config);
-      let accepted = proposed;
-      let decoded = primitiveFromConservative(
-        [accepted[0], accepted[1], accepted[2], accepted[3]],
-        thermo,
-        this.config
-      );
-      const isPhysical = () =>
-        Number.isFinite(decoded.rawPressure) &&
-        Number.isFinite(decoded.rawTemperature) &&
-        decoded.rawRho > this.config.rhoMin &&
-        decoded.rawPressure > this.config.pressureMin &&
-        decoded.rawTemperature > this.config.temperatureMin;
-      if (!isPhysical()) {
+      let acceptedRho = proposedRho;
+      let acceptedRhoU = proposedRhoU;
+      let acceptedRhoV = proposedRhoV;
+      let acceptedRhoE = proposedRhoE;
+      let acceptedRhoNuTilde = proposedRhoNuTilde;
+      if (
+        !isPhysicalConservative(
+          acceptedRho,
+          acceptedRhoU,
+          acceptedRhoV,
+          acceptedRhoE,
+          thermo,
+          this.config
+        )
+      ) {
         let theta = 0.5;
         let recovered = false;
         for (let correction = 0; correction < 48; correction += 1) {
-          accepted = [
-            this.state.rho[index] + theta * (proposed[0] - this.state.rho[index]),
-            this.state.rhoU[index] + theta * (proposed[1] - this.state.rhoU[index]),
-            this.state.rhoV[index] + theta * (proposed[2] - this.state.rhoV[index]),
-            this.state.rhoE[index] + theta * (proposed[3] - this.state.rhoE[index]),
-            this.state.rhoNuTilde[index] + theta * (proposed[4] - this.state.rhoNuTilde[index])
-          ];
-          decoded = primitiveFromConservative(
-            [accepted[0], accepted[1], accepted[2], accepted[3]],
-            thermo,
-            this.config
-          );
-          if (isPhysical()) {
+          acceptedRho =
+            this.state.rho[index] + theta * (proposedRho - this.state.rho[index]);
+          acceptedRhoU =
+            this.state.rhoU[index] + theta * (proposedRhoU - this.state.rhoU[index]);
+          acceptedRhoV =
+            this.state.rhoV[index] + theta * (proposedRhoV - this.state.rhoV[index]);
+          acceptedRhoE =
+            this.state.rhoE[index] + theta * (proposedRhoE - this.state.rhoE[index]);
+          acceptedRhoNuTilde =
+            this.state.rhoNuTilde[index] +
+            theta * (proposedRhoNuTilde - this.state.rhoNuTilde[index]);
+          if (
+            isPhysicalConservative(
+              acceptedRho,
+              acceptedRhoU,
+              acceptedRhoV,
+              acceptedRhoE,
+              thermo,
+              this.config
+            )
+          ) {
             recovered = true;
             break;
           }
@@ -859,15 +933,15 @@ export class AxisymmetricRansSolver {
         if (!recovered) return null;
         this.counters.positivityCorrections += 1;
       }
-      next.rho[index] = accepted[0];
-      next.rhoU[index] = accepted[1];
-      next.rhoV[index] = accepted[2];
-      next.rhoE[index] = accepted[3];
+      next.rho[index] = acceptedRho;
+      next.rhoU[index] = acceptedRhoU;
+      next.rhoV[index] = acceptedRhoV;
+      next.rhoE[index] = acceptedRhoE;
       const nu = this.primitive.nu[index];
       const maximumRhoNuTilde = next.rho[index] * nu *
         this.config.maxModifiedViscosityRatio;
       next.rhoNuTilde[index] = Math.min(
-        Math.max(accepted[4], 0),
+        Math.max(acceptedRhoNuTilde, 0),
         maximumRhoNuTilde
       );
       const turbulenceTolerance = Math.max(
@@ -875,8 +949,8 @@ export class AxisymmetricRansSolver {
         next.rho[index] * nu * 1e-8
       );
       if (
-        accepted[4] < -turbulenceTolerance ||
-        accepted[4] > maximumRhoNuTilde + turbulenceTolerance
+        acceptedRhoNuTilde < -turbulenceTolerance ||
+        acceptedRhoNuTilde > maximumRhoNuTilde + turbulenceTolerance
       ) {
         this.counters.turbulenceClips += 1;
       }
@@ -926,6 +1000,7 @@ export class AxisymmetricRansSolver {
       return;
     }
     if (retries === 0) this.cflScale = Math.min(this.cflScale * 1.03, 1);
+    this.nextState = this.state;
     this.state = next;
     this.iteration += 1;
     this.pseudoTimeS += dt;

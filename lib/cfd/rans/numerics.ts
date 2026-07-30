@@ -27,6 +27,11 @@ export type HllcResult = {
   usedFallback: boolean;
 };
 
+export type ScalarReconstruction = ScalarGradient & {
+  minimum: Float64Array;
+  maximum: Float64Array;
+};
+
 const finite = (value: number, fallback: number) => Number.isFinite(value) ? value : fallback;
 
 export function symmetryAxisGhost(interior: FacePrimitive): FacePrimitive {
@@ -113,17 +118,6 @@ export function primitiveFromConservative(
   };
 }
 
-function physicalFlux(face: FacePrimitive, normalX: number, normalR: number): FluxVector {
-  const conserved = conservativeFromPrimitive(face);
-  const vn = face.u * normalX + face.v * normalR;
-  return [
-    face.rho * vn,
-    face.rho * face.u * vn + face.p * normalX,
-    face.rho * face.v * vn + face.p * normalR,
-    (conserved[3] + face.p) * vn
-  ];
-}
-
 function admissible(face: FacePrimitive) {
   return Number.isFinite(face.rho) && face.rho > 0 &&
     Number.isFinite(face.p) && face.p > 0 &&
@@ -137,18 +131,35 @@ export function rusanovFlux(
   normalX: number,
   normalR: number
 ): HllcResult {
-  const ul = conservativeFromPrimitive(left);
-  const ur = conservativeFromPrimitive(right);
-  const fl = physicalFlux(left, normalX, normalR);
-  const fr = physicalFlux(right, normalX, normalR);
   const vnLeft = left.u * normalX + left.v * normalR;
   const vnRight = right.u * normalX + right.v * normalR;
+  const ul0 = left.rho;
+  const ul1 = left.rho * left.u;
+  const ul2 = left.rho * left.v;
+  const ul3 = left.p / (left.thermo.gamma - 1) +
+    0.5 * left.rho * (left.u * left.u + left.v * left.v);
+  const ur0 = right.rho;
+  const ur1 = right.rho * right.u;
+  const ur2 = right.rho * right.v;
+  const ur3 = right.p / (right.thermo.gamma - 1) +
+    0.5 * right.rho * (right.u * right.u + right.v * right.v);
+  const fl0 = left.rho * vnLeft;
+  const fl1 = left.rho * left.u * vnLeft + left.p * normalX;
+  const fl2 = left.rho * left.v * vnLeft + left.p * normalR;
+  const fl3 = (ul3 + left.p) * vnLeft;
+  const fr0 = right.rho * vnRight;
+  const fr1 = right.rho * right.u * vnRight + right.p * normalX;
+  const fr2 = right.rho * right.v * vnRight + right.p * normalR;
+  const fr3 = (ur3 + right.p) * vnRight;
   const aLeft = Math.sqrt(left.thermo.gamma * left.p / left.rho);
   const aRight = Math.sqrt(right.thermo.gamma * right.p / right.rho);
   const lambda = Math.max(Math.abs(vnLeft) + aLeft, Math.abs(vnRight) + aRight);
-  const flux = fl.map((value, component) =>
-    0.5 * (value + fr[component]) - 0.5 * lambda * (ur[component] - ul[component])
-  ) as FluxVector;
+  const flux: FluxVector = [
+    0.5 * (fl0 + fr0) - 0.5 * lambda * (ur0 - ul0),
+    0.5 * (fl1 + fr1) - 0.5 * lambda * (ur1 - ul1),
+    0.5 * (fl2 + fr2) - 0.5 * lambda * (ur2 - ul2),
+    0.5 * (fl3 + fr3) - 0.5 * lambda * (ur3 - ul3)
+  ];
   return { flux, massFlux: flux[0], usedFallback: true };
 }
 
@@ -159,20 +170,38 @@ export function hllcFlux(
   normalR: number
 ): HllcResult {
   if (!admissible(left) || !admissible(right)) return rusanovFlux(left, right, normalX, normalR);
-  const ul = conservativeFromPrimitive(left);
-  const ur = conservativeFromPrimitive(right);
-  const fl = physicalFlux(left, normalX, normalR);
-  const fr = physicalFlux(right, normalX, normalR);
   const vnLeft = left.u * normalX + left.v * normalR;
   const vnRight = right.u * normalX + right.v * normalR;
   const vtLeft = -left.u * normalR + left.v * normalX;
   const vtRight = -right.u * normalR + right.v * normalX;
+  const ul0 = left.rho;
+  const ul1 = left.rho * left.u;
+  const ul2 = left.rho * left.v;
+  const ul3 = left.p / (left.thermo.gamma - 1) +
+    0.5 * left.rho * (left.u * left.u + left.v * left.v);
+  const ur0 = right.rho;
+  const ur1 = right.rho * right.u;
+  const ur2 = right.rho * right.v;
+  const ur3 = right.p / (right.thermo.gamma - 1) +
+    0.5 * right.rho * (right.u * right.u + right.v * right.v);
+  const fl0 = left.rho * vnLeft;
+  const fl1 = left.rho * left.u * vnLeft + left.p * normalX;
+  const fl2 = left.rho * left.v * vnLeft + left.p * normalR;
+  const fl3 = (ul3 + left.p) * vnLeft;
+  const fr0 = right.rho * vnRight;
+  const fr1 = right.rho * right.u * vnRight + right.p * normalX;
+  const fr2 = right.rho * right.v * vnRight + right.p * normalR;
+  const fr3 = (ur3 + right.p) * vnRight;
   const aLeft = Math.sqrt(left.thermo.gamma * left.p / left.rho);
   const aRight = Math.sqrt(right.thermo.gamma * right.p / right.rho);
   const sLeft = Math.min(vnLeft - aLeft, vnRight - aRight);
   const sRight = Math.max(vnLeft + aLeft, vnRight + aRight);
-  if (sLeft >= 0) return { flux: fl, massFlux: fl[0], usedFallback: false };
-  if (sRight <= 0) return { flux: fr, massFlux: fr[0], usedFallback: false };
+  if (sLeft >= 0) {
+    return { flux: [fl0, fl1, fl2, fl3], massFlux: fl0, usedFallback: false };
+  }
+  if (sRight <= 0) {
+    return { flux: [fr0, fr1, fr2, fr3], massFlux: fr0, usedFallback: false };
+  }
 
   const denominator = left.rho * (sLeft - vnLeft) - right.rho * (sRight - vnRight);
   if (!Number.isFinite(denominator) || Math.abs(denominator) < 1e-12) {
@@ -184,115 +213,200 @@ export function hllcFlux(
     right.rho * vnRight * (sRight - vnRight)
   ) / denominator;
 
-  const starState = (
-    state: ConservedVector,
-    primitive: FacePrimitive,
-    vn: number,
-    vt: number,
-    wave: number
-  ): ConservedVector | null => {
-    const waveGap = wave - sMiddle;
-    const upstreamGap = wave - vn;
-    if (Math.abs(waveGap) < 1e-12 || Math.abs(upstreamGap) < 1e-12) return null;
-    const rhoStar = primitive.rho * upstreamGap / waveGap;
-    const normalMomentum = rhoStar * sMiddle;
-    const tangentMomentum = rhoStar * vt;
-    const energyStar = rhoStar * (
-      state[3] / primitive.rho +
-      (sMiddle - vn) * (sMiddle + primitive.p / (primitive.rho * upstreamGap))
-    );
-    const star: ConservedVector = [
-      rhoStar,
-      normalMomentum * normalX - tangentMomentum * normalR,
-      normalMomentum * normalR + tangentMomentum * normalX,
-      energyStar
-    ];
-    const kinetic = 0.5 * (star[1] * star[1] + star[2] * star[2]) / Math.max(star[0], 1e-20);
-    if (!star.every(Number.isFinite) || star[0] <= 0 || star[3] <= kinetic) return null;
-    return star;
-  };
-
   if (sMiddle >= 0) {
-    const star = starState(ul, left, vnLeft, vtLeft, sLeft);
-    if (!star) return rusanovFlux(left, right, normalX, normalR);
-    const flux = fl.map((value, component) => value + sLeft * (star[component] - ul[component])) as FluxVector;
+    const waveGap = sLeft - sMiddle;
+    const upstreamGap = sLeft - vnLeft;
+    if (Math.abs(waveGap) < 1e-12 || Math.abs(upstreamGap) < 1e-12) {
+      return rusanovFlux(left, right, normalX, normalR);
+    }
+    const star0 = left.rho * upstreamGap / waveGap;
+    const normalMomentum = star0 * sMiddle;
+    const tangentMomentum = star0 * vtLeft;
+    const star1 = normalMomentum * normalX - tangentMomentum * normalR;
+    const star2 = normalMomentum * normalR + tangentMomentum * normalX;
+    const star3 = star0 * (
+      ul3 / left.rho +
+      (sMiddle - vnLeft) *
+        (sMiddle + left.p / (left.rho * upstreamGap))
+    );
+    const kinetic = 0.5 * (star1 * star1 + star2 * star2) / Math.max(star0, 1e-20);
+    if (
+      !Number.isFinite(star0) ||
+      !Number.isFinite(star1) ||
+      !Number.isFinite(star2) ||
+      !Number.isFinite(star3) ||
+      star0 <= 0 ||
+      star3 <= kinetic
+    ) {
+      return rusanovFlux(left, right, normalX, normalR);
+    }
+    const flux: FluxVector = [
+      fl0 + sLeft * (star0 - ul0),
+      fl1 + sLeft * (star1 - ul1),
+      fl2 + sLeft * (star2 - ul2),
+      fl3 + sLeft * (star3 - ul3)
+    ];
     return { flux, massFlux: flux[0], usedFallback: false };
   }
-  const star = starState(ur, right, vnRight, vtRight, sRight);
-  if (!star) return rusanovFlux(left, right, normalX, normalR);
-  const flux = fr.map((value, component) => value + sRight * (star[component] - ur[component])) as FluxVector;
+  const waveGap = sRight - sMiddle;
+  const upstreamGap = sRight - vnRight;
+  if (Math.abs(waveGap) < 1e-12 || Math.abs(upstreamGap) < 1e-12) {
+    return rusanovFlux(left, right, normalX, normalR);
+  }
+  const star0 = right.rho * upstreamGap / waveGap;
+  const normalMomentum = star0 * sMiddle;
+  const tangentMomentum = star0 * vtRight;
+  const star1 = normalMomentum * normalX - tangentMomentum * normalR;
+  const star2 = normalMomentum * normalR + tangentMomentum * normalX;
+  const star3 = star0 * (
+    ur3 / right.rho +
+    (sMiddle - vnRight) *
+      (sMiddle + right.p / (right.rho * upstreamGap))
+  );
+  const kinetic = 0.5 * (star1 * star1 + star2 * star2) / Math.max(star0, 1e-20);
+  if (
+    !Number.isFinite(star0) ||
+    !Number.isFinite(star1) ||
+    !Number.isFinite(star2) ||
+    !Number.isFinite(star3) ||
+    star0 <= 0 ||
+    star3 <= kinetic
+  ) {
+    return rusanovFlux(left, right, normalX, normalR);
+  }
+  const flux: FluxVector = [
+    fr0 + sRight * (star0 - ur0),
+    fr1 + sRight * (star1 - ur1),
+    fr2 + sRight * (star2 - ur2),
+    fr3 + sRight * (star3 - ur3)
+  ];
   return { flux, massFlux: flux[0], usedFallback: false };
 }
 
-function neighborIndices(index: number, mesh: BodyFittedMesh) {
-  const i = Math.floor(index / mesh.nr);
-  const j = index % mesh.nr;
-  const neighbors: number[] = [];
-  if (i > 0) {
-    neighbors.push(ransCellIndex(i - 1, adjacentRadialCell(i, j, i - 1, mesh), mesh));
-  }
-  if (i + 1 < mesh.nx) {
-    neighbors.push(ransCellIndex(i + 1, adjacentRadialCell(i, j, i + 1, mesh), mesh));
-  }
-  if (j > 0) neighbors.push(ransCellIndex(i, j - 1, mesh));
-  if (j + 1 < mesh.nr) neighbors.push(ransCellIndex(i, j + 1, mesh));
-  return neighbors;
-}
+type GradientStencil = {
+  count: Uint8Array;
+  neighbors: Int32Array;
+  coefficientX: Float64Array;
+  coefficientR: Float64Array;
+};
 
-export function weightedLeastSquaresGradient(values: Float64Array, mesh: BodyFittedMesh): ScalarGradient {
-  const gradient = {
-    x: new Float64Array(mesh.cells),
-    r: new Float64Array(mesh.cells)
-  };
+const gradientStencilCache = new WeakMap<BodyFittedMesh, GradientStencil>();
+const MAX_STENCIL_NEIGHBORS = 4;
+
+function createGradientStencil(mesh: BodyFittedMesh): GradientStencil {
+  const count = new Uint8Array(mesh.cells);
+  const neighbors = new Int32Array(mesh.cells * MAX_STENCIL_NEIGHBORS);
+  const coefficientX = new Float64Array(mesh.cells * MAX_STENCIL_NEIGHBORS);
+  const coefficientR = new Float64Array(mesh.cells * MAX_STENCIL_NEIGHBORS);
+  neighbors.fill(-1);
 
   for (let index = 0; index < mesh.cells; index += 1) {
+    const i = Math.floor(index / mesh.nr);
+    const j = index % mesh.nr;
+    const offset = index * MAX_STENCIL_NEIGHBORS;
+    let neighborCount = 0;
+    if (i > 0) {
+      neighbors[offset + neighborCount] = ransCellIndex(
+        i - 1,
+        adjacentRadialCell(i, j, i - 1, mesh),
+        mesh
+      );
+      neighborCount += 1;
+    }
+    if (i + 1 < mesh.nx) {
+      neighbors[offset + neighborCount] = ransCellIndex(
+        i + 1,
+        adjacentRadialCell(i, j, i + 1, mesh),
+        mesh
+      );
+      neighborCount += 1;
+    }
+    if (j > 0) {
+      neighbors[offset + neighborCount] = ransCellIndex(i, j - 1, mesh);
+      neighborCount += 1;
+    }
+    if (j + 1 < mesh.nr) {
+      neighbors[offset + neighborCount] = ransCellIndex(i, j + 1, mesh);
+      neighborCount += 1;
+    }
+    count[index] = neighborCount;
+
     let a11 = 0;
     let a12 = 0;
     let a22 = 0;
-    let b1 = 0;
-    let b2 = 0;
-    const neighbors = neighborIndices(index, mesh);
-    for (const neighbor of neighbors) {
+    for (let slot = 0; slot < neighborCount; slot += 1) {
+      const neighbor = neighbors[offset + slot];
       const dx = mesh.cellX[neighbor] - mesh.cellX[index];
       const dr = mesh.cellR[neighbor] - mesh.cellR[index];
-      const distance2 = dx * dx + dr * dr;
-      const weight = 1 / Math.max(distance2, 1e-20);
-      const delta = values[neighbor] - values[index];
+      const weight = 1 / Math.max(dx * dx + dr * dr, 1e-20);
       a11 += weight * dx * dx;
       a12 += weight * dx * dr;
       a22 += weight * dr * dr;
-      b1 += weight * dx * delta;
-      b2 += weight * dr * delta;
     }
-    const determinant = a11 * a22 - a12 * a12;
-    if (Math.abs(determinant) > 1e-10 * Math.max(a11 * a22, 1e-30)) {
-      gradient.x[index] = (a22 * b1 - a12 * b2) / determinant;
-      gradient.r[index] = (a11 * b2 - a12 * b1) / determinant;
-      continue;
+    const regularization = Math.max((a11 + a22) * 1e-14, 1e-20);
+    a11 += regularization;
+    a22 += regularization;
+    const determinant = Math.max(a11 * a22 - a12 * a12, 1e-30);
+    for (let slot = 0; slot < neighborCount; slot += 1) {
+      const neighbor = neighbors[offset + slot];
+      const dx = mesh.cellX[neighbor] - mesh.cellX[index];
+      const dr = mesh.cellR[neighbor] - mesh.cellR[index];
+      const weight = 1 / Math.max(dx * dx + dr * dr, 1e-20);
+      coefficientX[offset + slot] =
+        weight * (a22 * dx - a12 * dr) / determinant;
+      coefficientR[offset + slot] =
+        weight * (a11 * dr - a12 * dx) / determinant;
     }
-
-    const i = Math.floor(index / mesh.nr);
-    const j = index % mesh.nr;
-    const leftI = Math.max(i - 1, 0);
-    const rightI = Math.min(i + 1, mesh.nx - 1);
-    const left = ransCellIndex(
-      leftI,
-      leftI === i ? j : adjacentRadialCell(i, j, leftI, mesh),
-      mesh
-    );
-    const right = ransCellIndex(
-      rightI,
-      rightI === i ? j : adjacentRadialCell(i, j, rightI, mesh),
-      mesh
-    );
-    const bottom = ransCellIndex(i, Math.max(j - 1, 0), mesh);
-    const top = ransCellIndex(i, Math.min(j + 1, mesh.nr - 1), mesh);
-    gradient.x[index] = (values[right] - values[left]) /
-      Math.max(mesh.cellX[right] - mesh.cellX[left], mesh.minCellLength);
-    gradient.r[index] = (values[top] - values[bottom]) /
-      Math.max(mesh.cellR[top] - mesh.cellR[bottom], mesh.minCellLength);
   }
-  return gradient;
+  return { count, neighbors, coefficientX, coefficientR };
+}
+
+function gradientStencil(mesh: BodyFittedMesh) {
+  const cached = gradientStencilCache.get(mesh);
+  if (cached) return cached;
+  const stencil = createGradientStencil(mesh);
+  gradientStencilCache.set(mesh, stencil);
+  return stencil;
+}
+
+export function weightedLeastSquaresReconstruction(
+  values: Float64Array,
+  mesh: BodyFittedMesh
+): ScalarReconstruction {
+  const reconstruction = {
+    x: new Float64Array(mesh.cells),
+    r: new Float64Array(mesh.cells),
+    minimum: new Float64Array(mesh.cells),
+    maximum: new Float64Array(mesh.cells)
+  };
+  const stencil = gradientStencil(mesh);
+
+  for (let index = 0; index < mesh.cells; index += 1) {
+    let gradientX = 0;
+    let gradientR = 0;
+    const offset = index * MAX_STENCIL_NEIGHBORS;
+    const center = values[index];
+    let minimum = center;
+    let maximum = center;
+    for (let slot = 0; slot < stencil.count[index]; slot += 1) {
+      const neighbor = stencil.neighbors[offset + slot];
+      const neighborValue = values[neighbor];
+      const difference = neighborValue - center;
+      gradientX += stencil.coefficientX[offset + slot] * difference;
+      gradientR += stencil.coefficientR[offset + slot] * difference;
+      minimum = Math.min(minimum, neighborValue);
+      maximum = Math.max(maximum, neighborValue);
+    }
+    reconstruction.x[index] = gradientX;
+    reconstruction.r[index] = gradientR;
+    reconstruction.minimum[index] = minimum;
+    reconstruction.maximum[index] = maximum;
+  }
+  return reconstruction;
+}
+
+export function weightedLeastSquaresGradient(values: Float64Array, mesh: BodyFittedMesh): ScalarGradient {
+  return weightedLeastSquaresReconstruction(values, mesh);
 }
 
 export function venkatakrishnanLimiter(delta: number, allowableDelta: number, epsilon2: number) {
@@ -309,15 +423,21 @@ export function reconstructScalar(
   index: number,
   faceX: number,
   faceR: number,
-  mesh: BodyFittedMesh
+  mesh: BodyFittedMesh,
+  bounds?: Pick<ScalarReconstruction, "minimum" | "maximum">
 ) {
   const delta = gradient.x[index] * (faceX - mesh.cellX[index]) +
     gradient.r[index] * (faceR - mesh.cellR[index]);
-  let minValue = values[index];
-  let maxValue = values[index];
-  for (const neighbor of neighborIndices(index, mesh)) {
-    minValue = Math.min(minValue, values[neighbor]);
-    maxValue = Math.max(maxValue, values[neighbor]);
+  let minValue = bounds?.minimum[index] ?? values[index];
+  let maxValue = bounds?.maximum[index] ?? values[index];
+  if (!bounds) {
+    const stencil = gradientStencil(mesh);
+    const offset = index * MAX_STENCIL_NEIGHBORS;
+    for (let slot = 0; slot < stencil.count[index]; slot += 1) {
+      const neighbor = stencil.neighbors[offset + slot];
+      minValue = Math.min(minValue, values[neighbor]);
+      maxValue = Math.max(maxValue, values[neighbor]);
+    }
   }
   const allowable = delta >= 0 ? maxValue - values[index] : minValue - values[index];
   const h3 = mesh.minCellLength ** 3;
