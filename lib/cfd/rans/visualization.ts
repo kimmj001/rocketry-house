@@ -82,3 +82,26 @@ export function externalFlowActivity({
   );
   return Math.max(machSignal, pressureSignal * 0.72, temperatureSignal);
 }
+
+export function transportedThermalEnergy({
+  temperatureK,
+  ambientTemperatureK = 288.15,
+  maximumTemperatureK,
+  axialVelocityMS,
+  maximumAxialVelocityMS
+}: {
+  temperatureK: number;
+  ambientTemperatureK?: number;
+  maximumTemperatureK: number;
+  axialVelocityMS: number;
+  maximumAxialVelocityMS: number;
+}) {
+  const temperatureSignal = clamp01(
+    (temperatureK - ambientTemperatureK) /
+      Math.max(maximumTemperatureK - ambientTemperatureK, 200)
+  );
+  const axialVelocitySignal = clamp01(
+    Math.max(axialVelocityMS, 0) / Math.max(maximumAxialVelocityMS, 1)
+  );
+  return Math.pow(temperatureSignal * axialVelocitySignal, 0.55);
+}

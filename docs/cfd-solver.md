@@ -137,9 +137,11 @@ departure, and temperature departure rather than from a prescribed widening
 plume silhouette. Only the numerical farfield edge receives a geometric fade.
 
 The default `Flow structure` view is a derived diagnostic rather than a new
-solver variable. It combines normalized static temperature and Mach number for
-the jet core with finite-difference pressure gradients for shocks and shear
-features. Every raw cell-centered field remains selectable independently.
+solver variable. Outside the nozzle, its filled core is proportional to
+transported thermal energy: normalized temperature departure multiplied by
+positive axial velocity. Finite-difference pressure gradients add only thin
+shock and shear features, so a slow heated pressure wave cannot become an
+opaque plume. Every raw cell-centered field remains selectable independently.
 
 ## Diagnostics
 

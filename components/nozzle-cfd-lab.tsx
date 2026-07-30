@@ -28,7 +28,8 @@ import {
   externalFieldVisibility,
   externalFlowActivity,
   pressureContrastPosition,
-  pressureContrastScale
+  pressureContrastScale,
+  transportedThermalEnergy
 } from "@/lib/cfd/rans/visualization";
 
 function createInteractiveConfig(): RansSolverConfig {
@@ -302,6 +303,16 @@ function NozzleFieldCanvas({
             tr,
             nr
           );
+          const sampledAxialVelocity = bilinearSample(
+            snapshot.fields.axialVelocity,
+            sample.i0,
+            sample.i1,
+            j0,
+            j1,
+            sample.tx,
+            tr,
+            nr
+          );
           const sampledPressure = fieldName === "pressure"
             ? sampledValue
             : bilinearSample(
@@ -343,13 +354,23 @@ function NozzleFieldCanvas({
                   Math.max(snapshot.ranges.temperature.max - 288.15, 200)
               )
             );
-            const machSignal = Math.max(
+            const axialVelocitySignal = Math.max(
               0,
-              Math.min(1, sampledMach / Math.max(snapshot.ranges.mach.max, 1))
+              Math.min(
+                1,
+                Math.max(sampledAxialVelocity, 0) /
+                  Math.max(snapshot.ranges.axialVelocity.max, 1)
+              )
             );
-            structureBase[pixelIndex] =
-              0.88 * Math.sqrt(temperatureSignal) +
-              0.12 * Math.pow(machSignal, 0.7);
+            structureBase[pixelIndex] = sample.xM <= nozzleExitXM
+              ? 0.72 * Math.sqrt(temperatureSignal) +
+                0.28 * Math.sqrt(axialVelocitySignal)
+              : transportedThermalEnergy({
+                  temperatureK: sampledTemperature,
+                  maximumTemperatureK: snapshot.ranges.temperature.max,
+                  axialVelocityMS: sampledAxialVelocity,
+                  maximumAxialVelocityMS: snapshot.ranges.axialVelocity.max
+                });
             structurePressure[pixelIndex] =
               (sampledPressure - ambientPressurePa) / Math.max(pressureContrastPa, 1);
             structureVisibility[pixelIndex] = fade;

@@ -4,7 +4,8 @@ import {
   externalFieldVisibility,
   externalFlowActivity,
   pressureContrastPosition,
-  pressureContrastScale
+  pressureContrastScale,
+  transportedThermalEnergy
 } from "../../lib/cfd/rans/visualization";
 
 const domain = {
@@ -66,6 +67,28 @@ test("external flow activity rejects still ambient gas and retains moving therma
     ambientPressurePa: 101325,
     temperatureK: 900
   }) > 0.9);
+});
+
+test("transported thermal energy excludes stationary heat and cold pressure waves", () => {
+  const base = {
+    maximumTemperatureK: 3500,
+    maximumAxialVelocityMS: 2500
+  };
+  assert.equal(transportedThermalEnergy({
+    ...base,
+    temperatureK: 1800,
+    axialVelocityMS: 0
+  }), 0);
+  assert.equal(transportedThermalEnergy({
+    ...base,
+    temperatureK: 288.15,
+    axialVelocityMS: 1200
+  }), 0);
+  assert.ok(transportedThermalEnergy({
+    ...base,
+    temperatureK: 2400,
+    axialVelocityMS: 1800
+  }) > 0.5);
 });
 
 test("pressure contrast ignores chamber extremes and separates pressure around ambient", () => {
