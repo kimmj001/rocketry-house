@@ -48,11 +48,17 @@ terms. At the first radial cell, `v/r` uses the symmetry limit `dv/dr`.
 - Adaptive CFL reduction, extended step retry, and gradual CFL recovery after
   a nonphysical proposal
 
-The internal initial state is a quasi-one-dimensional isentropic nozzle
-estimate: subsonic upstream of the throat and supersonic downstream. The
-external domain starts from a smooth plume-informed guess blended into the
-ambient state to reduce browser convergence time. This is only an initial
-condition; subsequent snapshots come from the finite-volume residual and state
+The interactive lab uses a cold start. At iteration zero, every cell is a
+quiescent ambient state and no developed nozzle flow or plume is present.
+Starting the solver applies the chamber boundary condition at the inlet, so the
+pressure front can be followed through the chamber, throat, nozzle exit, and
+external domain.
+
+Server-side performance calculations retain an optional quasi-steady
+initialization: subsonic upstream of the throat, supersonic downstream, and a
+smooth plume-informed external guess. This avoids weakening upload and
+published-project metrics that use a finite iteration budget. In both modes,
+snapshots after iteration zero come from the finite-volume residual and state
 update.
 
 ## Thermodynamics
@@ -132,6 +138,7 @@ pnpm test:cfd
 
 The suite covers conservative/primitive conversion, ideal-gas identities,
 HLLC consistency, contact and Sod Riemann states, linear least-squares
-gradients, symmetry and wall ghost states, a low-resolution nozzle smoke test,
-axis finiteness, positivity, a long near-vacuum plume run at aggressive CFL,
-and a development-mesh performance check.
+gradients, symmetry and wall ghost states, cold-start inlet propagation, a
+low-resolution nozzle smoke test, axis finiteness, positivity, a long
+near-vacuum plume run at aggressive CFL, and a development-mesh performance
+check.

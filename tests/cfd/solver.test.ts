@@ -10,6 +10,7 @@ test("low-resolution nozzle remains finite and accelerates downstream", () => {
     nx: 36,
     nr: 14,
     resolution: "development",
+    initializationMode: "quasiSteady",
     turbulence: "laminar",
     reconstruction: "firstOrder",
     cfl: 0.02,
@@ -44,12 +45,39 @@ test("default mesh includes a long, finite external plume domain at one atmosphe
   });
   const snapshot = solver.createSnapshot();
   assert.equal(solver.config.ambientPressurePa, 101325);
+  assert.equal(solver.config.initializationMode, "coldStart");
   assert.ok(snapshot.mesh.lengthM / snapshot.mesh.nozzleLengthM > 6);
   assert.ok(snapshot.mesh.nozzleExitIndex < snapshot.mesh.nx - 2);
   assert.ok(snapshot.mesh.wallFaces.at(-1)! > solver.config.geometry.exitRadiusM * 3);
   const externalIndex = (snapshot.mesh.nozzleExitIndex + 4) * snapshot.mesh.nr;
   assert.ok(Number.isFinite(snapshot.fields.mach[externalIndex]));
-  assert.ok(snapshot.fields.velocity[externalIndex] > 0);
+  assert.equal(snapshot.fields.velocity[externalIndex], 0);
+  assert.ok(snapshot.fields.velocity.every((value) => value === 0));
+  assert.ok(snapshot.fields.pressure.every((value) => Math.abs(value - 101325) < 1));
+});
+
+test("cold start applies chamber pressure at the inlet before it reaches the nozzle", () => {
+  const solver = new AxisymmetricRansSolver({
+    ...DEFAULT_RANS_CONFIG,
+    nx: 48,
+    nr: 14,
+    turbulence: "laminar",
+    reconstruction: "firstOrder",
+    cfl: 0.05,
+    cflRamp: false
+  });
+  const initial = solver.createSnapshot();
+  assert.ok(initial.fields.velocity.every((value) => value === 0));
+
+  const firstStep = solver.step(1);
+  const nr = firstStep.mesh.nr;
+  const inletPressure = firstStep.fields.pressure[0];
+  const throatPressure = firstStep.fields.pressure[solver.mesh.throatIndex * nr];
+  const exitPressure = firstStep.fields.pressure[solver.mesh.nozzleExitIndex * nr];
+  assert.ok(inletPressure > DEFAULT_RANS_CONFIG.ambientPressurePa * 1.05);
+  assert.ok(Math.abs(throatPressure - DEFAULT_RANS_CONFIG.ambientPressurePa) < 1);
+  assert.ok(Math.abs(exitPressure - DEFAULT_RANS_CONFIG.ambientPressurePa) < 1);
+  assert.equal(firstStep.diagnostics.failed, false, firstStep.diagnostics.failureReason);
 });
 
 test("axisymmetric SA step has positive wall distance and no axis singularity", () => {
@@ -75,6 +103,7 @@ test("long external-plume run survives an aggressive CFL and near-vacuum farfiel
     ...DEFAULT_RANS_CONFIG,
     nx: 48,
     nr: 14,
+    initializationMode: "quasiSteady",
     ambientPressurePa: 1013.25,
     cfl: 0.5,
     cflRamp: false
@@ -93,6 +122,7 @@ test("positivity recovery limits an oversized timestep instead of failing the ru
     ...DEFAULT_RANS_CONFIG,
     nx: 48,
     nr: 14,
+    initializationMode: "quasiSteady",
     fixedTimeStepS: 1e-5
   });
   const snapshot = solver.step(3);

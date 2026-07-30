@@ -41,6 +41,7 @@ function configFromInputs(inputs: NozzleCfdInputs): Partial<RansSolverConfig> {
     gamma: inputs.gamma,
     gasConstant: R_UNIVERSAL / Math.max(inputs.molecularWeightKgPerKmol, 1),
     thermoModel: inputs.thermoModel ?? "hydroloxFrozen",
+    initializationMode: "quasiSteady",
     turbulence: inputs.turbulence ?? "spalartAllmaras",
     reconstruction: inputs.reconstruction ?? "musclVenkatakrishnan",
     cfl: inputs.cfl ?? 0.05,

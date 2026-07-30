@@ -171,9 +171,41 @@ export class AxisymmetricRansSolver {
     this.primitive = createPrimitiveArrays(this.mesh.cells);
     this.residual = createConservativeState(this.mesh.cells);
     this.lastUpdate = new Float64Array(this.mesh.cells);
-    this.initializeQuasiOneDimensional();
+    if (this.config.initializationMode === "coldStart") this.initializeQuiescentAmbient();
+    else this.initializeQuasiOneDimensional();
     this.decodeState();
     this.gradients = this.computeGradients();
+  }
+
+  private initializeQuiescentAmbient() {
+    const pressure = Math.max(this.config.ambientPressurePa, this.config.pressureMin);
+    const temperature = 288.15;
+    for (let i = 0; i < this.mesh.nx; i += 1) {
+      const thermo = thermodynamicProperties(
+        this.thermoCoordinate(this.mesh.xCenters[i]),
+        temperature,
+        this.config
+      );
+      const rho = pressure / (thermo.gasConstant * temperature);
+      const face: FacePrimitive = {
+        rho,
+        u: 0,
+        v: 0,
+        p: pressure,
+        temperature,
+        nuTilde: 0,
+        thermo
+      };
+      const conserved = conservativeFromPrimitive(face);
+      for (let j = 0; j < this.mesh.nr; j += 1) {
+        const index = ransCellIndex(i, j, this.mesh);
+        this.state.rho[index] = conserved[0];
+        this.state.rhoU[index] = conserved[1];
+        this.state.rhoV[index] = conserved[2];
+        this.state.rhoE[index] = conserved[3];
+        this.state.rhoNuTilde[index] = 0;
+      }
+    }
   }
 
   private initializeQuasiOneDimensional() {

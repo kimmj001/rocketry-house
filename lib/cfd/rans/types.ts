@@ -2,6 +2,7 @@ export type ReconstructionMode = "firstOrder" | "musclVenkatakrishnan";
 export type TurbulenceMode = "laminar" | "spalartAllmaras";
 export type ThermoModel = "constantGas" | "hydroloxFrozen";
 export type ResolutionPreset = "development" | "standard" | "high";
+export type InitializationMode = "coldStart" | "quasiSteady";
 export type CfdFieldName =
   | "mach"
   | "pressure"
@@ -34,6 +35,7 @@ export type RansSolverConfig = {
   gamma: number;
   gasConstant: number;
   thermoModel: ThermoModel;
+  initializationMode: InitializationMode;
   turbulence: TurbulenceMode;
   reconstruction: ReconstructionMode;
   cfl: number;
@@ -198,6 +200,7 @@ export const DEFAULT_RANS_CONFIG: RansSolverConfig = {
   gamma: 1.1489,
   gasConstant: 378.1,
   thermoModel: "hydroloxFrozen",
+  initializationMode: "coldStart",
   turbulence: "spalartAllmaras",
   reconstruction: "musclVenkatakrishnan",
   cfl: 0.05,

@@ -78,7 +78,8 @@ function NozzleFieldCanvas({
   showMesh,
   autoRange,
   fixedMin,
-  fixedMax
+  fixedMax,
+  ambientPressurePa
 }: {
   snapshot: SolverSnapshot | null;
   fieldName: CfdFieldName;
@@ -87,6 +88,7 @@ function NozzleFieldCanvas({
   autoRange: boolean;
   fixedMin: number;
   fixedMax: number;
+  ambientPressurePa: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -137,12 +139,22 @@ function NozzleFieldCanvas({
             0,
             Math.min(1, (snapshot.fields.mach[index] - 0.005) / 0.12)
           );
+          const farfieldIndex = (nx - 1) * nr + (nr - 1);
+          const fieldVisibility = fieldName === "pressure"
+            ? Math.max(0, Math.min(1, Math.abs(values[index] - ambientPressurePa) / Math.max(ambientPressurePa * 0.02, 500)))
+            : fieldName === "temperature"
+              ? Math.max(0, Math.min(1, Math.abs(values[index] - 288.15) / 20))
+              : fieldName === "density"
+                ? Math.max(0, Math.min(1, Math.abs(values[index] - values[farfieldIndex]) / Math.max(Math.abs(values[farfieldIndex]) * 0.05, 1e-6)))
+                : fieldName === "residual"
+                  ? Math.max(0, Math.min(1, normalized))
+                  : machVisibility;
           const eta = (j + 0.5) / nr;
           const farfieldFade = i <= nozzleExitIndex
             ? 1
             : Math.max(0, Math.min(1, (1 - eta) / 0.22));
           const fade = farfieldFade * farfieldFade * (3 - 2 * farfieldFade);
-          const fillColor = scientificColor(normalized, machVisibility * fade);
+          const fillColor = scientificColor(normalized, fieldVisibility * fade);
           context.fillStyle = fillColor;
           context.strokeStyle = showMesh ? "rgba(255,255,255,0.14)" : fillColor;
           context.lineWidth = showMesh ? 0.45 : 0.8;
@@ -219,7 +231,7 @@ function NozzleFieldCanvas({
     const observer = new ResizeObserver(draw);
     observer.observe(parent);
     return () => observer.disconnect();
-  }, [autoRange, fieldName, fixedMax, fixedMin, mirror, showMesh, snapshot]);
+  }, [ambientPressurePa, autoRange, fieldName, fixedMax, fixedMin, mirror, showMesh, snapshot]);
 
   return (
     <div className="min-h-[260px] w-full overflow-hidden bg-[#05070b]">
@@ -298,7 +310,7 @@ export function NozzleCfdLab() {
   const [ready, setReady] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fieldName, setFieldName] = useState<CfdFieldName>("mach");
+  const [fieldName, setFieldName] = useState<CfdFieldName>("pressure");
   const [mirror, setMirror] = useState(true);
   const [showMesh, setShowMesh] = useState(false);
   const [autoRange, setAutoRange] = useState(true);
@@ -525,6 +537,7 @@ export function NozzleCfdLab() {
               autoRange={autoRange}
               fixedMin={fixedMin}
               fixedMax={fixedMax}
+              ambientPressurePa={config.ambientPressurePa}
             />
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 bg-[#0a0d12] px-5 py-2 text-xs text-white/48">
               <span>{selectedField.label} {snapshot ? `${formatNumber(snapshot.ranges[fieldName].min)} to ${formatNumber(snapshot.ranges[fieldName].max)} ${selectedField.unit}` : ""}</span>
