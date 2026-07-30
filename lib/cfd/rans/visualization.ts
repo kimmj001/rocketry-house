@@ -57,7 +57,15 @@ export function externalFieldVisibility({
 
   const edgeFeatherM = Math.max(exitRadiusM * 0.35, outerRadiusM * 0.12, 1e-6);
   const edgeVisibility = smoothStep((outerRadiusM - radiusM) / edgeFeatherM);
-  return edgeVisibility * smoothStep((flowActivity - 0.015) / 0.985);
+  const downstreamDistanceM = xM - nozzleExitXM;
+  const lipEnvelopeRadiusM = exitRadiusM + 0.22 * downstreamDistanceM;
+  const lipFeatherM = Math.max(exitRadiusM * 0.02, 1e-6);
+  const lipVisibility = 1 - smoothStep(
+    (radiusM - lipEnvelopeRadiusM) / lipFeatherM
+  );
+  return edgeVisibility *
+    lipVisibility *
+    smoothStep((flowActivity - 0.015) / 0.985);
 }
 
 export function externalFlowActivity({
@@ -104,4 +112,23 @@ export function transportedThermalEnergy({
     Math.max(axialVelocityMS, 0) / Math.max(maximumAxialVelocityMS, 1)
   );
   return Math.pow(temperatureSignal * axialVelocitySignal, 0.55);
+}
+
+export function flowStructureColorPosition({
+  pressurePa,
+  ambientPressurePa,
+  contrastScalePa,
+  shockSignal = 0
+}: {
+  pressurePa: number;
+  ambientPressurePa: number;
+  contrastScalePa: number;
+  shockSignal?: number;
+}) {
+  const pressurePosition = pressureContrastPosition(
+    pressurePa,
+    ambientPressurePa,
+    contrastScalePa
+  );
+  return clamp01(0.06 + 0.84 * pressurePosition + 0.1 * clamp01(shockSignal));
 }

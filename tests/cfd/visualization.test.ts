@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   externalFieldVisibility,
   externalFlowActivity,
+  flowStructureColorPosition,
   pressureContrastPosition,
   pressureContrastScale,
   transportedThermalEnergy
@@ -26,6 +27,16 @@ test("external visualization keeps the nozzle interior and active exit connected
     xM: domain.nozzleExitXM + 1e-5,
     radiusM: domain.exitRadiusM
   }), 1);
+  assert.ok(externalFieldVisibility({
+    ...domain,
+    xM: domain.nozzleExitXM + 1e-5,
+    radiusM: domain.exitRadiusM * 1.35
+  }) < 0.1);
+  assert.ok(externalFieldVisibility({
+    ...domain,
+    xM: domain.nozzleExitXM + domain.exitRadiusM * 0.5,
+    radiusM: domain.exitRadiusM * 1.2
+  }) < 0.05);
 });
 
 test("external visualization follows flow activity and fades only at the farfield boundary", () => {
@@ -89,6 +100,19 @@ test("transported thermal energy excludes stationary heat and cold pressure wave
     temperatureK: 2400,
     axialVelocityMS: 1800
   }) > 0.5);
+});
+
+test("flow structure hue separates pressure deficits, ambient, and compression", () => {
+  const base = {
+    ambientPressurePa: 101325,
+    contrastScalePa: 50000
+  };
+  const low = flowStructureColorPosition({ ...base, pressurePa: 80000 });
+  const ambient = flowStructureColorPosition({ ...base, pressurePa: 101325 });
+  const high = flowStructureColorPosition({ ...base, pressurePa: 135000 });
+  assert.ok(low < ambient);
+  assert.ok(ambient < high);
+  assert.ok(high - low > 0.35);
 });
 
 test("pressure contrast ignores chamber extremes and separates pressure around ambient", () => {

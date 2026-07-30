@@ -141,7 +141,12 @@ solver variable. Outside the nozzle, its filled core is proportional to
 transported thermal energy: normalized temperature departure multiplied by
 positive axial velocity. Finite-difference pressure gradients add only thin
 shock and shear features, so a slow heated pressure wave cannot become an
-opaque plume. Every raw cell-centered field remains selectable independently.
+opaque plume. Hue is mapped independently from local static-pressure departure,
+with cool colors below ambient and warm colors above ambient. A continuous
+launch envelope starts at the physical nozzle-exit radius and limits the
+displayed expansion angle downstream, preventing the external mesh from
+creating a detached or oversized plume. Every raw cell-centered field remains
+selectable independently.
 
 ## Diagnostics
 

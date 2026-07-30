@@ -27,6 +27,7 @@ import {
 import {
   externalFieldVisibility,
   externalFlowActivity,
+  flowStructureColorPosition,
   pressureContrastPosition,
   pressureContrastScale,
   transportedThermalEnergy
@@ -78,13 +79,15 @@ const PRESSURE_DIVERGING = [
 ] as const;
 
 const FLOW_STRUCTURE_PALETTE = [
-  [18, 9, 28],
-  [55, 18, 54],
-  [112, 30, 54],
-  [181, 54, 43],
-  [226, 96, 42],
-  [248, 158, 59],
-  [255, 215, 116]
+  [38, 54, 104],
+  [42, 92, 136],
+  [54, 132, 154],
+  [84, 145, 150],
+  [128, 91, 72],
+  [185, 72, 43],
+  [222, 105, 40],
+  [242, 151, 55],
+  [250, 202, 92]
 ] as const;
 
 const STANDARD_ATMOSPHERE_PA = 101325;
@@ -427,10 +430,15 @@ function NozzleFieldCanvas({
               -14 * Math.hypot(axialGradient, radialGradient)
             );
             const base = Math.max(0, Math.min(1, structureBase[pixelIndex]));
-            const normalized = Math.max(
-              0,
-              Math.min(1, 0.05 + 0.72 * base + 0.3 * shockSignal)
-            );
+            const pressurePa =
+              ambientPressurePa +
+              structurePressure[pixelIndex] * pressureContrastPa;
+            const normalized = flowStructureColorPosition({
+              pressurePa,
+              ambientPressurePa,
+              contrastScalePa: pressureContrastPa,
+              shockSignal
+            });
             const structureOpacity = Math.max(
               Math.pow(base, 0.65),
               shockSignal * 0.68
@@ -448,7 +456,7 @@ function NozzleFieldCanvas({
       fieldContext.putImageData(image, 0, 0);
       context.save();
       context.imageSmoothingEnabled = true;
-      context.filter = "blur(0.8px)";
+      context.filter = "blur(0.45px)";
       context.drawImage(fieldCanvas, plotLeft, plotTop, rasterWidth, rasterHeight);
       context.restore();
 
@@ -535,7 +543,7 @@ function NozzleFieldCanvas({
           ? ambientPressurePa + pressureContrastPa
           : max;
       context.fillText(
-        flowStructureActive ? "low" : formatNumber(legendMin),
+        flowStructureActive ? "low p" : formatNumber(legendMin),
         legendLeft,
         legendTop - 2
       );
@@ -544,7 +552,7 @@ function NozzleFieldCanvas({
         const ambientWidth = context.measureText(ambientText).width;
         context.fillText(ambientText, legendLeft + 0.5 * legendWidth - 0.5 * ambientWidth, legendTop - 2);
       }
-      const maxText = flowStructureActive ? "high" : formatNumber(legendMax);
+      const maxText = flowStructureActive ? "high p" : formatNumber(legendMax);
       const maxWidth = context.measureText(maxText).width;
       context.fillText(maxText, legendLeft + legendWidth - maxWidth, legendTop - 2);
     };
