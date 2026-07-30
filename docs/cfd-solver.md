@@ -120,6 +120,11 @@ and a robust external-flow contrast scale. Chamber pressure saturates at the
 high end instead of flattening the much smaller expansion and compression
 variations in the plume.
 
+The canvas bilinearly reconstructs cell-centered values in body-fitted
+coordinates at display-pixel resolution. This removes cell-sized stair steps
+without changing the solver mesh, timestep, or stability characteristics. The
+`Mesh` overlay still shows the underlying finite-volume cells.
+
 ## Diagnostics
 
 The UI reports continuity, axial momentum, radial momentum, energy, and

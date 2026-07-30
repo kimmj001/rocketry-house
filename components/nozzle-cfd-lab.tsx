@@ -69,10 +69,13 @@ const PRESSURE_DIVERGING = [
 ] as const;
 
 const STANDARD_ATMOSPHERE_PA = 101325;
+const FIELD_BACKGROUND = [5, 7, 11] as const;
 
-function scientificColor(
+function writeScientificColor(
+  target: Uint8ClampedArray,
+  offset: number,
   value: number,
-  visibility = 1,
+  visibility: number,
   palette: ReadonlyArray<readonly [number, number, number]> = VIRIDIS
 ) {
   const t = Math.max(0, Math.min(1, value));
@@ -81,12 +84,29 @@ function scientificColor(
   const local = scaled - index;
   const left = palette[index];
   const right = palette[index + 1];
-  const background = [5, 7, 11] as const;
-  const channel = (component: number) => {
+  const strength = Math.max(0, Math.min(1, visibility));
+  for (let component = 0; component < 3; component += 1) {
     const color = left[component] + (right[component] - left[component]) * local;
-    return Math.round(background[component] + (color - background[component]) * Math.max(0, Math.min(1, visibility)));
-  };
-  return `rgb(${channel(0)}, ${channel(1)}, ${channel(2)})`;
+    target[offset + component] = Math.round(
+      FIELD_BACKGROUND[component] + (color - FIELD_BACKGROUND[component]) * strength
+    );
+  }
+  target[offset + 3] = 255;
+}
+
+function bilinearSample(
+  field: ArrayLike<number>,
+  i0: number,
+  i1: number,
+  j0: number,
+  j1: number,
+  tx: number,
+  tr: number,
+  nr: number
+) {
+  const lower = field[i0 * nr + j0] * (1 - tx) + field[i1 * nr + j0] * tx;
+  const upper = field[i0 * nr + j1] * (1 - tx) + field[i1 * nr + j1] * tx;
+  return lower * (1 - tr) + upper * tr;
 }
 
 function formatNumber(value: number) {
@@ -163,68 +183,136 @@ function NozzleFieldCanvas({
       );
       const pressurePaletteActive = fieldName === "pressure" && autoRange;
 
-      context.lineWidth = 0.45;
-      for (let i = 0; i < nx; i += 1) {
-        const x0 = plotLeft + xFaces[i] * xScale;
-        const x1 = plotLeft + xFaces[i + 1] * xScale;
-        const wall0 = wallFaces[i];
-        const wall1 = wallFaces[i + 1];
-        const cellXM = 0.5 * (xFaces[i] + xFaces[i + 1]);
-        const cellWallRadiusM = 0.5 * (wall0 + wall1);
-        for (let j = 0; j < nr; j += 1) {
-          const index = i * nr + j;
-          const normalized = pressurePaletteActive
-            ? pressureContrastPosition(values[index], ambientPressurePa, pressureContrastPa)
-            : (values[index] - min) / Math.max(max - min, 1e-20);
-          const machVisibility = Math.max(
-            0,
-            Math.min(1, (snapshot.fields.mach[index] - 0.005) / 0.12)
+      const rasterWidth = Math.max(1, Math.ceil(plotRight - plotLeft));
+      const rasterHeight = Math.max(1, Math.ceil(plotBottom - plotTop));
+      const fieldCanvas = document.createElement("canvas");
+      fieldCanvas.width = rasterWidth;
+      fieldCanvas.height = rasterHeight;
+      const fieldContext = fieldCanvas.getContext("2d");
+      if (!fieldContext) return;
+      const image = fieldContext.createImageData(rasterWidth, rasterHeight);
+      const xSamples: Array<{
+        xM: number;
+        wallRadiusM: number;
+        i0: number;
+        i1: number;
+        tx: number;
+      }> = [];
+      let faceI = 0;
+      for (let pixelX = 0; pixelX < rasterWidth; pixelX += 1) {
+        const xM = (pixelX + 0.5) / xScale;
+        while (faceI < nx - 1 && xM >= xFaces[faceI + 1]) faceI += 1;
+        const faceSpan = Math.max(xFaces[faceI + 1] - xFaces[faceI], 1e-12);
+        const faceFraction = Math.max(0, Math.min(1, (xM - xFaces[faceI]) / faceSpan));
+        const wallRadiusM = wallFaces[faceI] +
+          (wallFaces[faceI + 1] - wallFaces[faceI]) * faceFraction;
+        const center = 0.5 * (xFaces[faceI] + xFaces[faceI + 1]);
+        let i0 = faceI;
+        let i1 = faceI;
+        let tx = 0;
+        if (xM >= center && faceI < nx - 1) {
+          i1 = faceI + 1;
+          const nextCenter = 0.5 * (xFaces[i1] + xFaces[i1 + 1]);
+          tx = Math.max(0, Math.min(1, (xM - center) / Math.max(nextCenter - center, 1e-12)));
+        } else if (faceI > 0) {
+          i0 = faceI - 1;
+          i1 = faceI;
+          const previousCenter = 0.5 * (xFaces[i0] + xFaces[i0 + 1]);
+          tx = Math.max(0, Math.min(1, (xM - previousCenter) / Math.max(center - previousCenter, 1e-12)));
+        }
+        xSamples.push({ xM, wallRadiusM, i0, i1, tx });
+      }
+
+      const farfieldIndex = (nx - 1) * nr + (nr - 1);
+      const palette = pressurePaletteActive ? PRESSURE_DIVERGING : VIRIDIS;
+      for (let pixelY = 0; pixelY < rasterHeight; pixelY += 1) {
+        const canvasY = plotTop + pixelY + 0.5;
+        for (let pixelX = 0; pixelX < rasterWidth; pixelX += 1) {
+          const offset = (pixelY * rasterWidth + pixelX) * 4;
+          const sample = xSamples[pixelX];
+          const radiusM = Math.abs(canvasY - centerY) / radialScale;
+          if (radiusM > sample.wallRadiusM) {
+            image.data[offset] = FIELD_BACKGROUND[0];
+            image.data[offset + 1] = FIELD_BACKGROUND[1];
+            image.data[offset + 2] = FIELD_BACKGROUND[2];
+            image.data[offset + 3] = 255;
+            continue;
+          }
+          const radialPosition = radiusM / Math.max(sample.wallRadiusM, 1e-12) * nr - 0.5;
+          const j0 = Math.max(0, Math.min(nr - 1, Math.floor(radialPosition)));
+          const j1 = Math.max(0, Math.min(nr - 1, j0 + 1));
+          const tr = Math.max(0, Math.min(1, radialPosition - j0));
+          const sampledValue = bilinearSample(
+            values,
+            sample.i0,
+            sample.i1,
+            j0,
+            j1,
+            sample.tx,
+            tr,
+            nr
           );
-          const farfieldIndex = (nx - 1) * nr + (nr - 1);
+          const normalized = pressurePaletteActive
+            ? pressureContrastPosition(sampledValue, ambientPressurePa, pressureContrastPa)
+            : (sampledValue - min) / Math.max(max - min, 1e-20);
+          const sampledMach = bilinearSample(
+            snapshot.fields.mach,
+            sample.i0,
+            sample.i1,
+            j0,
+            j1,
+            sample.tx,
+            tr,
+            nr
+          );
+          const machVisibility = Math.max(0, Math.min(1, (sampledMach - 0.005) / 0.12));
           const fieldVisibility = fieldName === "pressure"
-            ? Math.max(0, Math.min(1, Math.abs(values[index] - ambientPressurePa) / Math.max(ambientPressurePa * 0.02, 500)))
+            ? Math.max(0, Math.min(1, Math.abs(sampledValue - ambientPressurePa) / Math.max(ambientPressurePa * 0.02, 500)))
             : fieldName === "temperature"
-              ? Math.max(0, Math.min(1, Math.abs(values[index] - 288.15) / 20))
+              ? Math.max(0, Math.min(1, Math.abs(sampledValue - 288.15) / 20))
               : fieldName === "density"
-                ? Math.max(0, Math.min(1, Math.abs(values[index] - values[farfieldIndex]) / Math.max(Math.abs(values[farfieldIndex]) * 0.05, 1e-6)))
+                ? Math.max(0, Math.min(1, Math.abs(sampledValue - values[farfieldIndex]) / Math.max(Math.abs(values[farfieldIndex]) * 0.05, 1e-6)))
                 : fieldName === "residual"
                   ? Math.max(0, Math.min(1, normalized))
                   : machVisibility;
           const fade = externalFieldVisibility({
-            xM: cellXM,
-            radiusM: (j + 0.5) / nr * cellWallRadiusM,
+            xM: sample.xM,
+            radiusM,
             nozzleExitXM,
             exitRadiusM,
             domainLengthM: snapshot.mesh.lengthM,
             farfieldRadiusM: maxRadiusM
           });
-          const fillColor = scientificColor(
-            normalized,
-            fieldVisibility * fade,
-            pressurePaletteActive ? PRESSURE_DIVERGING : VIRIDIS
-          );
-          context.fillStyle = fillColor;
-          context.strokeStyle = showMesh ? "rgba(255,255,255,0.14)" : fillColor;
-          context.lineWidth = showMesh ? 0.45 : 0.8;
-          const eta0 = j / nr;
-          const eta1 = (j + 1) / nr;
-          const upper = new Path2D();
-          upper.moveTo(x0, centerY - eta0 * wall0 * radialScale);
-          upper.lineTo(x1, centerY - eta0 * wall1 * radialScale);
-          upper.lineTo(x1, centerY - eta1 * wall1 * radialScale);
-          upper.lineTo(x0, centerY - eta1 * wall0 * radialScale);
-          upper.closePath();
-          context.fill(upper);
-          context.stroke(upper);
-          if (mirror) {
-            const lower = new Path2D();
-            lower.moveTo(x0, centerY + eta0 * wall0 * radialScale);
-            lower.lineTo(x1, centerY + eta0 * wall1 * radialScale);
-            lower.lineTo(x1, centerY + eta1 * wall1 * radialScale);
-            lower.lineTo(x0, centerY + eta1 * wall0 * radialScale);
-            lower.closePath();
-            context.fill(lower);
-            context.stroke(lower);
+          writeScientificColor(image.data, offset, normalized, fieldVisibility * fade, palette);
+        }
+      }
+      fieldContext.putImageData(image, 0, 0);
+      context.imageSmoothingEnabled = true;
+      context.drawImage(fieldCanvas, plotLeft, plotTop, rasterWidth, rasterHeight);
+
+      if (showMesh) {
+        context.strokeStyle = "rgba(255,255,255,0.14)";
+        context.lineWidth = 0.45;
+        for (let i = 0; i < nx; i += 1) {
+          const x0 = plotLeft + xFaces[i] * xScale;
+          const x1 = plotLeft + xFaces[i + 1] * xScale;
+          for (let j = 0; j < nr; j += 1) {
+            const eta0 = j / nr;
+            const eta1 = (j + 1) / nr;
+            context.stroke(new Path2D(
+              `M ${x0} ${centerY - eta0 * wallFaces[i] * radialScale} ` +
+              `L ${x1} ${centerY - eta0 * wallFaces[i + 1] * radialScale} ` +
+              `L ${x1} ${centerY - eta1 * wallFaces[i + 1] * radialScale} ` +
+              `L ${x0} ${centerY - eta1 * wallFaces[i] * radialScale} Z`
+            ));
+            if (mirror) {
+              context.stroke(new Path2D(
+                `M ${x0} ${centerY + eta0 * wallFaces[i] * radialScale} ` +
+                `L ${x1} ${centerY + eta0 * wallFaces[i + 1] * radialScale} ` +
+                `L ${x1} ${centerY + eta1 * wallFaces[i + 1] * radialScale} ` +
+                `L ${x0} ${centerY + eta1 * wallFaces[i] * radialScale} Z`
+              ));
+            }
           }
         }
       }
