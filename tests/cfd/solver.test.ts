@@ -183,6 +183,23 @@ test("SA roundoff limiting remains separate from conservative positivity recover
   assert.ok(snapshot.diagnostics.cfl >= 0.19, `CFL collapsed to ${snapshot.diagnostics.cfl}`);
 });
 
+test("point-implicit SA destruction does not collapse the global timestep", () => {
+  const solver = new AxisymmetricRansSolver({
+    ...DEFAULT_RANS_CONFIG,
+    nx: 48,
+    nr: 14
+  });
+  const snapshot = solver.step(1500);
+  assert.equal(snapshot.diagnostics.failed, false, snapshot.diagnostics.failureReason);
+  assert.equal(snapshot.diagnostics.rejectedSteps, 0);
+  assert.equal(snapshot.diagnostics.positivityCorrections, 0);
+  assert.equal(snapshot.diagnostics.turbulenceClips, 0);
+  assert.ok(
+    snapshot.diagnostics.dtS > 1e-8,
+    `SA source collapsed the timestep to ${snapshot.diagnostics.dtS}`
+  );
+});
+
 test("axisymmetric SA step has positive wall distance and no axis singularity", () => {
   const solver = new AxisymmetricRansSolver({
     ...DEFAULT_RANS_CONFIG,

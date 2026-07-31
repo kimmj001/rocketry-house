@@ -10,6 +10,16 @@ export type ThermoStation = {
   referenceTemperatureK: number;
 };
 
+export type ThermodynamicBase = {
+  gamma: number;
+  gasConstant: number;
+  viscosity: number;
+  conductivity: number;
+  prandtl: number;
+  cp: number;
+  referenceTemperatureK: number;
+};
+
 export const HYDROLOX_FROZEN_STATIONS: ThermoStation[] = [
   {
     xNormalized: 0,
@@ -62,16 +72,15 @@ function interpolateStation(xNormalized: number) {
   };
 }
 
-export function thermodynamicProperties(
+export function thermodynamicBase(
   xNormalized: number,
-  temperatureK: number,
   config: RansSolverConfig
-): ThermoProperties {
+): ThermodynamicBase {
   if (config.thermoModel === "constantGas") {
     const gamma = Math.max(1.02, Math.min(1.67, config.gamma));
     const gasConstant = Math.max(1, config.gasConstant);
     const referenceTemperatureK = 300;
-    const viscosity = 1.846e-5 * Math.pow(Math.max(temperatureK, 50) / referenceTemperatureK, 0.7);
+    const viscosity = 1.846e-5;
     const prandtl = 0.72;
     const cp = gamma * gasConstant / (gamma - 1);
     return {
@@ -80,20 +89,50 @@ export function thermodynamicProperties(
       viscosity,
       conductivity: cp * viscosity / prandtl,
       prandtl,
-      cp
+      cp,
+      referenceTemperatureK
     };
   }
 
   const station = interpolateStation(xNormalized);
-  const temperatureScale = Math.pow(Math.max(temperatureK, 50) / station.referenceTemperatureK, 0.7);
   const gamma = station.gamma;
   const gasConstant = station.gasConstant;
   return {
     gamma,
     gasConstant,
-    viscosity: station.viscosity * temperatureScale,
-    conductivity: station.conductivity * temperatureScale,
+    viscosity: station.viscosity,
+    conductivity: station.conductivity,
     prandtl: station.prandtl,
-    cp: gamma * gasConstant / (gamma - 1)
+    cp: gamma * gasConstant / (gamma - 1),
+    referenceTemperatureK: station.referenceTemperatureK
   };
+}
+
+export function thermodynamicPropertiesFromBase(
+  base: ThermodynamicBase,
+  temperatureK: number
+): ThermoProperties {
+  const temperatureScale = Math.pow(
+    Math.max(temperatureK, 50) / base.referenceTemperatureK,
+    0.7
+  );
+  return {
+    gamma: base.gamma,
+    gasConstant: base.gasConstant,
+    viscosity: base.viscosity * temperatureScale,
+    conductivity: base.conductivity * temperatureScale,
+    prandtl: base.prandtl,
+    cp: base.cp
+  };
+}
+
+export function thermodynamicProperties(
+  xNormalized: number,
+  temperatureK: number,
+  config: RansSolverConfig
+): ThermoProperties {
+  return thermodynamicPropertiesFromBase(
+    thermodynamicBase(xNormalized, config),
+    temperatureK
+  );
 }

@@ -220,7 +220,7 @@ export const DEFAULT_RANS_CONFIG: RansSolverConfig = {
   cflRamp: true,
   turbulentPrandtl: 0.9,
   maxModifiedViscosityRatio: 10000,
-  iterationsPerBatch: 4,
+  iterationsPerBatch: 16,
   snapshotInterval: 5,
   rhoMin: 1e-8,
   pressureMin: 1,

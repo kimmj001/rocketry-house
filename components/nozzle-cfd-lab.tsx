@@ -36,7 +36,7 @@ function createInteractiveConfig(): RansSolverConfig {
     ...base,
     ...dimensions,
     reconstruction: "musclVenkatakrishnan",
-    iterationsPerBatch: 4
+    iterationsPerBatch: 16
   };
 }
 
@@ -641,7 +641,7 @@ export function NozzleCfdLab() {
                   <option value="high">High - 208 x 40</option>
                 </SelectControl>
                 <NumberControl label="Initial CFL" value={config.cfl} step={0.01} min={0.005} max={0.5} onChange={(value) => updateConfig({ ...config, cfl: value })} />
-                <NumberControl label="Iterations per batch" value={config.iterationsPerBatch} step={1} min={1} max={20} onChange={(value) => updateConfig({ ...config, iterationsPerBatch: value })} />
+                <NumberControl label="Iterations per batch" value={config.iterationsPerBatch} step={1} min={1} max={64} onChange={(value) => updateConfig({ ...config, iterationsPerBatch: value })} />
                 <label className="flex items-center justify-between gap-3 text-xs text-white/58">
                   CFL ramp
                   <input

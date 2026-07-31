@@ -371,9 +371,10 @@ function gradientStencil(mesh: BodyFittedMesh) {
 
 export function weightedLeastSquaresReconstruction(
   values: Float64Array,
-  mesh: BodyFittedMesh
+  mesh: BodyFittedMesh,
+  target?: ScalarReconstruction
 ): ScalarReconstruction {
-  const reconstruction = {
+  const reconstruction = target ?? {
     x: new Float64Array(mesh.cells),
     r: new Float64Array(mesh.cells),
     minimum: new Float64Array(mesh.cells),

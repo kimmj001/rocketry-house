@@ -18,7 +18,6 @@ import {
   createPrimitiveArrays,
   hllcFlux,
   noSlipAdiabaticWallGhost,
-  primitiveFromConservative,
   residualNorm,
   venkatakrishnanLimiter,
   weightedLeastSquaresReconstruction,
@@ -26,7 +25,12 @@ import {
   type FluxVector,
   type ScalarReconstruction
 } from "./numerics";
-import { thermodynamicProperties } from "./thermodynamics";
+import {
+  thermodynamicBase,
+  thermodynamicProperties,
+  thermodynamicPropertiesFromBase,
+  type ThermodynamicBase
+} from "./thermodynamics";
 import {
   DEFAULT_RANS_CONFIG,
   type BodyFittedMesh,
@@ -37,8 +41,7 @@ import {
   type RansSolverConfig,
   type SolverDiagnostics,
   type SolverResidualPoint,
-  type SolverSnapshot,
-  type ThermoProperties
+  type SolverSnapshot
 } from "./types";
 
 const PI = Math.PI;
@@ -50,6 +53,9 @@ const SA_CV1 = 7.1;
 const SA_CW2 = 0.3;
 const SA_CW3 = 2;
 const SA_CW1 = SA_CB1 / (SA_KAPPA * SA_KAPPA) + (1 + SA_CB2) / SA_SIGMA;
+const SA_KAPPA2 = SA_KAPPA * SA_KAPPA;
+const SA_CV1_CUBED = SA_CV1 * SA_CV1 * SA_CV1;
+const SA_CW3_SIXTH = SA_CW3 * SA_CW3 * SA_CW3 * SA_CW3 * SA_CW3 * SA_CW3;
 
 type GradientSet = {
   rho: ScalarReconstruction;
@@ -75,6 +81,25 @@ type ViscousFaceFlux = {
   conservative: FluxVector;
   nuTilde: number;
 };
+
+function createFacePrimitiveScratch(): FacePrimitive {
+  return {
+    rho: 0,
+    u: 0,
+    v: 0,
+    p: 0,
+    temperature: 0,
+    nuTilde: 0,
+    thermo: {
+      gamma: 0,
+      gasConstant: 0,
+      viscosity: 0,
+      conductivity: 0,
+      prandtl: 0,
+      cp: 0
+    }
+  };
+}
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -130,7 +155,8 @@ function isPhysicalConservative(
   rhoU: number,
   rhoV: number,
   rhoE: number,
-  thermo: ThermoProperties,
+  gamma: number,
+  gasConstant: number,
   config: RansSolverConfig
 ) {
   if (
@@ -143,8 +169,8 @@ function isPhysicalConservative(
     return false;
   }
   const kinetic = 0.5 * (rhoU * rhoU + rhoV * rhoV) / rho;
-  const pressure = (thermo.gamma - 1) * (rhoE - kinetic);
-  const temperature = pressure / (rho * thermo.gasConstant);
+  const pressure = (gamma - 1) * (rhoE - kinetic);
+  const temperature = pressure / (rho * gasConstant);
   return Number.isFinite(pressure) &&
     Number.isFinite(temperature) &&
     pressure > config.pressureMin &&
@@ -176,9 +202,18 @@ export class AxisymmetricRansSolver {
   private residual: ConservativeState;
   private gradients: GradientSet;
   private saSource: Float64Array;
+  private saProduction: Float64Array;
+  private saDestruction: Float64Array;
   private lastUpdate: Float64Array;
   private limiterEpsilon2: number;
   private faceWasLimited = false;
+  private columnThermoBase: ThermodynamicBase[];
+  private axialFaceThermoBase: ThermodynamicBase[];
+  private referenceDensityKgM3: number;
+  private referenceSoundSpeedMS: number;
+  private referenceKinematicViscosityM2S: number;
+  private leftFaceScratch = createFacePrimitiveScratch();
+  private rightFaceScratch = createFacePrimitiveScratch();
   private residualHistory: SolverResidualPoint[] = [];
   private iteration = 0;
   private pseudoTimeS = 0;
@@ -206,11 +241,41 @@ export class AxisymmetricRansSolver {
       this.config.nx,
       this.config.nr
     );
+    this.columnThermoBase = Array.from(
+      { length: this.mesh.nx },
+      (_, i) => thermodynamicBase(
+        this.thermoCoordinate(this.mesh.xCenters[i]),
+        this.config
+      )
+    );
+    this.axialFaceThermoBase = Array.from(
+      { length: this.mesh.nx + 1 },
+      (_, faceI) => thermodynamicBase(
+        this.thermoCoordinate(this.mesh.xFaces[faceI]),
+        this.config
+      )
+    );
+    const chamberBase = thermodynamicBase(0, this.config);
+    const chamberThermo = thermodynamicPropertiesFromBase(
+      chamberBase,
+      this.config.chamberTemperatureK
+    );
+    this.referenceDensityKgM3 = this.config.chamberPressurePa /
+      (chamberBase.gasConstant * this.config.chamberTemperatureK);
+    this.referenceSoundSpeedMS = Math.sqrt(
+      chamberBase.gamma *
+      chamberBase.gasConstant *
+      this.config.chamberTemperatureK
+    );
+    this.referenceKinematicViscosityM2S =
+      chamberThermo.viscosity / this.referenceDensityKgM3;
     this.state = createConservativeState(this.mesh.cells);
     this.nextState = createConservativeState(this.mesh.cells);
     this.primitive = createPrimitiveArrays(this.mesh.cells);
     this.residual = createConservativeState(this.mesh.cells);
     this.saSource = new Float64Array(this.mesh.cells);
+    this.saProduction = new Float64Array(this.mesh.cells);
+    this.saDestruction = new Float64Array(this.mesh.cells);
     this.lastUpdate = new Float64Array(this.mesh.cells);
     const h3 = this.mesh.minCellLength ** 3;
     this.limiterEpsilon2 = h3 * h3 + 1e-30;
@@ -331,66 +396,122 @@ export class AxisymmetricRansSolver {
   }
 
   private decodeState(trackFloors = true) {
-    for (let index = 0; index < this.mesh.cells; index += 1) {
-      const xNormalized = this.thermoCoordinate(this.mesh.cellX[index]);
-      const preliminary = thermodynamicProperties(xNormalized, this.config.chamberTemperatureK, this.config);
-      const conserved: [number, number, number, number] = [
-        this.state.rho[index],
-        this.state.rhoU[index],
-        this.state.rhoV[index],
-        this.state.rhoE[index]
-      ];
-      let decoded = primitiveFromConservative(conserved, preliminary, this.config);
-      const thermo = thermodynamicProperties(xNormalized, decoded.temperature, this.config);
-      decoded = primitiveFromConservative(conserved, thermo, this.config);
-      if (trackFloors) this.counters.floorApplications += decoded.floorCount;
-      const rho = decoded.rho;
-      const nuTilde = Math.max(this.state.rhoNuTilde[index] / rho, 0);
-      const nu = thermo.viscosity / rho;
-      const chi = nuTilde / Math.max(nu, 1e-20);
-      const chi3 = chi * chi * chi;
-      const fv1 = chi3 / Math.max(chi3 + SA_CV1 ** 3, 1e-30);
-      this.primitive.rho[index] = rho;
-      this.primitive.u[index] = decoded.u;
-      this.primitive.v[index] = decoded.v;
-      this.primitive.p[index] = decoded.p;
-      this.primitive.temperature[index] = decoded.temperature;
-      this.primitive.soundSpeed[index] = decoded.soundSpeed;
-      this.primitive.mach[index] = decoded.mach;
-      this.primitive.gamma[index] = thermo.gamma;
-      this.primitive.gasConstant[index] = thermo.gasConstant;
-      this.primitive.cp[index] = thermo.cp;
-      this.primitive.mu[index] = thermo.viscosity;
-      this.primitive.conductivity[index] = thermo.conductivity;
-      this.primitive.prandtl[index] = thermo.prandtl;
-      this.primitive.nu[index] = nu;
-      this.primitive.nuTilde[index] = nuTilde;
-      this.primitive.muT[index] = this.config.turbulence === "spalartAllmaras" ? rho * nuTilde * fv1 : 0;
+    for (let i = 0; i < this.mesh.nx; i += 1) {
+      const base = this.columnThermoBase[i];
+      for (let j = 0; j < this.mesh.nr; j += 1) {
+        const index = ransCellIndex(i, j, this.mesh);
+        const rawRho = this.state.rho[index];
+        const rho = Math.max(
+          Number.isFinite(rawRho) ? rawRho : this.config.rhoMin,
+          this.config.rhoMin
+        );
+        const rawU = this.state.rhoU[index] / rho;
+        const rawV = this.state.rhoV[index] / rho;
+        const u = Number.isFinite(rawU) ? rawU : 0;
+        const v = Number.isFinite(rawV) ? rawV : 0;
+        const kinetic = 0.5 * rho * (u * u + v * v);
+        const rawPressure = (base.gamma - 1) * (this.state.rhoE[index] - kinetic);
+        const p = Math.max(
+          Number.isFinite(rawPressure) ? rawPressure : this.config.pressureMin,
+          this.config.pressureMin
+        );
+        const rawTemperature = p / (rho * base.gasConstant);
+        const temperature = Math.max(
+          Number.isFinite(rawTemperature) ? rawTemperature : this.config.temperatureMin,
+          this.config.temperatureMin
+        );
+        if (trackFloors) {
+          this.counters.floorApplications +=
+            (rawRho < this.config.rhoMin || !Number.isFinite(rawRho) ? 1 : 0) +
+            (rawPressure < this.config.pressureMin || !Number.isFinite(rawPressure) ? 1 : 0) +
+            (rawTemperature < this.config.temperatureMin || !Number.isFinite(rawTemperature) ? 1 : 0);
+        }
+        const temperatureScale = Math.pow(
+          Math.max(temperature, 50) / base.referenceTemperatureK,
+          0.7
+        );
+        const viscosity = base.viscosity * temperatureScale;
+        const conductivity = base.conductivity * temperatureScale;
+        const soundSpeed = Math.sqrt(
+          Math.max(base.gamma * base.gasConstant * temperature, 1e-12)
+        );
+        const nuTilde = Math.max(this.state.rhoNuTilde[index] / rho, 0);
+        const nu = viscosity / rho;
+        const chi = nuTilde / Math.max(nu, 1e-20);
+        const chi3 = chi * chi * chi;
+        const fv1 = chi3 / Math.max(chi3 + SA_CV1 ** 3, 1e-30);
+        this.primitive.rho[index] = rho;
+        this.primitive.u[index] = u;
+        this.primitive.v[index] = v;
+        this.primitive.p[index] = p;
+        this.primitive.temperature[index] = temperature;
+        this.primitive.soundSpeed[index] = soundSpeed;
+        this.primitive.mach[index] = Math.hypot(u, v) / soundSpeed;
+        this.primitive.gamma[index] = base.gamma;
+        this.primitive.gasConstant[index] = base.gasConstant;
+        this.primitive.cp[index] = base.cp;
+        this.primitive.mu[index] = viscosity;
+        this.primitive.conductivity[index] = conductivity;
+        this.primitive.prandtl[index] = base.prandtl;
+        this.primitive.nu[index] = nu;
+        this.primitive.nuTilde[index] = nuTilde;
+        this.primitive.muT[index] = this.config.turbulence === "spalartAllmaras"
+          ? rho * nuTilde * fv1
+          : 0;
+      }
     }
   }
 
-  private computeGradients(): GradientSet {
+  private computeGradients(target?: GradientSet): GradientSet {
     return {
-      rho: weightedLeastSquaresReconstruction(this.primitive.rho, this.mesh),
-      u: weightedLeastSquaresReconstruction(this.primitive.u, this.mesh),
-      v: weightedLeastSquaresReconstruction(this.primitive.v, this.mesh),
-      p: weightedLeastSquaresReconstruction(this.primitive.p, this.mesh),
-      temperature: weightedLeastSquaresReconstruction(this.primitive.temperature, this.mesh),
-      nuTilde: weightedLeastSquaresReconstruction(this.primitive.nuTilde, this.mesh)
+      rho: weightedLeastSquaresReconstruction(this.primitive.rho, this.mesh, target?.rho),
+      u: weightedLeastSquaresReconstruction(this.primitive.u, this.mesh, target?.u),
+      v: weightedLeastSquaresReconstruction(this.primitive.v, this.mesh, target?.v),
+      p: weightedLeastSquaresReconstruction(this.primitive.p, this.mesh, target?.p),
+      temperature: weightedLeastSquaresReconstruction(
+        this.primitive.temperature,
+        this.mesh,
+        target?.temperature
+      ),
+      nuTilde: weightedLeastSquaresReconstruction(
+        this.primitive.nuTilde,
+        this.mesh,
+        target?.nuTilde
+      )
     };
   }
 
-  private cellCenteredFace(index: number, faceX: number): FacePrimitive {
+  private updateFaceThermodynamics(
+    target: FacePrimitive,
+    thermoBase: ThermodynamicBase,
+    temperature: number
+  ) {
+    const temperatureScale = Math.pow(
+      Math.max(temperature, 50) / thermoBase.referenceTemperatureK,
+      0.7
+    );
+    target.thermo.gamma = thermoBase.gamma;
+    target.thermo.gasConstant = thermoBase.gasConstant;
+    target.thermo.viscosity = thermoBase.viscosity * temperatureScale;
+    target.thermo.conductivity = thermoBase.conductivity * temperatureScale;
+    target.thermo.prandtl = thermoBase.prandtl;
+    target.thermo.cp = thermoBase.cp;
+  }
+
+  private cellCenteredFace(
+    index: number,
+    thermoBase: ThermodynamicBase,
+    target: FacePrimitive
+  ): FacePrimitive {
     const temperature = this.primitive.temperature[index];
-    return {
-      rho: this.primitive.rho[index],
-      u: this.primitive.u[index],
-      v: this.primitive.v[index],
-      p: this.primitive.p[index],
-      temperature,
-      nuTilde: this.primitive.nuTilde[index],
-      thermo: thermodynamicProperties(this.thermoCoordinate(faceX), temperature, this.config)
-    };
+    target.rho = this.primitive.rho[index];
+    target.u = this.primitive.u[index];
+    target.v = this.primitive.v[index];
+    target.p = this.primitive.p[index];
+    target.temperature = temperature;
+    target.nuTilde = this.primitive.nuTilde[index];
+    this.updateFaceThermodynamics(target, thermoBase, temperature);
+    return target;
   }
 
   private reconstructFaceValue(
@@ -410,8 +531,16 @@ export class AxisymmetricRansSolver {
     return center + limiter * delta;
   }
 
-  private cellFace(index: number, faceX: number, faceR: number): FacePrimitive {
-    if (this.config.reconstruction === "firstOrder") return this.cellCenteredFace(index, faceX);
+  private cellFace(
+    index: number,
+    faceX: number,
+    faceR: number,
+    thermoBase: ThermodynamicBase,
+    target: FacePrimitive
+  ): FacePrimitive {
+    if (this.config.reconstruction === "firstOrder") {
+      return this.cellCenteredFace(index, thermoBase, target);
+    }
 
     const dx = faceX - this.mesh.cellX[index];
     const dr = faceR - this.mesh.cellR[index];
@@ -448,17 +577,16 @@ export class AxisymmetricRansSolver {
       !Number.isFinite(u) || !Number.isFinite(v)
     ) {
       this.counters.firstOrderFallbacks += 1;
-      return this.cellCenteredFace(index, faceX);
+      return this.cellCenteredFace(index, thermoBase, target);
     }
-    return {
-      rho,
-      u,
-      v,
-      p,
-      temperature,
-      nuTilde: Math.max(nuTilde, 0),
-      thermo: thermodynamicProperties(this.thermoCoordinate(faceX), temperature, this.config)
-    };
+    target.rho = rho;
+    target.u = u;
+    target.v = v;
+    target.p = p;
+    target.temperature = temperature;
+    target.nuTilde = Math.max(nuTilde, 0);
+    this.updateFaceThermodynamics(target, thermoBase, temperature);
+    return target;
   }
 
   private outletFace(interior: FacePrimitive): FacePrimitive {
@@ -614,34 +742,50 @@ export class AxisymmetricRansSolver {
 
   private spalartAllmarasSource(index: number) {
     const nuTilde = this.primitive.nuTilde[index];
-    if (nuTilde <= 0) return 0;
+    if (nuTilde <= 0) {
+      this.saProduction[index] = 0;
+      this.saDestruction[index] = 0;
+      return 0;
+    }
     const nu = this.primitive.nu[index];
     const chi = nuTilde / Math.max(nu, 1e-20);
-    const chi3 = chi ** 3;
-    const fv1 = chi3 / Math.max(chi3 + SA_CV1 ** 3, 1e-30);
+    const chi3 = chi * chi * chi;
+    const fv1 = chi3 / Math.max(chi3 + SA_CV1_CUBED, 1e-30);
     const fv2 = 1 - chi / Math.max(1 + chi * fv1, 1e-20);
     const rotation = Math.abs(this.gradients.v.x[index] - this.gradients.u.r[index]);
     const distance = this.mesh.wallDistance[index];
+    const distance2 = distance * distance;
     const sTilde = Math.max(
-      rotation + nuTilde * fv2 / Math.max(SA_KAPPA ** 2 * distance ** 2, 1e-20),
+      rotation + nuTilde * fv2 / Math.max(SA_KAPPA2 * distance2, 1e-20),
       1e-10
     );
     const rTurbulence = clamp(
-      nuTilde / Math.max(sTilde * SA_KAPPA ** 2 * distance ** 2, 1e-20),
+      nuTilde / Math.max(sTilde * SA_KAPPA2 * distance2, 1e-20),
       0,
       10
     );
-    const g = rTurbulence + SA_CW2 * (rTurbulence ** 6 - rTurbulence);
-    const fw = g * Math.pow(
-      (1 + SA_CW3 ** 6) / Math.max(g ** 6 + SA_CW3 ** 6, 1e-30),
-      1 / 6
-    );
+    const r2 = rTurbulence * rTurbulence;
+    const r6 = r2 * r2 * r2;
+    const g = rTurbulence + SA_CW2 * (r6 - rTurbulence);
+    const g2 = g * g;
+    const g6 = g2 * g2 * g2;
+    const fwRatio =
+      (1 + SA_CW3_SIXTH) /
+      Math.max(g6 + SA_CW3_SIXTH, 1e-30);
+    const fw = g * Math.sqrt(Math.cbrt(fwRatio));
+    const gradientX = this.gradients.nuTilde.x[index];
+    const gradientR = this.gradients.nuTilde.r[index];
     const gradientSquared =
-      this.gradients.nuTilde.x[index] ** 2 +
-      this.gradients.nuTilde.r[index] ** 2;
-    return SA_CB1 * sTilde * nuTilde +
-      SA_CB2 / SA_SIGMA * gradientSquared -
-      SA_CW1 * fw * (nuTilde / distance) ** 2;
+      gradientX * gradientX +
+      gradientR * gradientR;
+    const production =
+      SA_CB1 * sTilde * nuTilde +
+      SA_CB2 / SA_SIGMA * gradientSquared;
+    const nuOverDistance = nuTilde / distance;
+    const destruction = SA_CW1 * fw * nuOverDistance * nuOverDistance;
+    this.saProduction[index] = production;
+    this.saDestruction[index] = destruction;
+    return production - destruction;
   }
 
   private accumulateNozzleExitInterface() {
@@ -649,6 +793,7 @@ export class AxisymmetricRansSolver {
     const leftI = faceI - 1;
     const rightI = faceI;
     const faceX = this.mesh.nozzleLengthM;
+    const faceThermoBase = this.axialFaceThermoBase[faceI];
     let leftJ = 0;
     let rightJ = 0;
 
@@ -666,11 +811,25 @@ export class AxisymmetricRansSolver {
         ));
         const leftIndex = ransCellIndex(leftI, leftJ, this.mesh);
         const rightIndex = ransCellIndex(rightI, rightJ, this.mesh);
+        const left = this.cellFace(
+          leftIndex,
+          faceX,
+          faceR,
+          faceThermoBase,
+          this.leftFaceScratch
+        );
+        const right = this.cellFace(
+          rightIndex,
+          faceX,
+          faceR,
+          faceThermoBase,
+          this.rightFaceScratch
+        );
         this.accumulateFace(
           leftIndex,
           rightIndex,
-          this.cellFace(leftIndex, faceX, faceR),
-          this.cellFace(rightIndex, faceX, faceR),
+          left,
+          right,
           1,
           0,
           area
@@ -691,7 +850,13 @@ export class AxisymmetricRansSolver {
         exposedInner * exposedInner + outer * outer
       ));
       const rightIndex = ransCellIndex(rightI, j, this.mesh);
-      const right = this.cellFace(rightIndex, faceX, faceR);
+      const right = this.cellFace(
+        rightIndex,
+        faceX,
+        faceR,
+        faceThermoBase,
+        this.rightFaceScratch
+      );
       this.accumulateFace(
         -1,
         rightIndex,
@@ -707,13 +872,14 @@ export class AxisymmetricRansSolver {
   private computeResidual() {
     clearState(this.residual);
     this.decodeState();
-    this.gradients = this.computeGradients();
+    this.gradients = this.computeGradients(this.gradients);
 
     for (let faceI = 0; faceI <= this.mesh.nx; faceI += 1) {
       if (faceI === this.mesh.nozzleExitIndex + 1) {
         this.accumulateNozzleExitInterface();
         continue;
       }
+      const faceThermoBase = this.axialFaceThermoBase[faceI];
       for (let j = 0; j < this.mesh.nr; j += 1) {
         const area = axialFaceArea(this.mesh, faceI, j);
         const column = faceI === 0 ? 0 : faceI - 1;
@@ -724,7 +890,13 @@ export class AxisymmetricRansSolver {
         );
         if (faceI === 0) {
           const rightIndex = ransCellIndex(0, j, this.mesh);
-          const right = this.cellFace(rightIndex, 0, faceR);
+          const right = this.cellFace(
+            rightIndex,
+            0,
+            faceR,
+            faceThermoBase,
+            this.rightFaceScratch
+          );
           this.accumulateFace(
             -1,
             rightIndex,
@@ -736,17 +908,37 @@ export class AxisymmetricRansSolver {
           );
         } else if (faceI === this.mesh.nx) {
           const leftIndex = ransCellIndex(this.mesh.nx - 1, j, this.mesh);
-          const left = this.cellFace(leftIndex, this.mesh.lengthM, faceR);
+          const left = this.cellFace(
+            leftIndex,
+            this.mesh.lengthM,
+            faceR,
+            faceThermoBase,
+            this.leftFaceScratch
+          );
           this.accumulateFace(leftIndex, -1, left, this.outletFace(left), 1, 0, area);
         } else {
           const leftIndex = ransCellIndex(faceI - 1, j, this.mesh);
           const rightIndex = ransCellIndex(faceI, j, this.mesh);
           const faceX = this.mesh.xFaces[faceI];
+          const left = this.cellFace(
+            leftIndex,
+            faceX,
+            faceR,
+            faceThermoBase,
+            this.leftFaceScratch
+          );
+          const right = this.cellFace(
+            rightIndex,
+            faceX,
+            faceR,
+            faceThermoBase,
+            this.rightFaceScratch
+          );
           this.accumulateFace(
             leftIndex,
             rightIndex,
-            this.cellFace(leftIndex, faceX, faceR),
-            this.cellFace(rightIndex, faceX, faceR),
+            left,
+            right,
             1,
             0,
             area
@@ -757,6 +949,7 @@ export class AxisymmetricRansSolver {
 
     for (let i = 0; i < this.mesh.nx; i += 1) {
       const faceX = this.mesh.xCenters[i];
+      const faceThermoBase = this.columnThermoBase[i];
       for (let faceJ = 1; faceJ < this.mesh.nr; faceJ += 1) {
         const areaVector = radialFaceAreaVector(this.mesh, i, faceJ);
         const area = Math.hypot(areaVector.x, areaVector.r);
@@ -770,11 +963,25 @@ export class AxisymmetricRansSolver {
         );
         const leftIndex = ransCellIndex(i, faceJ - 1, this.mesh);
         const rightIndex = ransCellIndex(i, faceJ, this.mesh);
+        const left = this.cellFace(
+          leftIndex,
+          faceX,
+          faceR,
+          faceThermoBase,
+          this.leftFaceScratch
+        );
+        const right = this.cellFace(
+          rightIndex,
+          faceX,
+          faceR,
+          faceThermoBase,
+          this.rightFaceScratch
+        );
         this.accumulateFace(
           leftIndex,
           rightIndex,
-          this.cellFace(leftIndex, faceX, faceR),
-          this.cellFace(rightIndex, faceX, faceR),
+          left,
+          right,
           normalX,
           normalR,
           area
@@ -786,7 +993,13 @@ export class AxisymmetricRansSolver {
       const normalX = areaVector.x / Math.max(area, 1e-20);
       const normalR = areaVector.r / Math.max(area, 1e-20);
       const leftIndex = ransCellIndex(i, this.mesh.nr - 1, this.mesh);
-      const interior = this.cellFace(leftIndex, faceX, this.mesh.wallCenters[i]);
+      const interior = this.cellFace(
+        leftIndex,
+        faceX,
+        this.mesh.wallCenters[i],
+        faceThermoBase,
+        this.leftFaceScratch
+      );
       const isNozzleWall = i <= this.mesh.nozzleExitIndex;
       this.accumulateFace(
         leftIndex,
@@ -850,15 +1063,7 @@ export class AxisymmetricRansSolver {
           ? (this.primitive.nu[index] + this.primitive.nuTilde[index]) / SA_SIGMA
           : 0;
         const viscous = 0.22 * h * h / Math.max(nuEffective, saDiffusivity, 1e-20);
-        let turbulenceSource = Number.POSITIVE_INFINITY;
-        if (this.config.turbulence === "spalartAllmaras" && this.primitive.nuTilde[index] > 0) {
-          const source = this.saSource[index];
-          if (source < 0) {
-            turbulenceSource = 0.5 * this.primitive.nuTilde[index] /
-              Math.max(-source, 1e-30);
-          }
-        }
-        dt = Math.min(dt, convective, viscous, turbulenceSource);
+        dt = Math.min(dt, convective, viscous);
       }
     }
     return Math.max(Math.min(dt, 1e-3), 1e-12);
@@ -872,8 +1077,14 @@ export class AxisymmetricRansSolver {
       const proposedRhoU = this.state.rhoU[index] - factor * this.residual.rhoU[index];
       const proposedRhoV = this.state.rhoV[index] - factor * this.residual.rhoV[index];
       const proposedRhoE = this.state.rhoE[index] - factor * this.residual.rhoE[index];
+      // The diagnostic residual includes the full SA source. Remove it from
+      // the transport update, then apply the split source treatment below.
+      const saSourceResidual = this.config.turbulence === "spalartAllmaras"
+        ? this.primitive.rho[index] * this.saSource[index] * this.mesh.volumes[index]
+        : 0;
       const proposedRhoNuTilde =
-        this.state.rhoNuTilde[index] - factor * this.residual.rhoNuTilde[index];
+        this.state.rhoNuTilde[index] -
+        factor * (this.residual.rhoNuTilde[index] + saSourceResidual);
       if (
         !Number.isFinite(proposedRho) ||
         !Number.isFinite(proposedRhoU) ||
@@ -884,8 +1095,6 @@ export class AxisymmetricRansSolver {
         this.counters.nanCount += 1;
         return null;
       }
-      const xNormalized = this.thermoCoordinate(this.mesh.cellX[index]);
-      const thermo = thermodynamicProperties(xNormalized, this.primitive.temperature[index], this.config);
       let acceptedRho = proposedRho;
       let acceptedRhoU = proposedRhoU;
       let acceptedRhoV = proposedRhoV;
@@ -897,7 +1106,8 @@ export class AxisymmetricRansSolver {
           acceptedRhoU,
           acceptedRhoV,
           acceptedRhoE,
-          thermo,
+          this.primitive.gamma[index],
+          this.primitive.gasConstant[index],
           this.config
         )
       ) {
@@ -921,7 +1131,8 @@ export class AxisymmetricRansSolver {
               acceptedRhoU,
               acceptedRhoV,
               acceptedRhoE,
-              thermo,
+              this.primitive.gamma[index],
+              this.primitive.gasConstant[index],
               this.config
             )
           ) {
@@ -938,10 +1149,25 @@ export class AxisymmetricRansSolver {
       next.rhoV[index] = acceptedRhoV;
       next.rhoE[index] = acceptedRhoE;
       const nu = this.primitive.nu[index];
+      let sourceUpdatedRhoNuTilde = acceptedRhoNuTilde;
+      if (this.config.turbulence === "spalartAllmaras") {
+        const transportedNuTilde = Math.max(
+          acceptedRhoNuTilde / Math.max(acceptedRho, this.config.rhoMin),
+          0
+        );
+        const sourceUpdatedNuTilde = (
+          transportedNuTilde + dt * this.saProduction[index]
+        ) / (
+          1 +
+          dt * this.saDestruction[index] /
+            Math.max(this.primitive.nuTilde[index], 1e-20)
+        );
+        sourceUpdatedRhoNuTilde = acceptedRho * sourceUpdatedNuTilde;
+      }
       const maximumRhoNuTilde = next.rho[index] * nu *
         this.config.maxModifiedViscosityRatio;
       next.rhoNuTilde[index] = Math.min(
-        Math.max(acceptedRhoNuTilde, 0),
+        Math.max(sourceUpdatedRhoNuTilde, 0),
         maximumRhoNuTilde
       );
       const turbulenceTolerance = Math.max(
@@ -949,8 +1175,8 @@ export class AxisymmetricRansSolver {
         next.rho[index] * nu * 1e-8
       );
       if (
-        acceptedRhoNuTilde < -turbulenceTolerance ||
-        acceptedRhoNuTilde > maximumRhoNuTilde + turbulenceTolerance
+        sourceUpdatedRhoNuTilde < -turbulenceTolerance ||
+        sourceUpdatedRhoNuTilde > maximumRhoNuTilde + turbulenceTolerance
       ) {
         this.counters.turbulenceClips += 1;
       }
@@ -967,21 +1193,15 @@ export class AxisymmetricRansSolver {
     if (this.failed) return;
     this.computeResidual();
     let dt = this.computeTimeStep();
-    const chamberThermo = thermodynamicProperties(0, this.config.chamberTemperatureK, this.config);
-    const referenceDensity = this.config.chamberPressurePa /
-      (chamberThermo.gasConstant * this.config.chamberTemperatureK);
-    const referenceSoundSpeed = Math.sqrt(
-      chamberThermo.gamma * chamberThermo.gasConstant * this.config.chamberTemperatureK
-    );
     const point = residualNorm(
       this.residual,
       this.mesh,
       this.iteration + 1,
       {
-        densityKgM3: referenceDensity,
-        soundSpeedMS: referenceSoundSpeed,
+        densityKgM3: this.referenceDensityKgM3,
+        soundSpeedMS: this.referenceSoundSpeedMS,
         lengthM: this.config.geometry.throatRadiusM,
-        kinematicViscosityM2S: chamberThermo.viscosity / referenceDensity
+        kinematicViscosityM2S: this.referenceKinematicViscosityM2S
       }
     );
     let next: ConservativeState | null = null;

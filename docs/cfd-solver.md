@@ -45,13 +45,14 @@ limit `dv/dr`.
 - Venkatakrishnan limiter and first-order positivity fallback
 - Gradient-based central viscous flux
 - Fourier heat conduction with molecular and turbulent conductivity
-- Explicit Euler time integration
+- Explicit Euler transport update with positivity-preserving point-implicit
+  Spalart-Allmaras destruction
 - Convective and viscous CFL limits
-- Optional CFL ramp from the configured starting value to 0.5
+- Optional CFL ramp to the reconstruction-dependent stability ceiling
 - Cell-local conservative-state blending to preserve positive density,
   pressure, and temperature
-- SA source-timescale and diffusion limits, plus a separately counted bound on
-  the transported modified-viscosity ratio
+- SA diffusion limit and a separately counted bound on the transported
+  modified-viscosity ratio
 - Adaptive CFL reduction, extended step retry, and gradual CFL recovery after
   a nonphysical proposal
 
@@ -86,7 +87,11 @@ station data without changing the solver.
 
 The optional Spalart-Allmaras model transports `rho * nuTilde`. It includes the
 standard production, diffusion, and wall-destruction structure with standard
-constants. Wall distance is measured to the actual smooth nozzle contour.
+constants. The stiff quadratic destruction term uses a point-implicit
+Patankar update, while production and transport remain explicit. This preserves
+positive `nuTilde` without forcing one cell's destruction timescale onto the
+entire global timestep. Wall distance is measured to the actual smooth nozzle
+contour.
 
 Boundary conditions:
 
@@ -116,10 +121,12 @@ transient runs remain responsive:
 Server-side upload and published-project calculations retain the full
 production meshes.
 
-The browser lab defaults to MUSCL reconstruction with four iterations per
+The browser lab defaults to MUSCL reconstruction with sixteen iterations per
 display update. First-order reconstruction remains selectable only as a
 debugging mode. Cold starts use an accelerated CFL ramp; the MUSCL path retains
-a lower CFL ceiling than the monotone first-order path.
+a lower CFL ceiling than the monotone first-order path. Weighted least-squares
+stencils, reconstruction buffers, conservative update buffers, and face-state
+scratch storage are reused across iterations to avoid garbage-collector stalls.
 
 Automatic static-pressure coloring uses an ambient-centered diverging palette
 and a robust external-flow contrast scale. Chamber pressure saturates at the
