@@ -62,16 +62,16 @@ const VIRIDIS = [
   [253, 231, 37]
 ] as const;
 
-const PRESSURE_DIVERGING = [
-  [45, 86, 132],
-  [54, 119, 151],
-  [74, 139, 158],
-  [60, 82, 88],
-  [31, 38, 42],
-  [88, 72, 53],
-  [164, 108, 61],
-  [207, 151, 76],
-  [232, 196, 99]
+const PRESSURE_CONTINUOUS = [
+  [38, 126, 80],
+  [70, 151, 79],
+  [119, 174, 74],
+  [181, 192, 68],
+  [228, 193, 62],
+  [239, 164, 55],
+  [235, 123, 50],
+  [220, 82, 48],
+  [198, 52, 47]
 ] as const;
 
 const STANDARD_ATMOSPHERE_PA = 101325;
@@ -264,7 +264,7 @@ function NozzleFieldCanvas({
         xSamples.push({ xM, wallRadiusM, i0, i1, tx });
       }
 
-      const palette = pressurePaletteActive ? PRESSURE_DIVERGING : VIRIDIS;
+      const palette = pressurePaletteActive ? PRESSURE_CONTINUOUS : VIRIDIS;
       for (let pixelY = 0; pixelY < rasterHeight; pixelY += 1) {
         const canvasY = plotTop + pixelY + 0.5;
         for (let pixelX = 0; pixelX < rasterWidth; pixelX += 1) {
@@ -370,7 +370,7 @@ function NozzleFieldCanvas({
       const legendTop = height - 24;
       const legendWidth = Math.min(250, Math.max(180, width * 0.34));
       const gradient = context.createLinearGradient(legendLeft, 0, legendLeft + legendWidth, 0);
-      const legendPalette = pressurePaletteActive ? PRESSURE_DIVERGING : VIRIDIS;
+      const legendPalette = pressurePaletteActive ? PRESSURE_CONTINUOUS : VIRIDIS;
       legendPalette.forEach((color, index) => {
         gradient.addColorStop(index / (legendPalette.length - 1), `rgb(${color.join(",")})`);
       });
