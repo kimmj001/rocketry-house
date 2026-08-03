@@ -2,8 +2,6 @@ import type { BodyFittedMesh, NozzleGeometryConfig, ResolutionPreset } from "./t
 
 const PI = Math.PI;
 
-const smoothStep = (value: number) => value * value * (3 - 2 * value);
-
 export function nozzleLength(geometry: NozzleGeometryConfig) {
   return geometry.chamberLengthM + geometry.convergentLengthM + geometry.divergentLengthM;
 }
@@ -21,10 +19,10 @@ export function wallRadiusAt(xM: number, geometry: NozzleGeometryConfig) {
   const throatXM = throatX(geometry);
   if (xM <= throatXM) {
     const t = Math.max(0, Math.min(1, (xM - geometry.chamberLengthM) / geometry.convergentLengthM));
-    return geometry.chamberRadiusM + (geometry.throatRadiusM - geometry.chamberRadiusM) * smoothStep(t);
+    return geometry.chamberRadiusM + (geometry.throatRadiusM - geometry.chamberRadiusM) * t;
   }
   const t = Math.max(0, Math.min(1, (xM - throatXM) / geometry.divergentLengthM));
-  return geometry.throatRadiusM + (geometry.exitRadiusM - geometry.throatRadiusM) * smoothStep(t);
+  return geometry.throatRadiusM + (geometry.exitRadiusM - geometry.throatRadiusM) * t;
 }
 
 export function outerRadiusAt(xM: number, geometry: NozzleGeometryConfig) {
@@ -40,7 +38,8 @@ export function outerRadiusAt(xM: number, geometry: NozzleGeometryConfig) {
     Math.max(nozzleLengthM * 1.6, (farfieldRadiusM - geometry.exitRadiusM) * 2.5)
   );
   const t = Math.max(0, Math.min(1, (xM - nozzleLengthM) / Math.max(expansionLengthM, 1e-8)));
-  const rapidOpening = smoothStep(Math.sqrt(t));
+  const openingProgress = Math.sqrt(t);
+  const rapidOpening = openingProgress * openingProgress * (3 - 2 * openingProgress);
   return geometry.exitRadiusM + (farfieldRadiusM - geometry.exitRadiusM) * rapidOpening;
 }
 

@@ -3,23 +3,22 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Archive, Boxes, Calculator, Check, ChevronRight, Cpu, Crosshair, Download, Eye, FileUp, Flame, Gauge, Layers, Library, PackagePlus, Pause, Play, Rocket, Ruler, Save, ShieldCheck, UploadCloud, Wind } from "lucide-react";
+import { Archive, Boxes, Calculator, Check, ChevronRight, Cpu, Crosshair, Download, Eye, FileUp, Flame, Gauge, Layers, Library, PackagePlus, Play, Rocket, Ruler, Save, ShieldCheck, UploadCloud, Wind } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { RocketViewer3D } from "@/components/rocket-viewer-3d";
 import { FileUploadBox } from "@/components/file-upload-box";
 import { TelemetryChart } from "@/components/charts";
-import { UpgradeLimitCard, UsageCounter } from "@/components/usage-meter";
 import { mockProjects } from "@/lib/mock-data";
 import { readMockUser } from "@/lib/auth";
 import { loadPersistentRecords, savePersistentRecord } from "@/lib/cloud-persistence";
-import { getCloudUsageAuthHeaders, useCloudUsage } from "@/lib/use-cloud-usage";
 import { analyzeNozzleFlow, defaultMotorParameters, propellantProfiles, simulateMotor } from "@/lib/motor-simulation";
 import { runRocketEstimateWithMotor } from "@/lib/rocket-simulation";
 import { sortComponents, totalLength } from "@/lib/cad/geometry";
 import { buildModules, flightEquations, flightGraphOutputs, motorEquations, motorGraphOutputs } from "@/lib/platform-content";
 import type { MotorParameters, MotorSimulationResult, SavedMotor } from "@/types/motor";
-import type { NozzleCfdField, NozzleCfdInputs, NozzleCfdResult } from "@/types/cfd";
+import type { NozzleCfdField, NozzleCfdResult } from "@/types/cfd";
+import { SAVED_NOZZLE_COLLECTION, type SavedNozzleDesign } from "@/types/nozzle";
 import type { RocketComponent, RocketComponentType, SimulationResult } from "@/lib/types";
 
 const MOTOR_STORAGE_KEY = "rocketry-house.saved-motors";
@@ -1941,6 +1940,7 @@ function MotorPerformanceSummary({ result, parameters, compareMotors, setCompare
           <Button variant="outline" onClick={copyCsv}><Download className="h-4 w-4" />CSV</Button>
           <Button variant="outline" onClick={onExportRasp}><Download className="h-4 w-4" />RASP export</Button>
           <Button variant="outline" onClick={onNozzle}><Gauge className="h-4 w-4" />Nozzle design</Button>
+          <Button asChild href="/build/motor/cfd" variant="outline"><Wind className="h-4 w-4" />Run CFD</Button>
         </div>
       </div>
       <div className="mt-5 grid gap-3 md:grid-cols-3 xl:grid-cols-5">
@@ -2136,17 +2136,10 @@ function MotorSaveModal(props: {
 }
 
 function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorParameters; update: <K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) => void; onClose: () => void }) {
-  const [meshDensity, setMeshDensity] = useState<NozzleCfdInputs["meshDensity"]>("standard");
-  const [cfdResult, setCfdResult] = useState<NozzleCfdResult | null>(null);
-  const [cfdError, setCfdError] = useState<string | null>(null);
-  const [cfdRunning, setCfdRunning] = useState(false);
-  const [cfdElapsedSeconds, setCfdElapsedSeconds] = useState(0);
-  const [cfdFieldName, setCfdFieldName] = useState<NozzleCfdField["name"]>("schlieren");
-  const [cfdDebugView, setCfdDebugView] = useState<CfdDebugView>("mach");
-  const [cfdFrameIndex, setCfdFrameIndex] = useState(0);
-  const [cfdPlaying, setCfdPlaying] = useState(false);
-  const [cfdLimitPrompt, setCfdLimitPrompt] = useState<{ title: string; description: string } | null>(null);
-  const { statuses, loading: usageLoading, error: usageError, refreshUsage } = useCloudUsage();
+  const [nozzleId] = useState(() => `nozzle-${Date.now()}`);
+  const [nozzleName, setNozzleName] = useState(() => `${parameters.projectName || "Untitled motor"} nozzle`);
+  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const convergenceAngle = Math.max(1, Math.min(89, parameters.convergenceAngleDeg ?? 60));
   const divergenceAngle = Math.max(1, Math.min(89, parameters.divergenceAngleDeg ?? 24));
   const chamberRadius = parameters.casingInnerDiameterMm / 2;
@@ -2157,8 +2150,6 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   const convergenceLength = convergenceDelta / Math.tan((convergenceAngle * Math.PI) / 180);
   const divergenceLength = divergenceDelta / Math.tan((divergenceAngle * Math.PI) / 180);
   const throatAreaMm2 = Math.PI * throatRadius ** 2;
-  const exitAreaMm2 = Math.PI * exitRadius ** 2;
-  const expansionRatio = exitAreaMm2 / Math.max(throatAreaMm2, 1);
   const modalSimulation = useMemo(() => simulateMotor(parameters), [parameters]);
   const nozzleFlow = useMemo(
     () => analyzeNozzleFlow(parameters, modalSimulation.maxPressureMPa || modalSimulation.averagePressureMPa || 2.5),
@@ -2193,81 +2184,6 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
   const convergenceArcY = visualCenterY - Math.sin((convergenceAngle * Math.PI) / 180) * convergenceArcRadius;
   const divergenceArcX = throatX + Math.cos((divergenceAngle * Math.PI) / 180) * divergenceArcRadius;
   const divergenceArcY = visualCenterY - Math.sin((divergenceAngle * Math.PI) / 180) * divergenceArcRadius;
-  const cfdDisplayActive = cfdRunning || Boolean(cfdResult);
-  const cfdFrames = cfdResult?.transientFrames ?? [];
-  const activeCfdFrame = cfdFrames[Math.min(cfdFrameIndex, Math.max(cfdFrames.length - 1, 0))];
-  useEffect(() => {
-    if (!cfdPlaying || cfdFrames.length < 2) return;
-    const timer = window.setInterval(() => {
-      setCfdFrameIndex((current) => {
-        if (current >= cfdFrames.length - 1) {
-          setCfdPlaying(false);
-          return current;
-        }
-        return current + 1;
-      });
-    }, 27);
-    return () => window.clearInterval(timer);
-  }, [cfdFrames.length, cfdPlaying]);
-  useEffect(() => {
-    if (!cfdRunning) return;
-    const startedAt = Date.now();
-    setCfdElapsedSeconds(0);
-    const timer = window.setInterval(() => {
-      setCfdElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [cfdRunning]);
-  const runCfd = async () => {
-    const payload: NozzleCfdInputs = {
-      chamberPressurePa: nozzleFlow.chamberPressureMPa * 1_000_000,
-      chamberTemperatureK: Math.max(300, nozzleFlow.exitTemperatureK * (1 + ((nozzleFlow.gamma - 1) / 2) * nozzleFlow.exitMach ** 2)),
-      gamma: nozzleFlow.gamma,
-      molecularWeightKgPerKmol: 40,
-      throatDiameterMm: parameters.nozzleThroatMm,
-      exitDiameterMm: parameters.nozzleExitMm,
-      chamberDiameterMm: parameters.casingInnerDiameterMm,
-      convergenceAngleDeg: convergenceAngle,
-      divergenceAngleDeg: divergenceAngle,
-      convergenceLengthMm: Number(convergenceLength.toFixed(3)),
-      divergenceLengthMm: Number(divergenceLength.toFixed(3)),
-      ambientPressurePa: 101_325,
-      meshDensity
-    };
-
-    setCfdRunning(true);
-    setCfdError(null);
-    setCfdLimitPrompt(null);
-
-    try {
-      const usageHeaders = await getCloudUsageAuthHeaders();
-      const response = await fetch("/api/cfd/nozzle/run", {
-        method: "POST",
-        headers: { ...(usageHeaders ?? {}), "content-type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        if (data?.prompt?.title && data?.prompt?.description) {
-          setCfdLimitPrompt({ title: data.prompt.title, description: data.prompt.description });
-        }
-        const message =
-          typeof data?.message === "string" ? data.message :
-          typeof data?.error === "string" ? data.error :
-          "CFD backend failed to start.";
-        setCfdError(message);
-        return;
-      }
-      setCfdResult(data as NozzleCfdResult);
-      setCfdFrameIndex(0);
-      setCfdPlaying(Boolean((data as NozzleCfdResult).transientFrames?.length));
-      void refreshUsage();
-    } catch (error) {
-      setCfdError(error instanceof Error ? error.message : "CFD request failed.");
-    } finally {
-      setCfdRunning(false);
-    }
-  };
   const updateThroat = (value: number) => {
     const safeValue = Math.max(1, value || 1);
     update("nozzleThroatMm", safeValue as never);
@@ -2294,6 +2210,37 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
     const nextExitRadius = throatRadius + safeValue * Math.tan((divergenceAngle * Math.PI) / 180);
     updateExit(Number(Math.max(parameters.nozzleThroatMm, nextExitRadius * 2).toFixed(1)));
   };
+  const saveNozzle = async () => {
+    const trimmedName = nozzleName.trim();
+    if (!trimmedName) {
+      setSaveStatus("Enter a nozzle name before saving.");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const nozzle: SavedNozzleDesign = {
+      id: nozzleId,
+      name: trimmedName,
+      sourceMotorName: parameters.projectName,
+      chamberDiameterMm: parameters.casingInnerDiameterMm,
+      throatDiameterMm: parameters.nozzleThroatMm,
+      exitDiameterMm: parameters.nozzleExitMm,
+      chamberLengthMm: Number(Math.max(parameters.casingInnerDiameterMm * 1.7, 60).toFixed(2)),
+      convergenceLengthMm: Number(convergenceLength.toFixed(3)),
+      divergenceLengthMm: Number(divergenceLength.toFixed(3)),
+      convergenceAngleDeg: convergenceAngle,
+      divergenceAngleDeg: divergenceAngle,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    setSaving(true);
+    setSaveStatus("Saving nozzle...");
+    const result = await savePersistentRecord(SAVED_NOZZLE_COLLECTION, nozzle.id, nozzle);
+    setSaving(false);
+    setSaveStatus(result.cloud ? "Nozzle saved to your account." : "Nozzle saved on this device.");
+    window.dispatchEvent(new Event("rocketry-nozzles-change"));
+  };
 
   return (
     <div className="fixed inset-0 z-[90] grid place-items-center bg-black/70 px-4 py-4">
@@ -2303,7 +2250,12 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
           <p className="mt-1 text-sm text-orange-50/55">Converging throat and diverging exit geometry for simulation review only.</p>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_repeat(2,minmax(0,1fr))]">
+            <label className="text-sm text-orange-50/65 sm:col-span-3">Nozzle name
+              <input value={nozzleName} onChange={(event) => setNozzleName(event.target.value)} placeholder="e.g. J-class sea-level nozzle" className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
+            </label>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="text-sm text-orange-50/65">Throat diameter
               <input type="number" min="1" value={parameters.nozzleThroatMm} onChange={(event) => updateThroat(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
             </label>
@@ -2334,166 +2286,39 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
             <Metric label="Optimum ratio" value={`${nozzleFlow.optimumExpansionRatio.toFixed(2)}:1`} />
             <Metric label="Nozzle efficiency" value={`${Math.round(nozzleFlow.nozzleEfficiency * 100)}%`} />
           </div>
-          <p className="mt-3 text-xs leading-5 text-orange-50/55">
-            CFD verification mode renders raw finite-volume cells and reports validation failures openly. Treat non-converged fields as numerical diagnostics, not certified plume predictions.
-          </p>
-          <div className="mt-3">
-            <UsageCounter
-              label="CFD runs"
-              status={statuses?.cfdRunsUsed}
-              periodText="this month"
-              loading={usageLoading}
-              error={usageError}
-            />
-          </div>
-          {cfdLimitPrompt ? (
-            <div className="mt-3">
-              <UpgradeLimitCard title={cfdLimitPrompt.title} description={cfdLimitPrompt.description} onDismiss={() => setCfdLimitPrompt(null)} />
-            </div>
-          ) : null}
           <p className={`mt-2 text-xs font-semibold ${expansionTone}`}>{expansionCopy} · peak chamber boundary {nozzleFlow.chamberPressureMPa.toFixed(2)} MPa · Pe/Pa {nozzleFlow.pressureRatio.toFixed(2)} · Cf {nozzleFlow.thrustCoefficient.toFixed(2)}</p>
           <svg viewBox="0 0 760 330" className="mt-5 h-auto w-full rounded-lg border border-white/10 bg-[#070a12]" role="img" aria-label="Nozzle convergence throat divergence and flow analysis diagram">
-            <defs>
-              <clipPath id="nozzleInternalCfdClip">
-                <path d={`M${inletX} ${convergingStartTop} H${chamberEndX} L${throatX} ${throatTop} L${exitX} ${exitTop} L${exitX} ${exitBottom} L${throatX} ${throatBottom} L${chamberEndX} ${convergingStartBottom} H${inletX} Z`} />
-              </clipPath>
-            </defs>
-            {cfdDisplayActive ? (
-              <NozzleIntegratedCfdOverlay
-                result={cfdResult}
-                running={cfdRunning}
-                inletX={inletX}
-                chamberEndX={chamberEndX}
-                throatX={throatX}
-                exitX={exitX}
-                centerY={visualCenterY}
-                chamberRadius={visualChamberRadius}
-                throatRadius={visualThroatRadius}
-                exitRadius={visualExitRadius}
-                fieldName={cfdFieldName}
-                frameValues={activeCfdFrame?.fields[cfdFieldName]}
-                elapsedSeconds={cfdElapsedSeconds}
-              />
-            ) : null}
-            {!cfdDisplayActive ? <line x1="48" x2="712" y1={visualCenterY} y2={visualCenterY} stroke="#f8fafc" strokeOpacity="0.32" strokeDasharray="7 8" /> : null}
-            {!cfdDisplayActive ? (
-              <>
-                <path
-                  d={`M${inletX} ${convergingStartTop} H${chamberEndX} L${throatX} ${throatTop} L${exitX} ${exitTop}`}
-                  fill="none"
-                  stroke="#f8fafc"
-                  strokeWidth="5"
-                  strokeLinecap="square"
-                  strokeLinejoin="miter"
-                />
-                <path
-                  d={`M${inletX} ${convergingStartBottom} H${chamberEndX} L${throatX} ${throatBottom} L${exitX} ${exitBottom}`}
-                  fill="none"
-                  stroke="#f8fafc"
-                  strokeWidth="5"
-                  strokeLinecap="square"
-                  strokeLinejoin="miter"
-                />
-                <line x1={inletX} x2={inletX} y1={convergingStartTop} y2={convergingStartBottom} stroke="#f8fafc" strokeOpacity="0.7" strokeWidth="3" />
-              </>
-            ) : null}
-            {!cfdDisplayActive ? (
-              <>
-                <path d={`M${throatX - convergenceArcRadius} ${visualCenterY} A${convergenceArcRadius} ${convergenceArcRadius} 0 0 0 ${convergenceArcX} ${convergenceArcY}`} fill="none" stroke="#86efac" strokeWidth="2" strokeOpacity="0.85" />
-                <path d={`M${throatX + divergenceArcRadius} ${visualCenterY} A${divergenceArcRadius} ${divergenceArcRadius} 0 0 0 ${divergenceArcX} ${divergenceArcY}`} fill="none" stroke="#fecdd3" strokeWidth="2" strokeOpacity="0.85" />
-                <line x1={throatX - convergenceArcRadius - 8} x2={throatX + 6} y1={visualCenterY} y2={visualCenterY} stroke="#86efac" strokeWidth="1.5" strokeOpacity="0.55" />
-                <line x1={throatX - 6} x2={throatX + divergenceArcRadius + 8} y1={visualCenterY} y2={visualCenterY} stroke="#fecdd3" strokeWidth="1.5" strokeOpacity="0.55" />
-                <circle cx={throatX} cy={throatTop} r="4" fill="#fb923c" />
-                <circle cx={throatX} cy={throatBottom} r="4" fill="#fb923c" />
-                <line x1={throatX} x2={throatX} y1={throatTop} y2={throatBottom} stroke="#fb923c" strokeWidth="2.5" strokeDasharray="5 4" />
-                <line x1={throatX} x2={throatX} y1="244" y2="278" stroke="#fb923c" strokeWidth="2" />
-                <line x1={exitX} x2={exitX} y1="244" y2="278" stroke="#c084fc" strokeWidth="2" />
-                <line x1={chamberEndX} x2={throatX} y1="265" y2="265" stroke="#93c5fd" strokeWidth="2" />
-                <line x1={throatX} x2={exitX} y1="292" y2="292" stroke="#93c5fd" strokeWidth="2" />
-                <text x={inletX - 4} y={convergingStartTop - 12} fill="#dbeafe" fontSize="13">chamber ID {parameters.casingInnerDiameterMm} mm</text>
-                <text x={throatX - 30} y={Math.max(38, throatTop - 22)} fill="#fb923c" fontSize="14">throat {parameters.nozzleThroatMm} mm</text>
-                <text x={exitX - 54} y={exitTop - 12} fill="#c084fc" fontSize="14">exit {parameters.nozzleExitMm} mm</text>
-                <text x={throatX - convergenceArcRadius - 4} y={visualCenterY - 18} fill="#bbf7d0" fontSize="13">{convergenceAngle} deg</text>
-                <text x={throatX + divergenceArcRadius + 4} y={visualCenterY - 18} fill="#fecdd3" fontSize="13">{divergenceAngle} deg</text>
-                <text x={chamberEndX + 28} y="258" fill="#bfdbfe" fontSize="13">convergence</text>
-                <text x={throatX + 54} y="285" fill="#bfdbfe" fontSize="13">divergence</text>
-                <text x="68" y="306" fill="#94a3b8" fontSize="12">Geometry mode. Run CFD uses one chamber-nozzle-ambient computational domain.</text>
-              </>
-            ) : null}
+            <line x1="48" x2="712" y1={visualCenterY} y2={visualCenterY} stroke="#f8fafc" strokeOpacity="0.32" strokeDasharray="7 8" />
+            <path d={`M${inletX} ${convergingStartTop} H${chamberEndX} L${throatX} ${throatTop} L${exitX} ${exitTop}`} fill="none" stroke="#f8fafc" strokeWidth="5" strokeLinecap="square" strokeLinejoin="miter" />
+            <path d={`M${inletX} ${convergingStartBottom} H${chamberEndX} L${throatX} ${throatBottom} L${exitX} ${exitBottom}`} fill="none" stroke="#f8fafc" strokeWidth="5" strokeLinecap="square" strokeLinejoin="miter" />
+            <line x1={inletX} x2={inletX} y1={convergingStartTop} y2={convergingStartBottom} stroke="#f8fafc" strokeOpacity="0.7" strokeWidth="3" />
+            <path d={`M${throatX - convergenceArcRadius} ${visualCenterY} A${convergenceArcRadius} ${convergenceArcRadius} 0 0 0 ${convergenceArcX} ${convergenceArcY}`} fill="none" stroke="#86efac" strokeWidth="2" strokeOpacity="0.85" />
+            <path d={`M${throatX + divergenceArcRadius} ${visualCenterY} A${divergenceArcRadius} ${divergenceArcRadius} 0 0 0 ${divergenceArcX} ${divergenceArcY}`} fill="none" stroke="#fecdd3" strokeWidth="2" strokeOpacity="0.85" />
+            <line x1={throatX - convergenceArcRadius - 8} x2={throatX + 6} y1={visualCenterY} y2={visualCenterY} stroke="#86efac" strokeWidth="1.5" strokeOpacity="0.55" />
+            <line x1={throatX - 6} x2={throatX + divergenceArcRadius + 8} y1={visualCenterY} y2={visualCenterY} stroke="#fecdd3" strokeWidth="1.5" strokeOpacity="0.55" />
+            <circle cx={throatX} cy={throatTop} r="4" fill="#fb923c" />
+            <circle cx={throatX} cy={throatBottom} r="4" fill="#fb923c" />
+            <line x1={throatX} x2={throatX} y1={throatTop} y2={throatBottom} stroke="#fb923c" strokeWidth="2.5" strokeDasharray="5 4" />
+            <line x1={throatX} x2={throatX} y1="244" y2="278" stroke="#fb923c" strokeWidth="2" />
+            <line x1={exitX} x2={exitX} y1="244" y2="278" stroke="#c084fc" strokeWidth="2" />
+            <line x1={chamberEndX} x2={throatX} y1="265" y2="265" stroke="#93c5fd" strokeWidth="2" />
+            <line x1={throatX} x2={exitX} y1="292" y2="292" stroke="#93c5fd" strokeWidth="2" />
+            <text x={inletX - 4} y={convergingStartTop - 12} fill="#dbeafe" fontSize="13">chamber ID {parameters.casingInnerDiameterMm} mm</text>
+            <text x={throatX - 30} y={Math.max(38, throatTop - 22)} fill="#fb923c" fontSize="14">throat {parameters.nozzleThroatMm} mm</text>
+            <text x={exitX - 54} y={exitTop - 12} fill="#c084fc" fontSize="14">exit {parameters.nozzleExitMm} mm</text>
+            <text x={throatX - convergenceArcRadius - 4} y={visualCenterY - 18} fill="#bbf7d0" fontSize="13">{convergenceAngle} deg</text>
+            <text x={throatX + divergenceArcRadius + 4} y={visualCenterY - 18} fill="#fecdd3" fontSize="13">{divergenceAngle} deg</text>
+            <text x={chamberEndX + 28} y="258" fill="#bfdbfe" fontSize="13">convergence</text>
+            <text x={throatX + 54} y="285" fill="#bfdbfe" fontSize="13">divergence</text>
+            <text x="68" y="306" fill="#94a3b8" fontSize="12">Saved geometry is transferred directly to the CFD body-fitted mesh.</text>
           </svg>
-          {cfdFrames.length > 1 ? (
-            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-white/10 bg-white/[0.035] px-3 py-2">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  if (!cfdPlaying && cfdFrameIndex >= cfdFrames.length - 1) setCfdFrameIndex(0);
-                  setCfdPlaying((current) => !current);
-                }}
-                aria-label={cfdPlaying ? "Pause CFD playback" : cfdFrameIndex >= cfdFrames.length - 1 ? "Replay CFD playback" : "Play CFD playback"}
-              >
-                {cfdPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                {cfdPlaying ? "Pause" : cfdFrameIndex >= cfdFrames.length - 1 ? "Replay" : "Play"}
-              </Button>
-              <input
-                type="range"
-                min="0"
-                max={cfdFrames.length - 1}
-                value={cfdFrameIndex}
-                onChange={(event) => {
-                  setCfdPlaying(false);
-                  setCfdFrameIndex(Number(event.target.value));
-                }}
-                className="min-w-44 flex-1 accent-orange-400"
-                aria-label="CFD iteration frame"
-              />
-              <p className="min-w-44 text-right text-xs tabular-nums text-orange-50/58">
-                iteration {activeCfdFrame?.iteration ?? 0} · t={(activeCfdFrame?.physicalTimeS ?? 0).toExponential(2)} s
-              </p>
-            </div>
-          ) : null}
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
-            <label className="text-sm text-orange-50/65">Mesh density
-              <select value={meshDensity} onChange={(event) => setMeshDensity(event.target.value as NozzleCfdInputs["meshDensity"])} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50">
-                <option value="coarse">Coarse validation mesh</option>
-                <option value="standard">Standard throat-refined mesh</option>
-                <option value="fine">Fine shock-capturing mesh</option>
-                <option value="research">Research-grade mesh</option>
-              </select>
-            </label>
-            <label className="text-sm text-orange-50/65">Field
-              <select value={cfdFieldName} onChange={(event) => setCfdFieldName(event.target.value as NozzleCfdField["name"])} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50">
-                <option value="mach">Mach</option>
-                <option value="pressure">Static pressure</option>
-                <option value="temperature">Static temperature</option>
-                <option value="density">Density</option>
-                <option value="velocity">Velocity magnitude</option>
-                <option value="schlieren">Schlieren / shock structure</option>
-                <option value="faceFlux">Face flux magnitude</option>
-                <option value="totalPressure">Total pressure</option>
-                <option value="totalTemperature">Total temperature</option>
-              </select>
-            </label>
-            <label className="text-sm text-orange-50/65">Debug view
-              <select value={cfdDebugView} onChange={(event) => setCfdDebugView(event.target.value as CfdDebugView)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50">
-                <option value="mach">Mach contour</option>
-                <option value="pressure">Pressure contour</option>
-                <option value="density">Density contour</option>
-                <option value="temperature">Temperature contour</option>
-                <option value="velocity">Velocity contour</option>
-                <option value="faceFlux">Face flux view</option>
-                <option value="mesh">Mesh view</option>
-                <option value="residual">Residual view</option>
-              </select>
-            </label>
-            <Button onClick={runCfd} disabled={cfdRunning}><Wind className="h-4 w-4" />{cfdRunning ? `Solving... ${cfdElapsedSeconds}s` : "Run CFD"}</Button>
-            <Button asChild href="/build/motor/cfd" variant="outline"><Cpu className="h-4 w-4" />Open live CFD lab</Button>
-          </div>
-          <NozzleCfdViewer result={cfdResult} error={cfdError} running={cfdRunning} fieldName={cfdFieldName} debugView={cfdDebugView} />
           <p className="mt-4 rounded-md border border-amber-200/20 bg-amber-200/8 p-3 text-xs leading-5 text-amber-50/82">Rocketry House records nozzle geometry for analysis and data comparison. It does not provide manufacturing certification or hazardous build instructions.</p>
+          {saveStatus ? <p className="mt-3 text-sm text-emerald-200" role="status">{saveStatus}</p> : null}
         </div>
         <div className="shrink-0 border-t border-white/10 bg-[#111827]/95 px-5 py-4 backdrop-blur">
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose}>Close</Button>
+            <Button onClick={saveNozzle} disabled={saving || !nozzleName.trim()}><Save className="h-4 w-4" />{saving ? "Saving..." : "Save nozzle"}</Button>
           </div>
         </div>
       </Card>

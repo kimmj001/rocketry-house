@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
+  FolderOpen,
   Gauge,
   Grid3X3,
   Pause,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
+import { loadPersistentRecords } from "@/lib/cloud-persistence";
 import {
   DEFAULT_RANS_CONFIG,
   INTERACTIVE_RANS_DIMENSIONS,
@@ -29,6 +31,8 @@ import {
   pressureContrastPosition,
   pressureContrastScale
 } from "@/lib/cfd/rans/visualization";
+import { isSavedNozzleDesign, savedNozzleToGeometry } from "@/lib/nozzle-library";
+import { SAVED_NOZZLE_COLLECTION, type SavedNozzleDesign } from "@/types/nozzle";
 
 function createInteractiveConfig(): RansSolverConfig {
   const base = structuredClone(DEFAULT_RANS_CONFIG);
@@ -513,6 +517,8 @@ export function NozzleCfdLab() {
   const [fixedMax, setFixedMax] = useState(3);
   const [colorSensitivity, setColorSensitivity] = useState(1);
   const [residualHistory, setResidualHistory] = useState<SolverResidualPoint[]>([]);
+  const [savedNozzles, setSavedNozzles] = useState<SavedNozzleDesign[]>([]);
+  const [selectedNozzleId, setSelectedNozzleId] = useState("default");
 
   useEffect(() => {
     const worker = new Worker(new URL("../lib/cfd/worker/cfd.worker.ts", import.meta.url), { type: "module" });
@@ -550,9 +556,42 @@ export function NozzleCfdLab() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    const loadNozzles = async () => {
+      const records = await loadPersistentRecords<SavedNozzleDesign>(SAVED_NOZZLE_COLLECTION);
+      if (!active) return;
+      const nozzles = records
+        .map((record) => record.payload)
+        .filter(isSavedNozzleDesign)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      setSavedNozzles(nozzles);
+      const latest = nozzles[0];
+      if (!latest) return;
+      setSelectedNozzleId(latest.id);
+      setConfig((current) => {
+        const next = { ...current, geometry: savedNozzleToGeometry(latest, current.geometry) };
+        initialConfigRef.current = next;
+        setDirty(false);
+        setError(null);
+        setResidualHistory([]);
+        if (workerRef.current) transferFreeMessage(workerRef.current, { type: "reset", config: next });
+        return next;
+      });
+    };
+    void loadNozzles();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const selectedField = useMemo(
     () => FIELD_OPTIONS.find((field) => field.name === fieldName) ?? FIELD_OPTIONS[0],
     [fieldName]
+  );
+  const selectedNozzle = useMemo(
+    () => savedNozzles.find((nozzle) => nozzle.id === selectedNozzleId),
+    [savedNozzles, selectedNozzleId]
   );
   const diagnostics = snapshot?.diagnostics;
 
@@ -561,7 +600,24 @@ export function NozzleCfdLab() {
     setDirty(true);
   };
   const updateGeometry = (key: keyof RansSolverConfig["geometry"], value: number) => {
+    setSelectedNozzleId("custom");
     updateConfig({ ...config, geometry: { ...config.geometry, [key]: value } });
+  };
+  const selectNozzle = (id: string) => {
+    setSelectedNozzleId(id);
+    const savedNozzle = savedNozzles.find((nozzle) => nozzle.id === id);
+    const geometry = id === "default"
+      ? structuredClone(DEFAULT_RANS_CONFIG.geometry)
+      : savedNozzle
+        ? savedNozzleToGeometry(savedNozzle, config.geometry)
+        : config.geometry;
+    const next = { ...config, geometry };
+    setConfig(next);
+    setDirty(false);
+    setError(null);
+    setResidualHistory([]);
+    setRunning(false);
+    if (workerRef.current) transferFreeMessage(workerRef.current, { type: "reset", config: next });
   };
   const applyAndReset = () => {
     if (!workerRef.current) return;
@@ -627,6 +683,26 @@ export function NozzleCfdLab() {
         <aside className="border-b border-white/10 bg-[#0a0d12] p-5 lg:border-b-0 lg:border-r">
           <div className="grid gap-5">
             <section>
+              <h2 className="flex items-center gap-2 text-sm font-semibold"><FolderOpen className="h-4 w-4 text-orange-300" /> Saved nozzle</h2>
+              <div className="mt-3 grid gap-3">
+                <SelectControl label="Nozzle geometry" value={selectedNozzleId} onChange={selectNozzle}>
+                  <option value="default">Default reference nozzle</option>
+                  {selectedNozzleId === "custom" ? <option value="custom">Custom geometry</option> : null}
+                  {savedNozzles.map((nozzle) => <option key={nozzle.id} value={nozzle.id}>{nozzle.name}</option>)}
+                </SelectControl>
+                {selectedNozzle ? (
+                  <p className="text-xs leading-5 text-white/48">
+                    Throat {selectedNozzle.throatDiameterMm} mm · exit {selectedNozzle.exitDiameterMm} mm · convergent {selectedNozzle.convergenceLengthMm} mm · divergent {selectedNozzle.divergenceLengthMm} mm. These dimensions are applied directly to the body-fitted mesh.
+                  </p>
+                ) : savedNozzles.length ? (
+                  <p className="text-xs leading-5 text-white/48">Select a saved nozzle to apply its exact geometry.</p>
+                ) : (
+                  <p className="text-xs leading-5 text-white/48">Save a nozzle from Motor performance to load its exact design here.</p>
+                )}
+              </div>
+            </section>
+
+            <section className="border-t border-white/10 pt-5">
               <h2 className="flex items-center gap-2 text-sm font-semibold"><Gauge className="h-4 w-4 text-orange-300" /> Physics</h2>
               <div className="mt-3 grid gap-3">
                 <SelectControl

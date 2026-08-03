@@ -3,14 +3,49 @@ import { performance } from "node:perf_hooks";
 import test from "node:test";
 import {
   radialFaceRadius,
-  resolutionDimensions
+  resolutionDimensions,
+  throatX,
+  wallRadiusAt
 } from "../../lib/cfd/rans/geometry";
+import { savedNozzleToGeometry } from "../../lib/nozzle-library";
 import { AxisymmetricRansSolver } from "../../lib/cfd/rans/solver";
 import {
   DEFAULT_RANS_CONFIG,
   INTERACTIVE_RANS_DIMENSIONS,
   type ResolutionPreset
 } from "../../lib/cfd/rans/types";
+
+test("saved nozzle dimensions become the exact conical CFD wall profile", () => {
+  const geometry = savedNozzleToGeometry({
+    id: "nozzle-test",
+    name: "Test nozzle",
+    sourceMotorName: "Test motor",
+    chamberDiameterMm: 48,
+    throatDiameterMm: 8,
+    exitDiameterMm: 31,
+    chamberLengthMm: 82,
+    convergenceLengthMm: 11.5,
+    divergenceLengthMm: 25.8,
+    convergenceAngleDeg: 60,
+    divergenceAngleDeg: 24,
+    createdAt: "2026-08-03T00:00:00.000Z",
+    updatedAt: "2026-08-03T00:00:00.000Z"
+  }, DEFAULT_RANS_CONFIG.geometry);
+
+  assert.equal(geometry.chamberRadiusM, 0.024);
+  assert.equal(geometry.throatRadiusM, 0.004);
+  assert.equal(geometry.exitRadiusM, 0.0155);
+  assert.equal(geometry.chamberLengthM, 0.082);
+  assert.equal(geometry.convergentLengthM, 0.0115);
+  assert.equal(geometry.divergentLengthM, 0.0258);
+
+  const throat = throatX(geometry);
+  const convergenceMidpoint = geometry.chamberLengthM + geometry.convergentLengthM / 2;
+  const divergenceMidpoint = throat + geometry.divergentLengthM / 2;
+  assert.ok(Math.abs(wallRadiusAt(convergenceMidpoint, geometry) - 0.014) < 1e-12);
+  assert.ok(Math.abs(wallRadiusAt(throat, geometry) - 0.004) < 1e-12);
+  assert.ok(Math.abs(wallRadiusAt(divergenceMidpoint, geometry) - 0.00975) < 1e-12);
+});
 
 test("interactive resolution presets use one quarter of the production cell count", () => {
   const presets: ResolutionPreset[] = ["development", "standard", "high"];
