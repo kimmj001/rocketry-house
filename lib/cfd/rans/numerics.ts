@@ -283,6 +283,39 @@ export function hllcFlux(
   return { flux, massFlux: flux[0], usedFallback: false };
 }
 
+const SHOCK_SENSOR_START = 0.06;
+const SHOCK_SENSOR_FULL_DISSIPATION = 0.24;
+
+export function shockStabilizedFlux(
+  left: FacePrimitive,
+  right: FacePrimitive,
+  normalX: number,
+  normalR: number
+): HllcResult {
+  const hllc = hllcFlux(left, right, normalX, normalR);
+  const pressureSensor = Math.abs(right.p - left.p) /
+    Math.max(right.p + left.p, 1e-20);
+  if (pressureSensor <= SHOCK_SENSOR_START || hllc.usedFallback) return hllc;
+
+  // HLLC can develop the carbuncle/odd-even mode at a strong, grid-aligned
+  // shock. Blend toward the positivity-friendly Rusanov flux only across the
+  // discontinuity; smooth regions retain the contact-resolving HLLC flux.
+  const rusanov = rusanovFlux(left, right, normalX, normalR);
+  const blend = Math.min(
+    (pressureSensor - SHOCK_SENSOR_START) /
+      (SHOCK_SENSOR_FULL_DISSIPATION - SHOCK_SENSOR_START),
+    1
+  );
+  const flux = hllc.flux.map((value, index) =>
+    value + blend * (rusanov.flux[index] - value)
+  ) as FluxVector;
+  return {
+    flux,
+    massFlux: hllc.massFlux + blend * (rusanov.massFlux - hllc.massFlux),
+    usedFallback: true
+  };
+}
+
 type GradientStencil = {
   count: Uint8Array;
   neighbors: Int32Array;

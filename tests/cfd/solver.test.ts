@@ -183,20 +183,40 @@ test("SA roundoff limiting remains separate from conservative positivity recover
   assert.ok(snapshot.diagnostics.cfl >= 0.19, `CFL collapsed to ${snapshot.diagnostics.cfl}`);
 });
 
-test("point-implicit SA destruction does not collapse the global timestep", () => {
+test("cold-start shock crosses the former stall point without collapsing the timestep", () => {
   const solver = new AxisymmetricRansSolver({
     ...DEFAULT_RANS_CONFIG,
     nx: 48,
     nr: 14
   });
-  const snapshot = solver.step(1500);
+  const snapshot = solver.step(3000);
+  let frontColumn = 0;
+  for (let i = 0; i < snapshot.mesh.nx; i += 1) {
+    for (let j = 0; j < snapshot.mesh.nr; j += 1) {
+      const index = i * snapshot.mesh.nr + j;
+      if (
+        snapshot.fields.pressure[index] > DEFAULT_RANS_CONFIG.ambientPressurePa * 1.03 ||
+        Math.abs(snapshot.fields.axialVelocity[index]) > 10
+      ) {
+        frontColumn = i;
+      }
+    }
+  }
+  const frontX = 0.5 * (
+    snapshot.mesh.xFaces[frontColumn] + snapshot.mesh.xFaces[frontColumn + 1]
+  );
   assert.equal(snapshot.diagnostics.failed, false, snapshot.diagnostics.failureReason);
   assert.equal(snapshot.diagnostics.rejectedSteps, 0);
   assert.equal(snapshot.diagnostics.positivityCorrections, 0);
   assert.equal(snapshot.diagnostics.turbulenceClips, 0);
+  assert.ok(frontX > 0.8, `pressure front stalled at x=${frontX.toFixed(3)} m`);
+  assert.ok(
+    snapshot.diagnostics.minDensityKgM3 > 1e-3,
+    `front density collapsed to ${snapshot.diagnostics.minDensityKgM3}`
+  );
   assert.ok(
     snapshot.diagnostics.dtS > 1e-8,
-    `SA source collapsed the timestep to ${snapshot.diagnostics.dtS}`
+    `shock or SA source collapsed the timestep to ${snapshot.diagnostics.dtS}`
   );
 });
 

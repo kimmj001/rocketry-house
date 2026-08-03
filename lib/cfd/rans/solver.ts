@@ -16,9 +16,9 @@ import {
   conservativeFromPrimitive,
   createConservativeState,
   createPrimitiveArrays,
-  hllcFlux,
   noSlipAdiabaticWallGhost,
   residualNorm,
+  shockStabilizedFlux,
   venkatakrishnanLimiter,
   weightedLeastSquaresReconstruction,
   type FacePrimitive,
@@ -56,6 +56,8 @@ const SA_CW1 = SA_CB1 / (SA_KAPPA * SA_KAPPA) + (1 + SA_CB2) / SA_SIGMA;
 const SA_KAPPA2 = SA_KAPPA * SA_KAPPA;
 const SA_CV1_CUBED = SA_CV1 * SA_CV1 * SA_CV1;
 const SA_CW3_SIXTH = SA_CW3 * SA_CW3 * SA_CW3 * SA_CW3 * SA_CW3 * SA_CW3;
+const LOCAL_DT_NEIGHBOR_RATIO = 2;
+const LOCAL_DT_GLOBAL_RATIO_CAP = 16;
 
 type GradientSet = {
   rho: ScalarReconstruction;
@@ -205,6 +207,9 @@ export class AxisymmetricRansSolver {
   private saProduction: Float64Array;
   private saDestruction: Float64Array;
   private lastUpdate: Float64Array;
+  private localTimeSteps: Float64Array;
+  private cellLengthScales: Float64Array;
+  private cellSurfaceAreas: Float64Array;
   private limiterEpsilon2: number;
   private faceWasLimited = false;
   private columnThermoBase: ThermodynamicBase[];
@@ -214,10 +219,13 @@ export class AxisymmetricRansSolver {
   private referenceKinematicViscosityM2S: number;
   private leftFaceScratch = createFacePrimitiveScratch();
   private rightFaceScratch = createFacePrimitiveScratch();
+  private shockLeftScratch = createFacePrimitiveScratch();
+  private shockRightScratch = createFacePrimitiveScratch();
   private residualHistory: SolverResidualPoint[] = [];
   private iteration = 0;
   private pseudoTimeS = 0;
   private lastDtS = 0;
+  private maxLocalDtS = 0;
   private effectiveCfl = 0;
   private cflScale = 1;
   private failed = false;
@@ -277,6 +285,10 @@ export class AxisymmetricRansSolver {
     this.saProduction = new Float64Array(this.mesh.cells);
     this.saDestruction = new Float64Array(this.mesh.cells);
     this.lastUpdate = new Float64Array(this.mesh.cells);
+    this.localTimeSteps = new Float64Array(this.mesh.cells);
+    this.cellLengthScales = new Float64Array(this.mesh.cells);
+    this.cellSurfaceAreas = new Float64Array(this.mesh.cells);
+    this.precomputeTimeStepGeometry();
     const h3 = this.mesh.minCellLength ** 3;
     this.limiterEpsilon2 = h3 * h3 + 1e-30;
     if (this.config.initializationMode === "coldStart") this.initializeQuiescentAmbient();
@@ -700,7 +712,42 @@ export class AxisymmetricRansSolver {
     area: number,
     wall = false
   ) {
-    const hllc = hllcFlux(left, right, normalX, normalR);
+    const pressureSensor = Math.abs(right.p - left.p) /
+      Math.max(right.p + left.p, 1e-20);
+    let inviscidLeft = left;
+    let inviscidRight = right;
+    if (pressureSensor > 0.06) {
+      // Reconstructing through a discontinuity can create an undershoot before
+      // the Riemann solver sees it. Use the exact cell averages at shocked
+      // internal faces while retaining MUSCL everywhere else.
+      if (leftIndex >= 0) {
+        inviscidLeft = this.shockLeftScratch;
+        inviscidLeft.rho = this.primitive.rho[leftIndex];
+        inviscidLeft.u = this.primitive.u[leftIndex];
+        inviscidLeft.v = this.primitive.v[leftIndex];
+        inviscidLeft.p = this.primitive.p[leftIndex];
+        inviscidLeft.temperature = this.primitive.temperature[leftIndex];
+        inviscidLeft.nuTilde = this.primitive.nuTilde[leftIndex];
+        inviscidLeft.thermo = left.thermo;
+      }
+      if (rightIndex >= 0) {
+        inviscidRight = this.shockRightScratch;
+        inviscidRight.rho = this.primitive.rho[rightIndex];
+        inviscidRight.u = this.primitive.u[rightIndex];
+        inviscidRight.v = this.primitive.v[rightIndex];
+        inviscidRight.p = this.primitive.p[rightIndex];
+        inviscidRight.temperature = this.primitive.temperature[rightIndex];
+        inviscidRight.nuTilde = this.primitive.nuTilde[rightIndex];
+        inviscidRight.thermo = right.thermo;
+      }
+      this.counters.firstOrderFallbacks += 1;
+    }
+    const hllc = shockStabilizedFlux(
+      inviscidLeft,
+      inviscidRight,
+      normalX,
+      normalR
+    );
     if (hllc.usedFallback) this.counters.hllcFallbacks += 1;
     const viscous = this.viscousFlux(leftIndex, rightIndex, left, right, normalX, normalR, wall);
     const upwindNuTilde = hllc.massFlux >= 0 ? left.nuTilde : right.nuTilde;
@@ -1038,41 +1085,125 @@ export class AxisymmetricRansSolver {
     return clamp(this.config.cfl * ramp * this.cflScale, 0.001, maximumCfl);
   }
 
-  private computeTimeStep() {
-    if (this.config.fixedTimeStepS && this.config.fixedTimeStepS > 0) return this.config.fixedTimeStepS;
-    this.effectiveCfl = this.currentCfl();
-    let dt = Number.POSITIVE_INFINITY;
+  private precomputeTimeStepGeometry() {
     for (let i = 0; i < this.mesh.nx; i += 1) {
       const dx = this.mesh.xFaces[i + 1] - this.mesh.xFaces[i];
       for (let j = 0; j < this.mesh.nr; j += 1) {
         const index = ransCellIndex(i, j, this.mesh);
         const radialOffset = i * (this.mesh.nr + 1) + j;
+        const leftInner = this.mesh.radialFaceLeft[radialOffset];
+        const leftOuter = this.mesh.radialFaceLeft[radialOffset + 1];
+        const rightInner = this.mesh.radialFaceRight[radialOffset];
+        const rightOuter = this.mesh.radialFaceRight[radialOffset + 1];
         const localDr = 0.5 * (
-          this.mesh.radialFaceLeft[radialOffset + 1] +
-          this.mesh.radialFaceRight[radialOffset + 1] -
-          this.mesh.radialFaceLeft[radialOffset] -
-          this.mesh.radialFaceRight[radialOffset]
+          leftOuter + rightOuter - leftInner - rightInner
         );
-        const h = Math.min(dx, localDr);
+        const radialInner = radialFaceAreaVector(this.mesh, i, j);
+        const radialOuter = radialFaceAreaVector(this.mesh, i, j + 1);
+        const axialArea = PI * (
+          leftOuter * leftOuter - leftInner * leftInner +
+          rightOuter * rightOuter - rightInner * rightInner
+        );
+        const radialArea = Math.hypot(radialInner.x, radialInner.r) +
+          Math.hypot(radialOuter.x, radialOuter.r);
+        this.cellLengthScales[index] = Math.min(dx, localDr);
+        this.cellSurfaceAreas[index] = axialArea + radialArea;
+      }
+    }
+  }
+
+  private computeTimeSteps() {
+    if (this.config.fixedTimeStepS && this.config.fixedTimeStepS > 0) {
+      this.localTimeSteps.fill(this.config.fixedTimeStepS);
+      return { min: this.config.fixedTimeStepS, max: this.config.fixedTimeStepS };
+    }
+    this.effectiveCfl = this.currentCfl();
+    let minimumDt = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < this.mesh.nx; i += 1) {
+      for (let j = 0; j < this.mesh.nr; j += 1) {
+        const index = ransCellIndex(i, j, this.mesh);
+        const h = this.cellLengthScales[index];
         const speed = Math.hypot(this.primitive.u[index], this.primitive.v[index]) +
           this.primitive.soundSpeed[index];
-        const convective = this.effectiveCfl * h / Math.max(speed, 1);
+        const spectralRadius = Math.max(speed * this.cellSurfaceAreas[index], 1e-20);
+        const distanceBasedConvective = this.effectiveCfl * h / Math.max(speed, 1);
+        const finiteVolumeConvective = this.effectiveCfl * this.mesh.volumes[index] / spectralRadius;
+        const convective = this.config.timeStepping === "global" || i <= this.mesh.nozzleExitIndex
+          ? distanceBasedConvective
+          : finiteVolumeConvective;
         const nuEffective = this.primitive.nu[index] +
           this.primitive.muT[index] / Math.max(this.primitive.rho[index], this.config.rhoMin);
         const saDiffusivity = this.config.turbulence === "spalartAllmaras"
           ? (this.primitive.nu[index] + this.primitive.nuTilde[index]) / SA_SIGMA
           : 0;
         const viscous = 0.22 * h * h / Math.max(nuEffective, saDiffusivity, 1e-20);
-        dt = Math.min(dt, convective, viscous);
+        const dt = Math.max(Math.min(convective, viscous, 1e-3), 1e-12);
+        this.localTimeSteps[index] = dt;
+        minimumDt = Math.min(minimumDt, dt);
       }
     }
-    return Math.max(Math.min(dt, 1e-3), 1e-12);
+
+    if (this.config.timeStepping === "global") {
+      this.localTimeSteps.fill(minimumDt);
+      return { min: minimumDt, max: minimumDt };
+    }
+
+    const globalRatioCap = minimumDt * LOCAL_DT_GLOBAL_RATIO_CAP;
+    for (let index = 0; index < this.localTimeSteps.length; index += 1) {
+      this.localTimeSteps[index] = Math.min(this.localTimeSteps[index], globalRatioCap);
+    }
+    this.smoothLocalTimeSteps();
+
+    let maximumDt = minimumDt;
+    for (const dt of this.localTimeSteps) maximumDt = Math.max(maximumDt, dt);
+    return { min: minimumDt, max: maximumDt };
   }
 
-  private attemptUpdate(dt: number) {
+  private smoothLocalTimeSteps() {
+    const limit = LOCAL_DT_NEIGHBOR_RATIO;
+    const nr = this.mesh.nr;
+    const nx = this.mesh.nx;
+    const relaxPair = (leftIndex: number, rightIndex: number) => {
+      const left = this.localTimeSteps[leftIndex];
+      const right = this.localTimeSteps[rightIndex];
+      this.localTimeSteps[leftIndex] = Math.min(left, right * limit);
+      this.localTimeSteps[rightIndex] = Math.min(right, left * limit);
+    };
+
+    for (let sweep = 0; sweep < 3; sweep += 1) {
+      for (let i = 0; i < nx; i += 1) {
+        for (let j = 1; j < nr; j += 1) {
+          relaxPair(ransCellIndex(i, j - 1, this.mesh), ransCellIndex(i, j, this.mesh));
+        }
+      }
+      for (let i = 1; i < nx; i += 1) {
+        for (let j = 0; j < nr; j += 1) {
+          relaxPair(ransCellIndex(i - 1, j, this.mesh), ransCellIndex(i, j, this.mesh));
+        }
+      }
+      for (let i = nx - 1; i >= 0; i -= 1) {
+        for (let j = nr - 1; j > 0; j -= 1) {
+          relaxPair(ransCellIndex(i, j, this.mesh), ransCellIndex(i, j - 1, this.mesh));
+        }
+      }
+      for (let i = nx - 1; i > 0; i -= 1) {
+        for (let j = 0; j < nr; j += 1) {
+          relaxPair(ransCellIndex(i, j, this.mesh), ransCellIndex(i - 1, j, this.mesh));
+        }
+      }
+    }
+  }
+
+  private attemptUpdate(timeStepScale: number, minimumTimeStep: number) {
     const next = this.nextState;
     for (let index = 0; index < this.mesh.cells; index += 1) {
+      const dt = this.localTimeSteps[index] * timeStepScale;
+      const turbulenceDt = this.config.turbulence === "spalartAllmaras" &&
+        this.config.timeStepping === "localPseudoTime"
+        ? minimumTimeStep * timeStepScale
+        : dt;
       const factor = dt / this.mesh.volumes[index];
+      const turbulenceFactor = turbulenceDt / this.mesh.volumes[index];
       const proposedRho = this.state.rho[index] - factor * this.residual.rho[index];
       const proposedRhoU = this.state.rhoU[index] - factor * this.residual.rhoU[index];
       const proposedRhoV = this.state.rhoV[index] - factor * this.residual.rhoV[index];
@@ -1084,7 +1215,7 @@ export class AxisymmetricRansSolver {
         : 0;
       const proposedRhoNuTilde =
         this.state.rhoNuTilde[index] -
-        factor * (this.residual.rhoNuTilde[index] + saSourceResidual);
+        turbulenceFactor * (this.residual.rhoNuTilde[index] + saSourceResidual);
       if (
         !Number.isFinite(proposedRho) ||
         !Number.isFinite(proposedRhoU) ||
@@ -1156,10 +1287,10 @@ export class AxisymmetricRansSolver {
           0
         );
         const sourceUpdatedNuTilde = (
-          transportedNuTilde + dt * this.saProduction[index]
+          transportedNuTilde + turbulenceDt * this.saProduction[index]
         ) / (
           1 +
-          dt * this.saDestruction[index] /
+          turbulenceDt * this.saDestruction[index] /
             Math.max(this.primitive.nuTilde[index], 1e-20)
         );
         sourceUpdatedRhoNuTilde = acceptedRho * sourceUpdatedNuTilde;
@@ -1192,7 +1323,7 @@ export class AxisymmetricRansSolver {
   private advanceOne() {
     if (this.failed) return;
     this.computeResidual();
-    let dt = this.computeTimeStep();
+    const timeSteps = this.computeTimeSteps();
     const point = residualNorm(
       this.residual,
       this.mesh,
@@ -1206,13 +1337,14 @@ export class AxisymmetricRansSolver {
     );
     let next: ConservativeState | null = null;
     let retries = 0;
+    let timeStepScale = 1;
     for (; retries < 12; retries += 1) {
-      next = this.attemptUpdate(dt);
+      next = this.attemptUpdate(timeStepScale, timeSteps.min);
       if (next) break;
       this.counters.rejectedSteps += 1;
       this.cflScale = Math.max(this.cflScale * 0.5, 0.02);
       this.effectiveCfl = Math.max(this.effectiveCfl * 0.5, 0.001);
-      dt *= 0.5;
+      timeStepScale *= 0.5;
     }
     if (!next) {
       this.failed = true;
@@ -1223,8 +1355,9 @@ export class AxisymmetricRansSolver {
     this.nextState = this.state;
     this.state = next;
     this.iteration += 1;
-    this.pseudoTimeS += dt;
-    this.lastDtS = dt;
+    this.lastDtS = timeSteps.min * timeStepScale;
+    this.maxLocalDtS = timeSteps.max * timeStepScale;
+    this.pseudoTimeS += this.lastDtS;
     this.residualHistory.push(point);
     if (this.residualHistory.length > 600) this.residualHistory.shift();
     this.decodeState(false);
@@ -1308,6 +1441,8 @@ export class AxisymmetricRansSolver {
       pseudoTimeS: this.pseudoTimeS,
       cfl: this.effectiveCfl || this.config.cfl,
       dtS: this.lastDtS,
+      maxLocalDtS: this.maxLocalDtS,
+      timeStepping: this.config.timeStepping,
       minDensityKgM3,
       minPressurePa,
       minTemperatureK,

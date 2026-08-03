@@ -10,6 +10,7 @@ import {
   hllcFlux,
   noSlipAdiabaticWallGhost,
   primitiveFromConservative,
+  shockStabilizedFlux,
   symmetryAxisGhost,
   weightedLeastSquaresGradient,
   type FacePrimitive
@@ -77,6 +78,24 @@ test("HLLC keeps contact and Sod shock-tube states finite", () => {
   assert.ok(sod.flux.every(Number.isFinite));
   assert.ok(sod.flux[0] > 0);
   assert.ok(sod.flux[1] > 0);
+});
+
+test("shock stabilization preserves smooth HLLC flux and damps strong jumps", () => {
+  const smoothLeft = face({ p: 101325 });
+  const smoothRight = face({ p: 103000 });
+  const smooth = shockStabilizedFlux(smoothLeft, smoothRight, 1, 0);
+  const smoothHllc = hllcFlux(smoothLeft, smoothRight, 1, 0);
+  assert.deepEqual(smooth.flux, smoothHllc.flux);
+  assert.equal(smooth.usedFallback, false);
+
+  const strong = shockStabilizedFlux(
+    face({ rho: 4, u: 700, p: 2_000_000, temperature: 1742 }),
+    face({ rho: 1.2, u: 0, p: 101325, temperature: 294.2 }),
+    1,
+    0
+  );
+  assert.ok(strong.flux.every(Number.isFinite));
+  assert.equal(strong.usedFallback, true);
 });
 
 test("weighted least-squares gradients recover a linear field", () => {

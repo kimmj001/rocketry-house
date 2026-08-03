@@ -640,6 +640,14 @@ export function NozzleCfdLab() {
                   <option value="standard">Standard - 144 x 28</option>
                   <option value="high">High - 208 x 40</option>
                 </SelectControl>
+                <SelectControl
+                  label="Time stepping"
+                  value={config.timeStepping}
+                  onChange={(value) => updateConfig({ ...config, timeStepping: value as RansSolverConfig["timeStepping"] })}
+                >
+                  <option value="localPseudoTime">Local pseudo-time - fast steady RANS</option>
+                  <option value="global">Global explicit - transient</option>
+                </SelectControl>
                 <NumberControl label="Initial CFL" value={config.cfl} step={0.01} min={0.005} max={0.5} onChange={(value) => updateConfig({ ...config, cfl: value })} />
                 <NumberControl label="Iterations per batch" value={config.iterationsPerBatch} step={1} min={1} max={64} onChange={(value) => updateConfig({ ...config, iterationsPerBatch: value })} />
                 <label className="flex items-center justify-between gap-3 text-xs text-white/58">
@@ -729,7 +737,14 @@ export function NozzleCfdLab() {
             {[
               ["Iteration", diagnostics?.iteration.toLocaleString() ?? "0"],
               ["CFL", diagnostics ? diagnostics.cfl.toFixed(3) : "0.000"],
-              ["dt", diagnostics ? `${diagnostics.dtS.toExponential(2)} s` : "0 s"],
+              [
+                diagnostics?.timeStepping === "localPseudoTime" ? "Local dt range" : "Global dt",
+                diagnostics
+                  ? diagnostics.timeStepping === "localPseudoTime"
+                    ? `${diagnostics.dtS.toExponential(1)} - ${diagnostics.maxLocalDtS.toExponential(1)} s`
+                    : `${diagnostics.dtS.toExponential(2)} s`
+                  : "0 s"
+              ],
               ["Max Mach", diagnostics ? diagnostics.maxMach.toFixed(3) : "0.000"],
               ["Min pressure", diagnostics ? `${(diagnostics.minPressurePa / 1000).toFixed(2)} kPa` : "0 kPa"],
               [

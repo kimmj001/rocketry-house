@@ -3,6 +3,7 @@ export type TurbulenceMode = "laminar" | "spalartAllmaras";
 export type ThermoModel = "constantGas" | "hydroloxFrozen";
 export type ResolutionPreset = "development" | "standard" | "high";
 export type InitializationMode = "coldStart" | "quasiSteady";
+export type TimeSteppingMode = "global" | "localPseudoTime";
 export type CfdFieldName =
   | "mach"
   | "pressure"
@@ -42,6 +43,7 @@ export type RansSolverConfig = {
   gasConstant: number;
   thermoModel: ThermoModel;
   initializationMode: InitializationMode;
+  timeStepping: TimeSteppingMode;
   turbulence: TurbulenceMode;
   reconstruction: ReconstructionMode;
   cfl: number;
@@ -141,6 +143,8 @@ export type SolverDiagnostics = {
   pseudoTimeS: number;
   cfl: number;
   dtS: number;
+  maxLocalDtS: number;
+  timeStepping: TimeSteppingMode;
   minDensityKgM3: number;
   minPressurePa: number;
   minTemperatureK: number;
@@ -214,6 +218,7 @@ export const DEFAULT_RANS_CONFIG: RansSolverConfig = {
   gasConstant: 378.1,
   thermoModel: "hydroloxFrozen",
   initializationMode: "coldStart",
+  timeStepping: "localPseudoTime",
   turbulence: "spalartAllmaras",
   reconstruction: "musclVenkatakrishnan",
   cfl: 0.05,

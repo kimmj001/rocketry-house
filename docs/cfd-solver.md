@@ -40,12 +40,14 @@ limit `dv/dr`.
 ## Numerical methods
 
 - HLLC upwind inviscid flux with Rusanov fallback
+- Pressure-jump shock sensor with first-order face states and local
+  HLLC/Rusanov blending to suppress grid-aligned carbuncle modes
 - Weighted least-squares gradients with a one-sided fallback
 - Second-order MUSCL reconstruction
 - Venkatakrishnan limiter and first-order positivity fallback
 - Gradient-based central viscous flux
 - Fourier heat conduction with molecular and turbulent conductivity
-- Explicit Euler transport update with positivity-preserving point-implicit
+- Local pseudo-time explicit Euler transport update with positivity-preserving point-implicit
   Spalart-Allmaras destruction
 - Convective and viscous CFL limits
 - Optional CFL ramp to the reconstruction-dependent stability ceiling
@@ -61,6 +63,23 @@ quiescent ambient state and no developed nozzle flow or plume is present.
 Starting the solver applies the chamber boundary condition at the inlet, so the
 pressure front can be followed through the chamber, throat, nozzle exit, and
 external domain.
+
+The browser defaults to cell-local pseudo-time stepping for the steady RANS
+solve. Each cell uses its own convective and viscous stability limit, with
+neighbor-ratio smoothing and a bounded maximum ratio to prevent abrupt update
+jumps at the nozzle-exit interface. The smallest and largest accepted local
+steps are reported separately. This removes the previous bottleneck in which
+the smallest hot throat cell forced the entire `1.8 m` ambient block to advance
+at the same tiny step. Local pseudo-time changes only the path to the steady
+residual root, not the finite-volume equations or their converged solution.
+Global explicit stepping remains selectable when a time-ordered transient is
+more important than reaching the steady plume quickly.
+
+Strong moving pressure fronts are detected from the normalized face pressure
+jump. Only those faces fall back to cell averages and blend toward the more
+dissipative Rusanov flux. This prevents a front-cell density undershoot from
+collapsing the CFL while leaving second-order MUSCL/HLLC reconstruction active
+through smooth expansions, shear layers, and established plume structure.
 
 Server-side performance calculations retain an optional quasi-steady
 initialization: subsonic upstream of the throat, supersonic downstream, and a
