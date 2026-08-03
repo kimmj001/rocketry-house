@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Archive, Boxes, Calculator, Check, ChevronRight, Cpu, Crosshair, Download, Eye, FileUp, Flame, Gauge, Layers, Library, PackagePlus, Play, Rocket, Ruler, Save, ShieldCheck, UploadCloud, Wind } from "lucide-react";
@@ -23,6 +23,13 @@ import type { RocketComponent, RocketComponentType, SimulationResult } from "@/l
 
 const MOTOR_STORAGE_KEY = "rocketry-house.saved-motors";
 type CfdDebugView = NozzleCfdField["name"] | "mesh" | "residual";
+
+type RocketBuilderSnapshot = {
+  components: RocketComponent[];
+  selectedMotorId?: string | null;
+  windSpeedMps?: number;
+  updatedAt?: string;
+};
 
 const safetyWarnings = [
   "Motor simulations are estimates and must not be treated as safety certification.",
@@ -476,12 +483,16 @@ export function MotorLibrary({ detailId }: { detailId?: string }) {
   const [motors, setMotors] = useState<SavedMotor[]>([]);
   useEffect(() => {
     const sync = () => setMotors(readStoredMotors());
+    const syncAccount = () => {
+      sync();
+      void syncPersistentMotors();
+    };
     sync();
     void syncPersistentMotors();
-    window.addEventListener("rocketry-auth-change", sync);
+    window.addEventListener("rocketry-auth-change", syncAccount);
     window.addEventListener("rocketry-motors-change", sync);
     return () => {
-      window.removeEventListener("rocketry-auth-change", sync);
+      window.removeEventListener("rocketry-auth-change", syncAccount);
       window.removeEventListener("rocketry-motors-change", sync);
     };
   }, []);
@@ -518,6 +529,7 @@ export function RocketBuilder() {
   const [launchRun, setLaunchRun] = useState(0);
   const [selectedComponentId, setSelectedComponentId] = useState(project.components[0]?.id ?? "");
   const [designView, setDesignView] = useState<"Side view" | "3D Figure">("Side view");
+  const draftRequestRef = useRef(0);
   const selectedMotor = motors.find((motor) => motor.id === selectedMotorId);
   const componentsWithMotor = useMemo(() => selectedMotor ? insertMotorComponent(components, selectedMotor) : components, [components, selectedMotor]);
   const selectedComponent = components.find((component) => component.id === selectedComponentId) ?? components[0];
@@ -528,15 +540,48 @@ export function RocketBuilder() {
       setMotors(storedMotors);
       setSelectedMotorId((current) => storedMotors.some((motor) => motor.id === current) ? current : storedMotors[0]?.id || "");
     };
+    const syncAccount = () => {
+      sync();
+      void syncPersistentMotors();
+    };
     sync();
     void syncPersistentMotors();
-    window.addEventListener("rocketry-auth-change", sync);
+    window.addEventListener("rocketry-auth-change", syncAccount);
     window.addEventListener("rocketry-motors-change", sync);
     return () => {
-      window.removeEventListener("rocketry-auth-change", sync);
+      window.removeEventListener("rocketry-auth-change", syncAccount);
       window.removeEventListener("rocketry-motors-change", sync);
     };
   }, []);
+
+  useEffect(() => {
+    const restoreAccountDraft = async () => {
+      const requestId = ++draftRequestRef.current;
+      setComponents(project.components);
+      setSelectedComponentId(project.components[0]?.id ?? "");
+      setSelectedMotorId("");
+      setWindSpeedMps(1.7);
+      setSaveStatus("Rocket project not saved yet.");
+
+      const records = await loadPersistentRecords<RocketBuilderSnapshot>("rocket_builder_current");
+      if (requestId !== draftRequestRef.current) return;
+      const saved = records[0]?.payload;
+      if (!isRocketBuilderSnapshot(saved)) return;
+
+      setComponents(saved.components);
+      setSelectedComponentId(saved.components[0]?.id ?? "");
+      setSelectedMotorId(saved.selectedMotorId ?? "");
+      setWindSpeedMps(Number.isFinite(saved.windSpeedMps) ? Math.max(0, saved.windSpeedMps ?? 0) : 1.7);
+      setSaveStatus("Loaded the latest rocket draft saved for this account.");
+    };
+
+    void restoreAccountDraft();
+    window.addEventListener("rocketry-auth-change", restoreAccountDraft);
+    return () => {
+      draftRequestRef.current += 1;
+      window.removeEventListener("rocketry-auth-change", restoreAccountDraft);
+    };
+  }, [project.components]);
 
   useEffect(() => {
     setResult(runRocketEstimateWithMotor(components, selectedMotor, { windSpeedMps }));
@@ -605,12 +650,12 @@ export function RocketBuilder() {
     };
 
     setSaveStatus("Saving rocket project to account archive...");
-    localStorage.setItem("rocketry-house.last-rocket-project", JSON.stringify(payload));
     const [projectSave, builderSave] = await Promise.all([
       savePersistentRecord("rocket_projects", slug, payload),
       savePersistentRecord("rocket_builder_current", "current", payload)
     ]);
     setSaveStatus(projectSave.cloud && builderSave.cloud ? "Rocket project saved to Supabase and local backup." : "Rocket project saved locally. Cloud sync needs Supabase availability.");
+    window.dispatchEvent(new Event("rocketry-rockets-change"));
   }
 
   function addPayloadBay() {
@@ -3017,16 +3062,26 @@ function mergeMeasured(curve: MotorSimulationResult["curve"], measuredCurve?: Mo
   return curve.map((point, index) => ({ ...point, measuredThrust: measuredCurve?.[index]?.thrust }));
 }
 
+function isRocketBuilderSnapshot(value: unknown): value is RocketBuilderSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const snapshot = value as Partial<RocketBuilderSnapshot>;
+  return Boolean(
+    Array.isArray(snapshot.components) &&
+    snapshot.components.length > 0 &&
+    snapshot.components.every((component) => component && typeof component.id === "string" && typeof component.type === "string")
+  );
+}
+
 function getMotorStorageKey() {
   if (typeof window === "undefined") return MOTOR_STORAGE_KEY;
   const user = readMockUser();
   return user?.id ? `${MOTOR_STORAGE_KEY}:${user.id}` : MOTOR_STORAGE_KEY;
 }
 
-function readStoredMotors() {
+function readStoredMotors(storageKey = getMotorStorageKey()) {
   if (typeof window === "undefined") return [];
   try {
-    const parsed = JSON.parse(localStorage.getItem(getMotorStorageKey()) ?? "[]") as SavedMotor[];
+    const parsed = JSON.parse(localStorage.getItem(storageKey) ?? "[]") as SavedMotor[];
     return parsed;
   } catch {
     return [];
@@ -3035,15 +3090,16 @@ function readStoredMotors() {
 
 async function syncPersistentMotors() {
   if (typeof window === "undefined") return;
+  const storageKey = getMotorStorageKey();
   const records = await loadPersistentRecords<SavedMotor>("saved_motors");
   if (!records.length) return;
   const cloudMotors = records.map((record) => record.payload);
-  const localMotors = readStoredMotors();
+  const localMotors = readStoredMotors(storageKey);
   const merged = [
     ...cloudMotors,
     ...localMotors.filter((motor) => !cloudMotors.some((cloudMotor) => cloudMotor.id === motor.id))
   ];
-  localStorage.setItem(getMotorStorageKey(), JSON.stringify(merged));
+  localStorage.setItem(storageKey, JSON.stringify(merged));
   window.dispatchEvent(new Event("rocketry-motors-change"));
 }
 

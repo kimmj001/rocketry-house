@@ -54,7 +54,7 @@ function resolveOwnerKey(options?: PersistenceOptions) {
   return options?.ownerKey ?? getPersistenceOwnerKey();
 }
 
-async function resolveCloudOwnerKey(options?: PersistenceOptions, mode: "read" | "write" = "read") {
+async function resolveCloudOwnerKey(options?: PersistenceOptions) {
   const requestedOwner = resolveOwnerKey(options);
   const supabase = getSupabaseClient();
   const publicCommunity = requestedOwner === PUBLIC_COMMUNITY_OWNER_KEY;
@@ -77,8 +77,13 @@ async function resolveCloudOwnerKey(options?: PersistenceOptions, mode: "read" |
     return { ownerKey: requestedOwner, authenticated: false, publicCommunity: false, publicProjects: false };
   }
 
+  const authenticatedOwner = `user:${userId}`;
+  if (requestedOwner !== authenticatedOwner) {
+    return { ownerKey: requestedOwner, authenticated: false, publicCommunity: false, publicProjects: false };
+  }
+
   return {
-    ownerKey: `user:${userId}`,
+    ownerKey: authenticatedOwner,
     authenticated: true,
     publicCommunity: false,
     publicProjects: false
@@ -115,11 +120,12 @@ export function cachePersistentRecord<T>(collection: string, recordKey: string, 
 }
 
 export async function savePersistentRecord<T>(collection: string, recordKey: string, payload: T, options?: PersistenceOptions) {
-  cachePersistentRecord(collection, recordKey, payload, options);
+  const scopedOptions = { ownerKey: resolveOwnerKey(options) };
+  cachePersistentRecord(collection, recordKey, payload, scopedOptions);
 
   const supabase = getSupabaseClient();
   if (!supabase || isMockMode) return { cloud: false, error: null };
-  const owner = await resolveCloudOwnerKey(options, "write");
+  const owner = await resolveCloudOwnerKey(scopedOptions);
   if (!owner.authenticated) {
     return { cloud: false, error: new Error("Sign in is required to archive data to Supabase.") };
   }
@@ -143,10 +149,11 @@ export async function savePersistentRecord<T>(collection: string, recordKey: str
 }
 
 export async function loadPersistentRecords<T>(collection: string, options?: PersistenceOptions) {
-  const localRecords = readLocalCollection<T>(collection, options);
+  const scopedOptions = { ownerKey: resolveOwnerKey(options) };
+  const localRecords = readLocalCollection<T>(collection, scopedOptions);
   const supabase = getSupabaseClient();
   if (!supabase || isMockMode) return localRecords;
-  const owner = await resolveCloudOwnerKey(options, "read");
+  const owner = await resolveCloudOwnerKey(scopedOptions);
   if (!owner.authenticated && !owner.publicCommunity && !owner.publicProjects) return localRecords;
 
   const { data, error } = await supabase
@@ -163,19 +170,20 @@ export async function loadPersistentRecords<T>(collection: string, options?: Per
     ...cloudRecords,
     ...localRecords.filter((local) => !cloudRecords.some((cloud) => cloud.record_key === local.record_key))
   ];
-  writeLocalCollection(collection, merged, options);
+  writeLocalCollection(collection, merged, scopedOptions);
   return merged;
 }
 
 export async function savePersistentSet(collection: string, recordKey: string, values: Set<string>, options?: PersistenceOptions) {
-  const previous = readLocalCollection<string[]>(collection, options).find((record) => record.record_key === recordKey)?.payload ?? [];
-  const result = await savePersistentRecord(collection, recordKey, Array.from(values), options);
+  const scopedOptions = { ownerKey: resolveOwnerKey(options) };
+  const previous = readLocalCollection<string[]>(collection, scopedOptions).find((record) => record.record_key === recordKey)?.payload ?? [];
+  const result = await savePersistentRecord(collection, recordKey, Array.from(values), scopedOptions);
   if (result.cloud) await recordSetChanges(collection, recordKey, new Set(previous), values);
   return result;
 }
 
 export async function loadPersistentSet(collection: string, recordKey: string, options?: PersistenceOptions) {
-  const records = await loadPersistentRecords<string[]>(collection, options);
+  const records = await loadPersistentRecords<string[]>(collection, { ownerKey: resolveOwnerKey(options) });
   const record = records.find((item) => item.record_key === recordKey);
   return new Set(record?.payload ?? []);
 }

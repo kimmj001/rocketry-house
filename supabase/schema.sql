@@ -317,49 +317,86 @@ drop policy if exists "Rocketry House MVP can read app records" on user_data_rec
 drop policy if exists "Rocketry House MVP can insert app records" on user_data_records;
 drop policy if exists "Rocketry House MVP can update app records" on user_data_records;
 drop policy if exists "Rocketry House MVP can delete app records" on user_data_records;
+drop policy if exists "Users can read own app records and public archives" on user_data_records;
+drop policy if exists "Users can insert own app records and public archives" on user_data_records;
+drop policy if exists "Users can update own app records and public archives" on user_data_records;
+drop policy if exists "Users can delete own app records" on user_data_records;
 
-create policy "Rocketry House MVP can read app records"
+create policy "Users can read own app records and public archives"
   on user_data_records for select
-  using (true);
+  using (
+    owner_key = ('user:' || auth.uid()::text)
+    or (owner_key = 'public:community' and collection in ('community_posts', 'community_comments'))
+    or (owner_key = 'public:projects' and collection in ('projects', 'rocket_projects'))
+  );
 
-create policy "Rocketry House MVP can insert app records"
+create policy "Users can insert own app records and public archives"
   on user_data_records for insert
-  with check (true);
+  with check (
+    auth.uid() is not null
+    and (
+      owner_key = ('user:' || auth.uid()::text)
+      or (owner_key = 'public:community' and collection in ('community_posts', 'community_comments'))
+      or (owner_key = 'public:projects' and collection in ('projects', 'rocket_projects'))
+    )
+  );
 
-create policy "Rocketry House MVP can update app records"
+create policy "Users can update own app records and public archives"
   on user_data_records for update
-  using (true)
-  with check (true);
+  using (
+    auth.uid() is not null
+    and (
+      owner_key = ('user:' || auth.uid()::text)
+      or (owner_key = 'public:community' and collection in ('community_posts', 'community_comments'))
+      or (owner_key = 'public:projects' and collection in ('projects', 'rocket_projects'))
+    )
+  )
+  with check (
+    auth.uid() is not null
+    and (
+      owner_key = ('user:' || auth.uid()::text)
+      or (owner_key = 'public:community' and collection in ('community_posts', 'community_comments'))
+      or (owner_key = 'public:projects' and collection in ('projects', 'rocket_projects'))
+    )
+  );
 
-create policy "Rocketry House MVP can delete app records"
+create policy "Users can delete own app records"
   on user_data_records for delete
-  using (true);
+  using (auth.uid() is not null and owner_key = ('user:' || auth.uid()::text));
 
 insert into storage.buckets (id, name, public)
-values ('rocketry-house-files', 'rocketry-house-files', true)
+values ('rocketry-house-files', 'rocketry-house-files', false)
 on conflict (id) do nothing;
+
+update storage.buckets set public = false where id = 'rocketry-house-files';
 
 drop policy if exists "Rocketry House MVP can read uploaded files" on storage.objects;
 drop policy if exists "Rocketry House MVP can upload files" on storage.objects;
 drop policy if exists "Rocketry House MVP can update files" on storage.objects;
 drop policy if exists "Rocketry House MVP can delete files" on storage.objects;
+drop policy if exists "Users can read own uploaded files" on storage.objects;
+drop policy if exists "Users can upload own files" on storage.objects;
+drop policy if exists "Users can update own files" on storage.objects;
+drop policy if exists "Users can delete own files" on storage.objects;
+drop policy if exists "Users can update own uploaded files" on storage.objects;
+drop policy if exists "Users can delete own uploaded files" on storage.objects;
 
-create policy "Rocketry House MVP can read uploaded files"
+create policy "Users can read own uploaded files"
   on storage.objects for select
-  using (bucket_id = 'rocketry-house-files');
+  using (bucket_id = 'rocketry-house-files' and auth.uid() is not null and (storage.foldername(name))[1] = auth.uid()::text);
 
-create policy "Rocketry House MVP can upload files"
+create policy "Users can upload own files"
   on storage.objects for insert
-  with check (bucket_id = 'rocketry-house-files');
+  with check (bucket_id = 'rocketry-house-files' and auth.uid() is not null and (storage.foldername(name))[1] = auth.uid()::text);
 
-create policy "Rocketry House MVP can update files"
+create policy "Users can update own uploaded files"
   on storage.objects for update
-  using (bucket_id = 'rocketry-house-files')
-  with check (bucket_id = 'rocketry-house-files');
+  using (bucket_id = 'rocketry-house-files' and auth.uid() is not null and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'rocketry-house-files' and auth.uid() is not null and (storage.foldername(name))[1] = auth.uid()::text);
 
-create policy "Rocketry House MVP can delete files"
+create policy "Users can delete own uploaded files"
   on storage.objects for delete
-  using (bucket_id = 'rocketry-house-files');
+  using (bucket_id = 'rocketry-house-files' and auth.uid() is not null and (storage.foldername(name))[1] = auth.uid()::text);
 alter table projects enable row level security;
 alter table project_files enable row level security;
 alter table purchases enable row level security;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Award, BadgeCheck, Flame, Globe, MapPin, Pencil, RadioTower, Rocket, Save, UserRoundCheck, X } from "lucide-react";
 import { AccountFeatureConsole } from "@/components/account-feature-console";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,7 @@ export function ProfileAccount() {
   const [profileStatus, setProfileStatus] = useState("");
   const [savedMotors, setSavedMotors] = useState<SavedMotor[]>([]);
   const [rocketProjects, setRocketProjects] = useState<StoredRocketProject[]>([]);
+  const workshopRequestRef = useRef(0);
   const { usage, statuses, loading: usageLoading, error: usageError, claimUsage, refreshUsage } = useCloudUsage();
   const [draft, setDraft] = useState({
     name: "",
@@ -47,6 +48,7 @@ export function ProfileAccount() {
     accountType: "personal" as AuthUser["accountType"],
     organizationName: ""
   });
+  const workshopOwnerId = user?.id;
 
   useEffect(() => {
     const sync = () => {
@@ -69,20 +71,35 @@ export function ProfileAccount() {
   }, []);
 
   useEffect(() => {
-    if (!user) {
+    if (!workshopOwnerId) {
+      workshopRequestRef.current += 1;
       setSavedMotors([]);
       setRocketProjects([]);
       return;
     }
 
-    void Promise.all([
-      loadPersistentRecords<SavedMotor>("saved_motors"),
-      loadPersistentRecords<StoredRocketProject>("rocket_projects")
-    ]).then(([motorRecords, projectRecords]) => {
+    const refreshWorkshop = async () => {
+      const requestId = ++workshopRequestRef.current;
+      const [motorRecords, projectRecords] = await Promise.all([
+        loadPersistentRecords<SavedMotor>("saved_motors"),
+        loadPersistentRecords<StoredRocketProject>("rocket_projects")
+      ]);
+      if (requestId !== workshopRequestRef.current) return;
       setSavedMotors(motorRecords.map((record) => record.payload));
       setRocketProjects(projectRecords.map((record) => record.payload));
-    });
-  }, [user]);
+    };
+
+    void refreshWorkshop();
+    window.addEventListener("rocketry-motors-change", refreshWorkshop);
+    window.addEventListener("rocketry-rockets-change", refreshWorkshop);
+    window.addEventListener("storage", refreshWorkshop);
+    return () => {
+      workshopRequestRef.current += 1;
+      window.removeEventListener("rocketry-motors-change", refreshWorkshop);
+      window.removeEventListener("rocketry-rockets-change", refreshWorkshop);
+      window.removeEventListener("storage", refreshWorkshop);
+    };
+  }, [workshopOwnerId]);
 
   function setDraftFromUser(nextUser: AuthUser) {
     setDraft({
