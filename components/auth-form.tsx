@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { isValidEmail, mapSupabaseUserToAuthUser, normalizeEmail, saveAuthUserProfileToCloud, validatePassword, writeMockUser } from "@/lib/auth";
 import { savePersistentRecord } from "@/lib/cloud-persistence";
+import { recordAccountActivity } from "@/lib/account-activity";
 import { sampleOrganizations } from "@/lib/team-data";
 import { getSupabaseClient, isMockMode } from "@/lib/supabase";
 
@@ -93,6 +94,17 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
       const archiveResult = await savePersistentRecord("profiles", savedUser.id, savedUser);
       if (profileResult.error || archiveResult.error) {
         throw new Error("Account was created, but profile archiving failed. Please try signing in again.");
+      }
+      if (isSignUp) {
+        await recordAccountActivity({
+          type: "account_created",
+          title: `Created ${savedUser.accountType} account`,
+          detail: savedUser.email,
+          subjectId: savedUser.id,
+          subjectUrl: "/profile",
+          occurredAt: savedUser.createdAt,
+          idempotencyKey: `account-created:${savedUser.id}`
+        });
       }
       router.push("/profile");
       router.refresh();

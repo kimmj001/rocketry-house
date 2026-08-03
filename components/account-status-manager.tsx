@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, CheckCircle2, Cloud, Database, Download, Lock, RefreshCw, Search, ShieldAlert, UserCog, Users } from "lucide-react";
+import { Activity, ChevronDown, ChevronUp, Clock3, Cloud, CreditCard, Database, Download, FolderKanban, Heart, Lock, MessageSquare, RefreshCw, Search, ShieldAlert, UserCog, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AUTH_ACCOUNTS_KEY, AUTH_STORAGE_KEY, normalizeEmail, type AccountAccessStatus, type AuthUser } from "@/lib/auth";
 import type {
+  AccountActivity,
   AccountApprovalStatus,
   AccountDirectoryResponse,
   AccountDirectorySource,
@@ -14,6 +15,8 @@ import type {
   AccountStorageSummary,
   ManagedAccount
 } from "@/lib/account-status-types";
+import { readLocalAccountActivities } from "@/lib/account-activity";
+import { STANDARD_LIMITS } from "@/lib/usage-limits";
 
 const STATUS_STORAGE_KEY = "rocketry-house.account-status-overrides";
 
@@ -68,6 +71,7 @@ export function AccountStatusManager() {
   const [statusFilter, setStatusFilter] = useState<AccountAccessStatus | "all">("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | "cloud" | "browser">("all");
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [directoryStatus, setDirectoryStatus] = useState<DirectoryStatus>({
     loading: true,
@@ -102,16 +106,29 @@ export function AccountStatusManager() {
       { label: "Unified accounts", value: accounts.length.toString(), icon: Users },
       { label: "Cloud profiles", value: directoryStatus.cloudProfiles.toString(), icon: Cloud },
       { label: "Review queue", value: reviewCount.toString(), icon: ShieldAlert },
-      { label: "Approved", value: accounts.filter((account) => account.approvalStatus === "approved").length.toString(), icon: CheckCircle2 }
+      { label: "Pro plans", value: accounts.filter((account) => account.subscriptionTier === "pro").length.toString(), icon: CreditCard }
     ];
   }, [accounts, directoryStatus.cloudProfiles]);
 
   useEffect(() => {
     void refreshDirectory();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshDirectory(true);
+    }, 5000);
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void refreshDirectory(true);
+    };
+    window.addEventListener("focus", refreshVisible);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshVisible);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
   }, []);
 
-  async function refreshDirectory() {
-    setDirectoryStatus((current) => ({ ...current, loading: true }));
+  async function refreshDirectory(silent = false) {
+    if (!silent) setDirectoryStatus((current) => ({ ...current, loading: true }));
     const localAccounts = readLocalManagedAccounts();
     const localSummary = readLocalStorageSummary();
 
@@ -131,7 +148,7 @@ export function AccountStatusManager() {
         canListAuthUsers: directory.cloud.canListAuthUsers,
         errors: directory.cloud.errors
       });
-      setNotice(`Unified ${mergedAccounts.length} accounts from cloud and this browser.`);
+      if (!silent) setNotice(`Unified ${mergedAccounts.length} accounts from cloud and this browser.`);
     } catch (error) {
       setAccounts(localAccounts);
       setStorageSummary(localSummary);
@@ -143,7 +160,7 @@ export function AccountStatusManager() {
         canListAuthUsers: false,
         errors: [error instanceof Error ? error.message : "Cloud directory could not be loaded."]
       });
-      setNotice("Cloud directory unavailable. Showing this browser's accounts only.");
+      if (!silent) setNotice("Cloud directory unavailable. Showing this browser's accounts only.");
     }
   }
 
@@ -240,7 +257,7 @@ export function AccountStatusManager() {
             <p className="text-sm uppercase tracking-[0.18em] text-cyan-100/62">Operations</p>
             <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Unified account management</h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-orange-50/62">
-              All discovered Supabase profiles, account status records, current sessions, and browser-local accounts in one control surface.
+              Live account plans, creation dates, and timestamped activity across projects, community interactions, likes, and direct messages.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -317,7 +334,7 @@ export function AccountStatusManager() {
           </div>
 
           <div className="mt-5 overflow-x-auto">
-            <table className="w-full min-w-[1160px] border-separate border-spacing-y-2 text-left text-sm">
+            <table className="w-full min-w-[1380px] border-separate border-spacing-y-2 text-left text-sm">
               <thead className="text-xs uppercase tracking-[0.12em] text-orange-50/45">
                 <tr>
                   <th className="px-3 py-2 font-medium">
@@ -330,6 +347,7 @@ export function AccountStatusManager() {
                     />
                   </th>
                   <th className="px-3 py-2 font-medium">Account</th>
+                  <th className="px-3 py-2 font-medium">Created</th>
                   <th className="px-3 py-2 font-medium">Sources</th>
                   <th className="px-3 py-2 font-medium">Type</th>
                   <th className="px-3 py-2 font-medium">Plan</th>
@@ -341,7 +359,8 @@ export function AccountStatusManager() {
               </thead>
               <tbody>
                 {filteredAccounts.map((account) => (
-                  <tr key={account.key} className="bg-white/[0.045] align-top">
+                  <Fragment key={account.key}>
+                  <tr className="bg-white/[0.045] align-top">
                     <td className="rounded-l-md px-3 py-3">
                       <input
                         type="checkbox"
@@ -355,6 +374,10 @@ export function AccountStatusManager() {
                       <p className="font-semibold text-orange-50">{account.name}</p>
                       <p className="mt-1 text-xs text-orange-50/50">{account.email || "No email"}</p>
                       <p className="mt-1 max-w-[220px] truncate text-xs text-cyan-100/58">{account.id || account.key}</p>
+                    </td>
+                    <td className="px-3 py-3">
+                      <p className="font-medium text-orange-50/88">{formatAdminDate(account.createdAt)}</p>
+                      <p className="mt-1 text-xs text-orange-50/45">{formatAdminTime(account.createdAt)}</p>
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex max-w-[190px] flex-wrap gap-1.5">
@@ -371,9 +394,14 @@ export function AccountStatusManager() {
                       </select>
                     </td>
                     <td className="px-3 py-3">
-                      <select value={account.subscriptionTier} onChange={(event) => void applyUpdates([account], { subscriptionTier: event.target.value as NonNullable<AuthUser["subscriptionTier"]> })} className="h-9 w-32 rounded-md border border-white/10 bg-[#151a27] px-2 text-orange-50 outline-none">
+                      <span className={`mb-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold ${account.subscriptionTier === "pro" ? "bg-orange-300 text-slate-950" : "border border-white/12 bg-white/[0.05] text-orange-50/78"}`}>
+                        <CreditCard className="h-3.5 w-3.5" />
+                        {planName(account)}
+                      </span>
+                      <select value={account.subscriptionTier} onChange={(event) => void applyUpdates([account], { subscriptionTier: event.target.value as NonNullable<AuthUser["subscriptionTier"]> })} className="block h-9 w-36 rounded-md border border-white/10 bg-[#151a27] px-2 text-orange-50 outline-none" aria-label={`Pricing plan for ${account.name}`}>
                         {subscriptionTiers.map((tier) => <option key={tier} value={tier}>{tier}</option>)}
                       </select>
+                      <p className="mt-2 max-w-40 text-xs leading-5 text-orange-50/48">{planUsageSummary(account)}</p>
                     </td>
                     <td className="px-3 py-3">
                       <select value={account.approvalStatus} onChange={(event) => void applyUpdates([account], { approvalStatus: event.target.value as AccountApprovalStatus })} className="h-9 w-32 rounded-md border border-white/10 bg-[#151a27] px-2 text-orange-50 outline-none">
@@ -395,8 +423,13 @@ export function AccountStatusManager() {
                       </div>
                     </td>
                     <td className="px-3 py-3">
-                      <p className="font-semibold">{account.activityCount}</p>
-                      <p className="mt-1 text-xs text-orange-50/45">{account.updatedAt ? new Date(account.updatedAt).toLocaleDateString() : "No update"}</p>
+                      <button type="button" onClick={() => setExpandedKey((current) => current === account.key ? null : account.key)} className="flex min-w-32 items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-left hover:bg-white/[0.08]" aria-expanded={expandedKey === account.key}>
+                        <span>
+                          <span className="block font-semibold">{account.activityCount} events</span>
+                          <span className="mt-1 block text-xs text-orange-50/45">{formatRelativeActivity(account.lastActiveAt)}</span>
+                        </span>
+                        {expandedKey === account.key ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </button>
                     </td>
                     <td className="rounded-r-md px-3 py-3">
                       <input
@@ -408,6 +441,14 @@ export function AccountStatusManager() {
                       />
                     </td>
                   </tr>
+                  {expandedKey === account.key ? (
+                    <tr>
+                      <td colSpan={10} className="rounded-md border border-white/10 bg-[#101520] px-5 py-4">
+                        <AccountActivityTimeline account={account} />
+                      </td>
+                    </tr>
+                  ) : null}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -475,6 +516,7 @@ function readLocalManagedAccounts() {
     const email = normalizeEmail(record.user.email);
     const override = overrides[email] ?? overrides[record.user.id];
     const key = accountKey(email, record.user.id);
+    const activities = localActivitiesFor(record.user);
     mapped.set(key, {
       key,
       id: record.user.id,
@@ -488,9 +530,12 @@ function readLocalManagedAccounts() {
       statusNote: override?.statusNote ?? record.statusNote ?? "",
       sourceLabels: ["browser-account"],
       cloudSynced: false,
+      createdAt: record.user.createdAt ?? record.createdAt,
       updatedAt: record.updatedAt ?? record.createdAt ?? record.user.createdAt,
+      lastActiveAt: activities[0]?.occurredAt,
       lastReviewedAt: override?.lastReviewedAt ?? record.lastReviewedAt,
-      activityCount: activityByOwner.get(`user:${record.user.id}`) ?? activityByOwner.get(`email:${email}`) ?? 0
+      activityCount: Math.max(activities.length, activityByOwner.get(`user:${record.user.id}`) ?? activityByOwner.get(`email:${email}`) ?? 0),
+      activities
     });
   }
 
@@ -499,6 +544,7 @@ function readLocalManagedAccounts() {
     const override = overrides[email] ?? overrides[currentUser.id];
     const key = accountKey(email, currentUser.id);
     const existing = mapped.get(key);
+    const activities = mergeActivities(existing?.activities ?? [], localActivitiesFor(currentUser));
     mapped.set(key, {
       key,
       id: currentUser.id,
@@ -512,9 +558,13 @@ function readLocalManagedAccounts() {
       statusNote: override?.statusNote ?? existing?.statusNote ?? "",
       sourceLabels: uniqueSources([...(existing?.sourceLabels ?? []), "current-session"]),
       cloudSynced: existing?.cloudSynced ?? false,
+      createdAt: existing?.createdAt ?? currentUser.createdAt,
       updatedAt: currentUser.createdAt,
+      lastActiveAt: activities[0]?.occurredAt ?? existing?.lastActiveAt,
       lastReviewedAt: override?.lastReviewedAt ?? existing?.lastReviewedAt,
-      activityCount: activityByOwner.get(`user:${currentUser.id}`) ?? activityByOwner.get(`email:${email}`) ?? existing?.activityCount ?? 0
+      activityCount: Math.max(activities.length, activityByOwner.get(`user:${currentUser.id}`) ?? activityByOwner.get(`email:${email}`) ?? existing?.activityCount ?? 0),
+      activities,
+      planUsage: existing?.planUsage
     });
   }
 
@@ -544,9 +594,13 @@ function mergeAccounts(accounts: ManagedAccount[]) {
       statusNote: account.sourceLabels.includes("cloud-status") ? account.statusNote : existing.statusNote,
       sourceLabels: uniqueSources([...existing.sourceLabels, ...account.sourceLabels]),
       cloudSynced: existing.cloudSynced || account.cloudSynced,
+      createdAt: oldestDate(existing.createdAt, account.createdAt),
       updatedAt: newestDate(existing.updatedAt, account.updatedAt),
+      lastActiveAt: newestDate(existing.lastActiveAt, account.lastActiveAt),
       lastReviewedAt: newestDate(existing.lastReviewedAt, account.lastReviewedAt),
-      activityCount: Math.max(existing.activityCount, account.activityCount)
+      activityCount: Math.max(existing.activityCount, account.activityCount),
+      activities: mergeActivities(existing.activities, account.activities),
+      planUsage: account.planUsage ?? existing.planUsage
     });
   }
   return Array.from(merged.values()).sort((left, right) => left.name.localeCompare(right.name));
@@ -705,6 +759,133 @@ function newestDate(left?: string, right?: string) {
   if (!left) return right;
   if (!right) return left;
   return new Date(left).getTime() >= new Date(right).getTime() ? left : right;
+}
+
+function oldestDate(left?: string, right?: string) {
+  if (!left) return right;
+  if (!right) return left;
+  return new Date(left).getTime() <= new Date(right).getTime() ? left : right;
+}
+
+function localActivitiesFor(user: AuthUser) {
+  const activities = readLocalAccountActivities(user.id);
+  if (activities.some((activity) => activity.type === "account_created") || !user.createdAt) return activities;
+  return mergeActivities(activities, [{
+    id: `local-account-created-${user.id}`,
+    type: "account_created",
+    title: "Account created",
+    detail: user.email,
+    occurredAt: user.createdAt,
+    subjectId: user.id,
+    subjectUrl: "/profile",
+    collection: "browser-account"
+  }]);
+}
+
+function activityIdentity(activity: AccountActivity) {
+  return `${activity.type}:${activity.subjectId ?? activity.id}`;
+}
+
+function mergeActivities(...groups: AccountActivity[][]) {
+  const merged = new Map<string, AccountActivity>();
+  for (const activity of groups.flat()) merged.set(activityIdentity(activity), activity);
+  return Array.from(merged.values()).sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt));
+}
+
+function planName(account: ManagedAccount) {
+  return `${titleCase(account.accountType)} ${account.subscriptionTier === "pro" ? "Pro" : "Standard"}`;
+}
+
+function planUsageSummary(account: ManagedAccount) {
+  const usage = account.planUsage;
+  if (!usage) return account.subscriptionTier === "pro" ? "Unlimited usage" : "No metered usage this period";
+  const projects = usage.projectsCreatedCount ?? 0;
+  const messages = usage.dmSentCount ?? 0;
+  if (account.subscriptionTier === "pro") return `Unlimited · ${projects} projects · ${messages} messages`;
+  const limits = STANDARD_LIMITS[account.accountType];
+  return `${projects}/${limits.projectsCreatedCount} projects · ${messages}/${limits.dmSentCount} messages`;
+}
+
+function formatAdminDate(value?: string) {
+  if (!value || Number.isNaN(Date.parse(value))) return "Unknown";
+  return new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short", day: "numeric" }).format(new Date(value));
+}
+
+function formatAdminTime(value?: string) {
+  if (!value || Number.isNaN(Date.parse(value))) return "No timestamp";
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(new Date(value));
+}
+
+function formatAdminDateTime(value?: string) {
+  if (!value || Number.isNaN(Date.parse(value))) return "Unknown time";
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit"
+  }).format(new Date(value));
+}
+
+function formatRelativeActivity(value?: string) {
+  if (!value || Number.isNaN(Date.parse(value))) return "No activity yet";
+  const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 1000));
+  if (seconds < 10) return "Just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return formatAdminDate(value);
+}
+
+function titleCase(value: string) {
+  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
+}
+
+function AccountActivityTimeline({ account }: { account: ManagedAccount }) {
+  return (
+    <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="font-semibold text-orange-50">Activity timeline for {account.name}</h3>
+          <p className="mt-1 text-xs text-orange-50/48">Every event includes the time recorded by the account or source record.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1.5">Created {formatAdminDateTime(account.createdAt)}</span>
+          <span className="rounded-md bg-orange-300 px-2.5 py-1.5 font-semibold text-slate-950">{planName(account)}</span>
+        </div>
+      </div>
+      {account.activities.length ? (
+        <ol className="mt-4 divide-y divide-white/8 border-y border-white/8">
+          {account.activities.map((activity) => (
+            <li key={activity.id} className="grid gap-2 py-3 sm:grid-cols-[28px_minmax(0,1fr)_220px] sm:items-start">
+              <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-white/[0.06] text-orange-200">{activityGlyph(activity)}</span>
+              <div className="min-w-0">
+                {activity.subjectUrl ? <a href={activity.subjectUrl} className="font-medium text-orange-50 hover:text-orange-200">{activity.title}</a> : <p className="font-medium text-orange-50">{activity.title}</p>}
+                {activity.detail ? <p className="mt-1 truncate text-xs text-orange-50/50">{activity.detail}</p> : null}
+                <p className="mt-1 text-xs text-cyan-100/48">{activity.collection?.replace(/[_-]+/g, " ") ?? titleCase(activity.type.replace(/_/g, " "))}</p>
+              </div>
+              <time dateTime={activity.occurredAt} className="text-xs text-orange-50/55 sm:text-right">{formatAdminDateTime(activity.occurredAt)}</time>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="mt-4 rounded-md border border-dashed border-white/12 px-4 py-5 text-sm text-orange-50/55">No activity records have been captured for this account yet.</p>
+      )}
+    </div>
+  );
+}
+
+function activityGlyph(activity: AccountActivity) {
+  if (activity.type.includes("message")) return <MessageSquare className="h-4 w-4" />;
+  if (activity.type.includes("like") || activity.type.includes("bookmark")) return <Heart className="h-4 w-4" />;
+  if (activity.type.includes("project") || activity.type.includes("motor")) return <FolderKanban className="h-4 w-4" />;
+  if (activity.type === "plan_changed") return <CreditCard className="h-4 w-4" />;
+  return <Clock3 className="h-4 w-4" />;
 }
 
 function SideMetric({ label, value }: { label: string; value: string }) {

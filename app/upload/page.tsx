@@ -456,6 +456,8 @@ export default function UploadPage() {
       name: title,
       title,
       creator: projectForm.ownerAccount.trim() || currentUser?.name || "Rocketry House builder",
+      creatorId: currentUser?.id,
+      creatorEmail: currentUser?.email,
       description:
         projectForm.description.trim() ||
         "A Rocketry House upload package with project metadata, editable Web CAD, motor context, evidence attachments, and release settings.",

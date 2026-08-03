@@ -1,6 +1,8 @@
 import { isHiddenCommunityComment, isHiddenCommunityPost } from "@/lib/internal-test-data";
 
 export type CommunityAuthor = {
+  accountId?: string;
+  email?: string;
   name: string;
   role: string;
   team: string;
@@ -47,6 +49,8 @@ export const guestCommunityUser: CommunityAuthor = {
 };
 
 export function getCommunityAuthorFromAuth(user: {
+  id?: string;
+  email?: string;
   name: string;
   accountType: "personal" | "team" | "organization";
   organizationName?: string;
@@ -56,6 +60,8 @@ export function getCommunityAuthorFromAuth(user: {
   if (!user) return guestCommunityUser;
   const profileType = user.accountType === "organization" ? "Organization" : user.accountType === "team" ? "Team" : "Personal";
   return {
+    accountId: user.id,
+    email: user.email,
     name: user.name,
     role: user.headline?.trim() || (user.accountType === "organization" ? "Organization owner" : user.accountType === "team" ? "Team representative" : "Rocketry House builder"),
     team: user.organizationName ?? (user.accountType === "personal" ? "Independent builder" : user.name),

@@ -3,6 +3,7 @@
 import { getSupabaseClient, isMockMode } from "@/lib/supabase";
 import { AUTH_STORAGE_KEY, type AuthUser } from "@/lib/auth";
 import { PUBLIC_COMMUNITY_OWNER_KEY, PUBLIC_PROJECTS_OWNER_KEY } from "@/lib/public-owner-keys";
+import { recordPersistentActivity, recordSetChanges } from "@/lib/account-activity";
 
 export { PUBLIC_COMMUNITY_OWNER_KEY, PUBLIC_PROJECTS_OWNER_KEY };
 
@@ -134,6 +135,10 @@ export async function savePersistentRecord<T>(collection: string, recordKey: str
     { onConflict: "owner_key,collection,record_key" }
   );
 
+  if (!error) {
+    await recordPersistentActivity({ collection, recordKey, payload });
+  }
+
   return { cloud: !error, error };
 }
 
@@ -163,7 +168,10 @@ export async function loadPersistentRecords<T>(collection: string, options?: Per
 }
 
 export async function savePersistentSet(collection: string, recordKey: string, values: Set<string>, options?: PersistenceOptions) {
-  return savePersistentRecord(collection, recordKey, Array.from(values), options);
+  const previous = readLocalCollection<string[]>(collection, options).find((record) => record.record_key === recordKey)?.payload ?? [];
+  const result = await savePersistentRecord(collection, recordKey, Array.from(values), options);
+  if (result.cloud) await recordSetChanges(collection, recordKey, new Set(previous), values);
+  return result;
 }
 
 export async function loadPersistentSet(collection: string, recordKey: string, options?: PersistenceOptions) {

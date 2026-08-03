@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MESSAGES_COLLECTION = "direct_messages";
+const ACCOUNT_ACTIVITY_COLLECTION = "account_activity";
 const ACCOUNT_STATUS_OWNER_KEY = "admin:account-status";
 const ACCOUNT_STATUS_COLLECTION = "account_status";
 
@@ -120,6 +121,7 @@ export async function POST(request: Request) {
     }
 
     const message = await saveMessage(supabase, sender, recipient, messageBody);
+    await saveMessageActivity(supabase, message).catch(() => undefined);
     const messages = await loadMessagesForUser(supabase, user.id);
 
     return NextResponse.json({
@@ -231,6 +233,28 @@ async function saveMessage(supabase: SupabaseClient, sender: MessageAccount, rec
 
   if (error) throw error;
   return message;
+}
+
+async function saveMessageActivity(supabase: SupabaseClient, message: DirectMessage) {
+  const activityId = `activity-message-sent-${message.id}`;
+  const { error } = await supabase.from("user_data_records").insert({
+    owner_key: `user:${message.senderId}`,
+    collection: ACCOUNT_ACTIVITY_COLLECTION,
+    record_key: activityId,
+    payload: {
+      id: activityId,
+      accountId: message.senderId,
+      type: "message_sent",
+      title: `Sent a message to ${message.recipientName}`,
+      detail: message.body.slice(0, 140),
+      subjectId: message.id,
+      collection: MESSAGES_COLLECTION,
+      occurredAt: message.createdAt,
+      recipientId: message.recipientId
+    },
+    updated_at: message.createdAt
+  });
+  if (error) throw error;
 }
 
 function collectAccountStatuses(records: UserDataRecord[]) {
