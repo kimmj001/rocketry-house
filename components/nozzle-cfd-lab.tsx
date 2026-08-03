@@ -25,6 +25,7 @@ import {
   type SolverSnapshot
 } from "@/lib/cfd/rans/types";
 import {
+  colorSensitivityPosition,
   pressureContrastPosition,
   pressureContrastScale
 } from "@/lib/cfd/rans/visualization";
@@ -156,7 +157,9 @@ function NozzleFieldCanvas({
   autoRange,
   fixedMin,
   fixedMax,
-  ambientPressurePa
+  ambientPressurePa,
+  colorSensitivity,
+  onColorSensitivityChange
 }: {
   snapshot: SolverSnapshot | null;
   fieldName: DisplayFieldName;
@@ -166,6 +169,8 @@ function NozzleFieldCanvas({
   fixedMin: number;
   fixedMax: number;
   ambientPressurePa: number;
+  colorSensitivity: number;
+  onColorSensitivityChange: (value: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -214,7 +219,7 @@ function NozzleFieldCanvas({
         snapshot.fields.pressure,
         ambientPressurePa,
         (nozzleExitIndex + 1) * nr
-      );
+      ) / colorSensitivity;
       const pressurePaletteActive = fieldName === "pressure" && autoRange;
 
       const rasterWidth = Math.max(1, Math.ceil(plotRight - plotLeft));
@@ -288,9 +293,12 @@ function NozzleFieldCanvas({
             image.data[offset + 3] = 255;
             continue;
           }
-          const normalized = pressurePaletteActive
+          const baseNormalized = pressurePaletteActive
             ? pressureContrastPosition(sampledValue, ambientPressurePa, pressureContrastPa)
             : (sampledValue - min) / Math.max(max - min, 1e-20);
+          const normalized = pressurePaletteActive
+            ? baseNormalized
+            : colorSensitivityPosition(baseNormalized, colorSensitivity);
           writeScientificColor(image.data, offset, normalized, 1, palette);
         }
       }
@@ -360,7 +368,7 @@ function NozzleFieldCanvas({
 
       const legendLeft = plotLeft;
       const legendTop = height - 24;
-      const legendWidth = Math.min(250, width * 0.34);
+      const legendWidth = Math.min(250, Math.max(180, width * 0.34));
       const gradient = context.createLinearGradient(legendLeft, 0, legendLeft + legendWidth, 0);
       const legendPalette = pressurePaletteActive ? PRESSURE_DIVERGING : VIRIDIS;
       legendPalette.forEach((color, index) => {
@@ -392,11 +400,31 @@ function NozzleFieldCanvas({
     const observer = new ResizeObserver(draw);
     observer.observe(parent);
     return () => observer.disconnect();
-  }, [ambientPressurePa, autoRange, fieldName, fixedMax, fixedMin, mirror, showMesh, snapshot]);
+  }, [ambientPressurePa, autoRange, colorSensitivity, fieldName, fixedMax, fixedMin, mirror, showMesh, snapshot]);
 
   return (
-    <div className="min-h-[260px] w-full overflow-hidden bg-[#05070b]">
+    <div className="relative min-h-[260px] w-full overflow-hidden bg-[#05070b]">
       <canvas ref={canvasRef} className="block" aria-label={`${fieldName} CFD field`} />
+      <label
+        className="absolute bottom-[7px] grid w-[clamp(92px,18vw,170px)] gap-1 text-[10px] text-white/62"
+        style={{ left: "calc(32px + min(250px, max(180px, 34%)))" }}
+      >
+        <span className="flex items-center justify-between gap-2">
+          <span className="sm:hidden">Color</span>
+          <span className="hidden sm:inline">Color sensitivity</span>
+          <span className="font-mono text-white/78">{colorSensitivity.toFixed(1)}x</span>
+        </span>
+        <input
+          type="range"
+          aria-label="Color sensitivity"
+          min={0.5}
+          max={2.5}
+          step={0.1}
+          value={colorSensitivity}
+          onChange={(event) => onColorSensitivityChange(Number(event.target.value))}
+          className="h-1 w-full cursor-pointer accent-orange-400"
+        />
+      </label>
     </div>
   );
 }
@@ -477,6 +505,7 @@ export function NozzleCfdLab() {
   const [autoRange, setAutoRange] = useState(true);
   const [fixedMin, setFixedMin] = useState(0);
   const [fixedMax, setFixedMax] = useState(3);
+  const [colorSensitivity, setColorSensitivity] = useState(1);
   const [residualHistory, setResidualHistory] = useState<SolverResidualPoint[]>([]);
 
   useEffect(() => {
@@ -715,6 +744,8 @@ export function NozzleCfdLab() {
               fixedMin={fixedMin}
               fixedMax={fixedMax}
               ambientPressurePa={config.ambientPressurePa}
+              colorSensitivity={colorSensitivity}
+              onColorSensitivityChange={setColorSensitivity}
             />
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 bg-[#0a0d12] px-5 py-2 text-xs text-white/48">
               <span>

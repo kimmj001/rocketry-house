@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  colorSensitivityPosition,
   pressureContrastPosition,
   pressureContrastScale
 } from "../../lib/cfd/rans/visualization";
+
+test("color sensitivity expands contrast around the palette midpoint", () => {
+  assert.equal(colorSensitivityPosition(0.5, 2), 0.5);
+  assert.equal(colorSensitivityPosition(0.25, 2), 0);
+  assert.equal(colorSensitivityPosition(0.75, 2), 1);
+  assert.equal(colorSensitivityPosition(0.25, 1), 0.25);
+});
 
 test("pressure contrast ignores chamber extremes and separates pressure around ambient", () => {
   const ambientPressurePa = 101325;

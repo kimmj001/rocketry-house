@@ -1,5 +1,10 @@
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
+export function colorSensitivityPosition(position: number, sensitivity: number) {
+  const safeSensitivity = Math.max(0.5, Math.min(2.5, sensitivity));
+  return clamp01(0.5 + (position - 0.5) * safeSensitivity);
+}
+
 export function pressureContrastScale(
   pressurePa: ArrayLike<number>,
   ambientPressurePa: number,
