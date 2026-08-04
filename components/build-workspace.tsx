@@ -13,7 +13,7 @@ import { mockProjects } from "@/lib/mock-data";
 import { readMockUser } from "@/lib/auth";
 import { loadPersistentRecords, savePersistentRecord } from "@/lib/cloud-persistence";
 import { analyzeNozzleFlow, defaultMotorParameters, propellantProfiles, simulateMotor } from "@/lib/motor-simulation";
-import { applySavedNozzleToMotor, createSavedNozzleDesign, isSavedNozzleDesign, motorMatchesSavedNozzle } from "@/lib/nozzle-library";
+import { applySavedNozzleToMotor, createSavedNozzleDesign, isSavedNozzleDesign, motorMatchesSavedNozzle, motorNozzleDimensions } from "@/lib/nozzle-library";
 import { runRocketEstimateWithMotor } from "@/lib/rocket-simulation";
 import { sortComponents, totalLength } from "@/lib/cad/geometry";
 import type { MotorParameters, MotorSimulationResult, SavedMotor } from "@/types/motor";
@@ -2007,12 +2007,17 @@ function MotorCrossSectionView({ parameters }: { parameters: MotorParameters }) 
   const inputGrainCount = Math.max(1, Math.round(parameters.grainCount));
   const visibleGrainCount = Math.min(8, inputGrainCount);
   const centerY = 150;
-  const chamberRadius = 54;
-  const caseRadius = 66;
-  const grainRadius = Math.min(51, Math.max(28, (parameters.grainOuterDiameterMm / Math.max(parameters.casingInnerDiameterMm, 1)) * chamberRadius));
-  const portRadius = Math.min(30, Math.max(7, (parameters.coreDiameterMm / Math.max(parameters.grainOuterDiameterMm, 1)) * grainRadius));
-  const throatRadius = Math.min(15, Math.max(5, (parameters.nozzleThroatMm / Math.max(parameters.casingInnerDiameterMm, 1)) * chamberRadius));
-  const exitRadius = Math.min(40, Math.max(15, (parameters.nozzleExitMm / Math.max(parameters.casingInnerDiameterMm, 1)) * chamberRadius));
+  const nozzleGeometry = motorNozzleDimensions(parameters);
+  const physicalCaseRadius = Math.max(parameters.casingOuterDiameterMm / 2, 1);
+  const physicalNozzleLength = Math.max(nozzleGeometry.convergenceLengthMm + nozzleGeometry.divergenceLengthMm, 0.1);
+  const geometryScale = Math.min(66 / physicalCaseRadius, 218 / physicalNozzleLength);
+  const caseRadius = physicalCaseRadius * geometryScale;
+  const chamberRadius = (parameters.casingInnerDiameterMm / 2) * geometryScale;
+  const grainRadius = (parameters.grainOuterDiameterMm / 2) * geometryScale;
+  const portRadius = (parameters.coreDiameterMm / 2) * geometryScale;
+  const throatRadius = (parameters.nozzleThroatMm / 2) * geometryScale;
+  const exitRadius = (parameters.nozzleExitMm / 2) * geometryScale;
+  const nozzleWall = Math.max(3, Math.min(8, (physicalCaseRadius - parameters.casingInnerDiameterMm / 2) * geometryScale));
   const grainStackLength = inputGrainCount * parameters.grainLengthMm;
   const grainSpan = Math.min(430, Math.max(150, (grainStackLength / Math.max(parameters.casingLengthMm, 1)) * 430));
   const grainStartX = 104;
@@ -2022,8 +2027,10 @@ function MotorCrossSectionView({ parameters }: { parameters: MotorParameters }) 
   const chamberBottom = centerY + chamberRadius;
   const grainTop = centerY - grainRadius;
   const grainBottom = centerY + grainRadius;
-  const throatX = 650;
-  const exitX = 772;
+  const nozzleBaseX = 550;
+  const throatX = nozzleBaseX + nozzleGeometry.convergenceLengthMm * geometryScale;
+  const exitX = throatX + nozzleGeometry.divergenceLengthMm * geometryScale;
+  const closurePortRadius = Math.max(10, chamberRadius * 0.58);
   const isFinocyl = grainMode === "Finocyl" || grainMode === "Star";
   const isCSlot = grainMode === "C-slot";
   const isMoonBurner = grainMode === "Moon burner";
@@ -2040,7 +2047,10 @@ function MotorCrossSectionView({ parameters }: { parameters: MotorParameters }) 
           <h2 className="flex items-center gap-2 font-semibold"><Boxes className="h-5 w-5 text-cyan-200" />Motor geometry</h2>
           <p className="mt-1 text-sm text-orange-50/58">Dimensioned longitudinal and grain sections from the current input deck.</p>
         </div>
-        <span className="rounded-md border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-orange-50/70">{grainMode}</span>
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded-md border border-cyan-200/15 bg-cyan-200/[0.06] px-3 py-1 text-xs text-cyan-100/72">Nozzle profile to scale</span>
+          <span className="rounded-md border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-orange-50/70">{grainMode}</span>
+        </div>
       </div>
       <div className="mt-5 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.6fr)_320px]">
         <div className="min-w-0 self-start border border-white/10 bg-[#070b12] p-4">
@@ -2060,7 +2070,7 @@ function MotorCrossSectionView({ parameters }: { parameters: MotorParameters }) 
             <rect x="70" y={chamberTop - 4} width="486" height={chamberRadius * 2 + 8} fill="#22d3ee" fillOpacity="0.55" />
             <rect x="76" y={chamberTop} width="474" height={chamberRadius * 2} fill="#111827" />
             <rect x="38" y={centerY - caseRadius} width="42" height={caseRadius * 2} rx="4" fill="#cbd5e1" />
-            <rect x="51" y={centerY - 31} width="34" height="62" fill="#64748b" />
+            <rect x="51" y={centerY - closurePortRadius} width="34" height={closurePortRadius * 2} fill="#64748b" />
 
             {Array.from({ length: visibleGrainCount }, (_, index) => (
               <rect
@@ -2077,9 +2087,10 @@ function MotorCrossSectionView({ parameters }: { parameters: MotorParameters }) 
             ))}
             <rect x={grainStartX} y={centerY - portRadius} width={grainSpan} height={portRadius * 2} rx={portRadius} fill="#111827" />
 
-            <path d={`M550 ${chamberTop} L${throatX - 12} ${centerY - throatRadius - 8} H${throatX + 12} L${exitX} ${centerY - exitRadius - 7} V${centerY + exitRadius + 7} L${throatX + 12} ${centerY + throatRadius + 8} H${throatX - 12} L550 ${chamberBottom} Z`} fill="#cbd5e1" />
-            <path d={`M550 ${centerY - 34} L${throatX - 12} ${centerY - throatRadius} H${throatX + 12} L${exitX} ${centerY - exitRadius} V${centerY + exitRadius} L${throatX + 12} ${centerY + throatRadius} H${throatX - 12} L550 ${centerY + 34} Z`} fill="#111827" />
-            <rect x={throatX - 12} y={centerY - throatRadius} width="24" height={throatRadius * 2} fill="#0b0f17" />
+            <path d={`M${nozzleBaseX} ${centerY - chamberRadius - nozzleWall} L${throatX} ${centerY - throatRadius - nozzleWall} L${exitX} ${centerY - exitRadius - nozzleWall} V${centerY + exitRadius + nozzleWall} L${throatX} ${centerY + throatRadius + nozzleWall} L${nozzleBaseX} ${centerY + chamberRadius + nozzleWall} Z`} fill="#cbd5e1" />
+            <path d={`M${nozzleBaseX} ${chamberTop} L${throatX} ${centerY - throatRadius} L${exitX} ${centerY - exitRadius} V${centerY + exitRadius} L${throatX} ${centerY + throatRadius} L${nozzleBaseX} ${chamberBottom} Z`} fill="#111827" />
+            <path d={`M${nozzleBaseX} ${chamberTop} L${throatX} ${centerY - throatRadius} L${exitX} ${centerY - exitRadius}`} fill="none" stroke="#f8fafc" strokeOpacity="0.82" strokeWidth="1.4" />
+            <path d={`M${nozzleBaseX} ${chamberBottom} L${throatX} ${centerY + throatRadius} L${exitX} ${centerY + exitRadius}`} fill="none" stroke="#f8fafc" strokeOpacity="0.82" strokeWidth="1.4" />
 
             <line x1="58" y1="55" x2="568" y2="55" stroke="#67e8f9" strokeWidth="1.5" markerStart="url(#motorDimensionArrow)" markerEnd="url(#motorDimensionArrow)" />
             <line x1="58" y1="63" x2="58" y2="45" stroke="#67e8f9" />
@@ -2095,16 +2106,14 @@ function MotorCrossSectionView({ parameters }: { parameters: MotorParameters }) 
             <text x={grainStartX + grainSpan / 2} y="275" textAnchor="middle" fill="#a5f3fc" fontSize="17">GRAIN STACK {grainStackLength} · {inputGrainCount} × {parameters.grainLengthMm}</text>
 
             <line x1={throatX} y1={centerY - throatRadius} x2={throatX} y2={centerY + throatRadius} stroke="#fb923c" strokeWidth="2" markerStart="url(#motorDimensionArrow)" markerEnd="url(#motorDimensionArrow)" />
-            <text x={throatX} y="228" textAnchor="middle" fill="#fdba74" fontSize="16">THROAT Ø {parameters.nozzleThroatMm}</text>
             <line x1={exitX} y1={centerY - exitRadius} x2={exitX} y2={centerY + exitRadius} stroke="#fb923c" strokeWidth="2" markerStart="url(#motorDimensionArrow)" markerEnd="url(#motorDimensionArrow)" />
-            <text x={exitX} y={centerY - exitRadius - 18} textAnchor="middle" fill="#fdba74" fontSize="16">EXIT Ø {parameters.nozzleExitMm}</text>
 
             <text x="45" y="309" fill="#cbd5e1" fontSize="15">FORWARD CLOSURE</text>
             <line x1="97" y1="295" x2="62" y2={centerY + caseRadius - 5} stroke="#64748b" />
             <text x="304" y="309" fill="#fcd34d" fontSize="15">PROPELLANT GRAIN</text>
             <line x1="374" y1="295" x2="374" y2={grainBottom - 8} stroke="#a16207" />
-            <text x="618" y="309" fill="#cbd5e1" fontSize="15">NOZZLE</text>
-            <line x1="648" y1="295" x2="680" y2={centerY + 29} stroke="#64748b" />
+            <text x={(nozzleBaseX + exitX) / 2} y="309" textAnchor="middle" fill="#cbd5e1" fontSize="15">NOZZLE</text>
+            <line x1={(nozzleBaseX + exitX) / 2} y1="295" x2={(throatX + exitX) / 2} y2={centerY + (throatRadius + exitRadius) / 2} stroke="#64748b" />
           </svg>
           <div className="border-t border-white/10 pt-3">
             <div className="flex items-center justify-between gap-3 text-[11px]">
@@ -2151,7 +2160,7 @@ function MotorCrossSectionView({ parameters }: { parameters: MotorParameters }) 
       <div className="mt-4 grid overflow-hidden border border-white/10 bg-white/10 sm:grid-cols-2 sm:gap-px xl:grid-cols-4">
         <GeometryReadout label="Case" value={`Ø ${parameters.casingOuterDiameterMm} / ID ${parameters.casingInnerDiameterMm} / L ${parameters.casingLengthMm}`} />
         <GeometryReadout label="Grain stack" value={`${inputGrainCount} × ${parameters.grainLengthMm} = ${grainStackLength} mm`} />
-        <GeometryReadout label="Nozzle" value={`Ø ${parameters.nozzleThroatMm} → ${parameters.nozzleExitMm} / ε ${expansionRatio}`} />
+        <GeometryReadout label="Nozzle" value={`Ø ${parameters.nozzleThroatMm} → ${parameters.nozzleExitMm} / ε ${expansionRatio} / C ${nozzleGeometry.convergenceLengthMm} @ ${nozzleGeometry.convergenceAngleDeg}° / D ${nozzleGeometry.divergenceLengthMm} @ ${nozzleGeometry.divergenceAngleDeg}°`} />
         <GeometryReadout label="Burn surfaces" value={`Core ${surfaceCode(parameters.coreSurface, "Exposed")} · Outer ${surfaceCode(parameters.outerSurface, "Inhibited")} · Ends ${surfaceCode(parameters.endsSurface, "Exposed")}`} />
       </div>
       <p className="mt-3 text-xs leading-5 text-orange-50/42">Geometry visualization for simulation review and comparison. Not a manufacturing drawing or safety certification.</p>
