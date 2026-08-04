@@ -30,12 +30,6 @@ type RocketBuilderSnapshot = {
   updatedAt?: string;
 };
 
-const safetyWarnings = [
-  "Motor simulations are estimates and must not be treated as safety certification.",
-  "Users are responsible for complying with applicable laws, club rules, launch site rules, and certified safety codes.",
-  "Rocketry House does not certify motor safety."
-];
-
 const buildPageClass = "min-h-screen bg-space-radial px-6 pb-32 pt-24";
 
 const defaultFreeformFinPoints = [
@@ -389,13 +383,17 @@ export function MotorBuilder() {
   const [nozzleOpen, setNozzleOpen] = useState(false);
   const [compareMotors, setCompareMotors] = useState(false);
   const [saveStatus, setSaveStatus] = useState("Motor not saved yet.");
+  const summary = summarizeMotor(result, parameters);
 
   function update<K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) {
     setParameters((current) => ({ ...current, [key]: value }));
+    if (key === "projectName") setSavedName(String(value));
+    setSaveStatus("Unsaved changes.");
   }
 
   function runSimulation() {
     setResult(simulateMotor(parameters));
+    setSaveStatus("Analysis updated. Unsaved changes.");
   }
 
   async function saveMotor() {
@@ -431,28 +429,57 @@ export function MotorBuilder() {
 
   return (
     <main className={buildPageClass}>
-        <div className="mx-auto max-w-7xl">
-        <BuilderHeader eyebrow="Build > Motor" title="Motor design and simulation workspace" copy="Generate a pre-flight performance analysis, attach measured static-fire data, and save the motor for rocket CAD integration." />
-        <SafetyStrip />
-        <div className="mt-8 grid min-w-0 gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <div className="min-w-0 space-y-5 xl:sticky xl:top-24 xl:self-start">
-            <MotorParameterPanel parameters={parameters} update={update} runSimulation={runSimulation} />
+      <div className="mx-auto max-w-7xl">
+        <header className="flex flex-col gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-200/65">Build / Motor</p>
+            <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Motor Builder</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-orange-50/58">Define the chamber, grain, and nozzle, review the live section, then run and save the performance model.</p>
           </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setNozzleOpen(true)}><Gauge className="h-4 w-4" />Nozzle design</Button>
+            <Button asChild href="/build/motor/cfd" variant="outline"><Wind className="h-4 w-4" />Run CFD</Button>
+            <Button variant="outline" onClick={() => setModalOpen(true)}><Save className="h-4 w-4" />Save</Button>
+            <Button onClick={runSimulation}><Play className="h-4 w-4 fill-current" />Run analysis</Button>
+          </div>
+        </header>
+
+        <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-white/12 bg-white/10 lg:grid-cols-4">
+          <MotorBuildMetric label="Motor class" value={`${result.motorClass}${result.averageThrustN}`} hint={`${summary.classLoad}% of class band`} />
+          <MotorBuildMetric label="Total impulse" value={`${result.totalImpulseNs} N-s`} hint="Integrated thrust" />
+          <MotorBuildMetric label="Burn time" value={`${result.burnTimeS} s`} hint={`${result.peakThrustN} N peak`} />
+          <MotorBuildMetric label="Chamber pressure" value={`${summary.maxPressureBar} bar`} hint={`${summary.maxPressure} MPa peak`} />
+        </div>
+
+        <div className="mt-3 flex flex-col gap-2 border-y border-white/8 bg-black/15 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+          <p className="flex items-center gap-2 text-orange-50/58"><ShieldCheck className="h-4 w-4 shrink-0 text-amber-200" />Pre-flight estimate only. Follow applicable safety codes.</p>
+          <p className="shrink-0 text-orange-100/58">{saveStatus}</p>
+        </div>
+
+        <section className="mt-5 grid min-w-0 gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+          <aside className="min-w-0 xl:sticky xl:top-24 xl:self-start">
+            <MotorParameterPanel parameters={parameters} update={update} runSimulation={runSimulation} />
+          </aside>
           <div className="min-w-0 space-y-5">
-            <MotorPerformanceSummary result={result} parameters={parameters} compareMotors={compareMotors} setCompareMotors={setCompareMotors} onSave={() => setModalOpen(true)} onNozzle={() => setNozzleOpen(true)} onExportRasp={() => exportRaspMotor(parameters, result)} />
             <MotorCrossSectionView parameters={parameters} />
+            <MotorPerformanceSummary result={result} parameters={parameters} compareMotors={compareMotors} setCompareMotors={setCompareMotors} onSave={() => setModalOpen(true)} onNozzle={() => setNozzleOpen(true)} onExportRasp={() => exportRaspMotor(parameters, result)} />
             <MotorCurveChart result={result} measuredCurve={undefined} />
           </div>
-        </div>
-        <Card className="mt-5 p-5">
-          <h2 className="flex items-center gap-2 font-semibold"><FileUp className="h-5 w-5 text-orange-200" />Measured data and files</h2>
-          <p className="mt-2 text-sm text-orange-50/62">Attach static-fire data, measured thrust CSV, photos, PDFs, or notes. These files support verification; they do not certify motor safety.</p>
-          <p className="mt-3 rounded-md bg-white/[0.04] p-3 text-xs text-orange-50/60">{saveStatus}</p>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <FileUploadBox />
-            <RawMeasuredPreview />
+        </section>
+
+        <details className="mt-5 overflow-hidden rounded-lg border border-white/10 bg-black/20">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4">
+            <span className="flex items-center gap-2 font-semibold"><FileUp className="h-5 w-5 text-orange-200" />Measured data and files</span>
+            <span className="text-xs text-orange-50/42">Static-fire CSV and supporting files</span>
+          </summary>
+          <div className="border-t border-white/10 px-5 pb-5 pt-4">
+            <p className="text-sm text-orange-50/62">Attach static-fire data, measured thrust CSV, photos, PDFs, or notes for verification and comparison.</p>
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <FileUploadBox />
+              <RawMeasuredPreview />
+            </div>
           </div>
-        </Card>
+        </details>
       </div>
       {modalOpen ? (
         <MotorSaveModal
@@ -1662,36 +1689,30 @@ function MotorParameterPanel({ parameters, update, runSimulation }: { parameters
     ["slotDepthMm", "Slot depth", "mm"]
   ];
   return (
-    <Card className="p-5">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 font-semibold"><Gauge className="h-5 w-5 text-orange-200" />Motor input deck</h2>
-        <div className="rounded-md border border-white/10 bg-white/[0.04] p-1 text-xs">
-          <span className="rounded bg-cyan-200/15 px-2 py-1 text-cyan-100">Metric</span>
-          <span className="px-2 py-1 text-orange-50/42">Imperial</span>
-        </div>
+    <Card className="p-5 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto xl:[scrollbar-color:rgba(255,255,255,0.18)_transparent] xl:[scrollbar-width:thin]">
+      <div>
+        <h2 className="flex items-center gap-2 font-semibold"><Gauge className="h-5 w-5 text-orange-200" />Design inputs</h2>
+        <p className="mt-1 text-xs text-orange-50/48">SI dimensions update the geometry preview immediately.</p>
       </div>
       <label className="mt-4 block text-sm text-orange-50/65">Motor project name<input value={parameters.projectName} onChange={(event) => update("projectName", event.target.value)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" /></label>
       <label className="mt-4 block text-sm text-orange-50/65">Propellant profile<select value={parameters.propellantProfileName} onChange={(event) => update("propellantProfileName", event.target.value)} className="mt-1 w-full rounded-md border border-white/10 bg-[#121421] px-3 py-2 text-orange-50">{propellantProfiles.map((profile) => <option key={profile}>{profile}</option>)}</select><span className="mt-1 block text-[11px] text-orange-50/42">Public metadata profile only. Exact formulation and process notes are intentionally excluded.</span></label>
-      <div className="mt-4 rounded-lg border border-orange-200/15 bg-orange-300/[0.04] p-3">
-        <p className="text-sm font-semibold text-orange-100">Geometry first</p>
-        <p className="mt-1 text-xs text-orange-50/55">Start from a known motor size, then tune chamber, grain stack, core, and nozzle values.</p>
-        <div className="mt-3 grid gap-2">
-          {motorGeometryPresets.map((preset) => (
-            <button
-              key={preset.name}
-              type="button"
-              onClick={() => {
-                Object.entries(preset.values).forEach(([key, value]) => update(key as keyof MotorParameters, value as never));
-              }}
-              className="rounded-md border border-white/10 bg-white/[0.04] p-3 text-left text-xs transition hover:border-orange-200/35 hover:bg-white/[0.07]"
-            >
-              <span className="font-semibold text-orange-50">{preset.name}</span>
-              <span className="mt-1 block text-orange-50/50">{preset.note}</span>
-            </button>
-          ))}
-        </div>
+      <label className="mt-4 block text-sm text-orange-50/65">Starting geometry
+        <select
+          defaultValue=""
+          onChange={(event) => {
+            const preset = motorGeometryPresets.find((item) => item.name === event.target.value);
+            if (preset) Object.entries(preset.values).forEach(([key, value]) => update(key as keyof MotorParameters, value as never));
+          }}
+          className="mt-1 w-full rounded-md border border-white/10 bg-[#121421] px-3 py-2 text-orange-50"
+        >
+          <option value="" disabled>Choose a geometry preset</option>
+          {motorGeometryPresets.map((preset) => <option key={preset.name} value={preset.name}>{preset.name} - {preset.note}</option>)}
+        </select>
+      </label>
+      <div className="mt-5 border-t border-white/10 pt-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-orange-100/52">Case and nozzle</p>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-3">
+      <div className="mt-3 grid grid-cols-2 gap-3">
         {mainFields.map(([key, label, unit, help]) => (
           <label key={key} className="text-xs text-orange-50/58">{label}
             <input type="number" value={parameters[key] as number} onChange={(event) => update(key, Number(event.target.value) as never)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-orange-50" />
@@ -1700,7 +1721,10 @@ function MotorParameterPanel({ parameters, update, runSimulation }: { parameters
           </label>
         ))}
       </div>
-      <label className="mt-4 block text-sm text-orange-50/65">Grain configuration<select value={grainMode} onChange={(event) => update("grainConfiguration", event.target.value as never)} className="mt-1 w-full rounded-md border border-white/10 bg-[#121421] px-3 py-2 text-orange-50">{grainGeometryModes.map(([name]) => <option key={name}>{name}</option>)}</select></label>
+      <div className="mt-5 border-t border-white/10 pt-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-orange-100/52">Grain geometry</p>
+      </div>
+      <label className="mt-3 block text-sm text-orange-50/65">Grain configuration<select value={grainMode} onChange={(event) => update("grainConfiguration", event.target.value as never)} className="mt-1 w-full rounded-md border border-white/10 bg-[#121421] px-3 py-2 text-orange-50">{grainGeometryModes.map(([name]) => <option key={name}>{name}</option>)}</select></label>
       <p className="mt-2 text-xs leading-5 text-orange-50/48">{grainGeometryModes.find(([name]) => name === grainMode)?.[1]}</p>
       <div className="mt-4 grid grid-cols-2 gap-3">
         {grainFields.map(([key, label, unit]) => (
@@ -2126,6 +2150,16 @@ function RocketBuildMetric({ label, value }: { label: string; value: string }) {
     <div className="min-h-[92px] bg-[#0a0e16] p-4">
       <p className="text-[11px] uppercase tracking-[0.12em] text-orange-50/38">{label}</p>
       <p className="mt-2 text-lg font-semibold text-orange-50">{value}</p>
+    </div>
+  );
+}
+
+function MotorBuildMetric({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="min-h-[88px] bg-[#0a0e16] px-4 py-3">
+      <p className="text-[11px] uppercase tracking-[0.12em] text-orange-50/38">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-orange-50">{value}</p>
+      <p className="mt-0.5 text-[11px] text-orange-50/42">{hint}</p>
     </div>
   );
 }
@@ -2962,19 +2996,6 @@ function exportRaspMotor(parameters: MotorParameters, result: MotorSimulationRes
   anchor.download = `${parameters.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "motor"}.eng`;
   anchor.click();
   URL.revokeObjectURL(url);
-}
-
-function SafetyStrip() {
-  return (
-    <Card className="mt-6 border-amber-300/20 bg-amber-300/8 p-4">
-      <div className="flex gap-3">
-        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-200" />
-        <div className="grid gap-2 text-sm text-amber-50/85 md:grid-cols-3">
-          {safetyWarnings.map((warning) => <p key={warning}>{warning}</p>)}
-        </div>
-      </div>
-    </Card>
-  );
 }
 
 function WorkspaceCard({ href, icon: Icon, number, title, copy, features, cta }: { href: string; icon: typeof Flame; number: string; title: string; copy: string; features: string[]; cta: string }) {
