@@ -15,7 +15,7 @@ import { loadPersistentRecords, savePersistentRecord } from "@/lib/cloud-persist
 import { analyzeNozzleFlow, defaultMotorParameters, propellantProfiles, simulateMotor } from "@/lib/motor-simulation";
 import { runRocketEstimateWithMotor } from "@/lib/rocket-simulation";
 import { sortComponents, totalLength } from "@/lib/cad/geometry";
-import { buildModules, flightEquations, flightGraphOutputs, motorEquations, motorGraphOutputs } from "@/lib/platform-content";
+import { flightEquations, flightGraphOutputs, motorEquations, motorGraphOutputs } from "@/lib/platform-content";
 import type { MotorParameters, MotorSimulationResult, SavedMotor } from "@/types/motor";
 import type { NozzleCfdField, NozzleCfdResult } from "@/types/cfd";
 import { SAVED_NOZZLE_COLLECTION, type SavedNozzleDesign } from "@/types/nozzle";
@@ -37,7 +37,6 @@ const safetyWarnings = [
   "Rocketry House does not certify motor safety."
 ];
 
-const flow = ["Design Motor", "Simulate Motor", "Save Motor", "Build Rocket", "Insert Motor", "Simulate Rocket", "Publish / Fork / Review"];
 const buildPageClass = "min-h-screen bg-space-radial px-6 pb-32 pt-24";
 
 const defaultFreeformFinPoints = [
@@ -337,50 +336,44 @@ export function createRocketComponent(type: RocketComponentType, components: Roc
 }
 
 export function BuildHome() {
-  const libraryNotes = [
-    ["Motor library", "Saved motors stay attached to your account and can be inserted into future rocket designs."],
-    ["Rocket projects", "Airframe CAD, selected motor, simulation result, and publish settings live together as one project."],
-    ["Public release", "Publish when the design has files, safety notes, flight evidence, and usage-rights metadata ready."]
-  ];
-
   return (
-    <main className={buildPageClass}>
-      <div className="mx-auto max-w-7xl">
-        <p className="text-sm uppercase tracking-[0.2em] text-orange-100/60">Builder workspace</p>
-        <h1 className="mt-3 max-w-4xl text-4xl font-semibold">Design propulsion first, then build the rocket around real motor data.</h1>
-        <p className="mt-4 max-w-3xl text-orange-50/68">Rocketry House treats motors as account-owned design objects: simulate a motor, save it to your personal library, insert it into a CAD rocket, then run rocket-level flight analysis from the selected thrust curve.</p>
-        <SafetyStrip />
-        <div className="mt-8 grid gap-4 md:grid-cols-7">
-          {flow.map((step, index) => (
-            <Card key={step} className="p-4">
-              <p className="text-xs text-orange-100/50">0{index + 1}</p>
-              <p className="mt-2 text-sm font-semibold">{step}</p>
-            </Card>
-          ))}
-        </div>
-        <div className="mt-8 grid gap-5 lg:grid-cols-2">
-          <WorkspaceCard href="/build/motor" icon={Flame} title="Build > Motor" copy="Create a solid motor analysis, visualize casing/grain/nozzle geometry, generate thrust and pressure curves, then save it to your account library." cta="Open Motor Builder" />
-          <WorkspaceCard href="/build/rocket" icon={Rocket} title="Build > Rocket" copy="Design the airframe in the browser, pick a saved motor, place it in the motor mount, and run rocket-level performance graphs." cta="Open Rocket Builder" />
-        </div>
-        <Card className="mt-8 p-5">
-          <h2 className="font-semibold">Build system modules</h2>
-          <p className="mt-2 text-sm text-orange-50/60">The workspace is organized like an aerospace engineering environment, not a single-file editor.</p>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            {buildModules.map(([title, copy]) => (
-              <div key={title} className="rounded-md border border-white/10 bg-white/[0.04] p-3">
-                <p className="text-sm font-semibold text-orange-100">{title}</p>
-                <p className="mt-2 text-xs leading-5 text-orange-50/55">{copy}</p>
-              </div>
-            ))}
+    <main className="min-h-screen bg-space-radial px-5 pb-20 pt-24 sm:px-6">
+      <div className="mx-auto max-w-6xl">
+        <div className="flex flex-col gap-3 border-b border-white/10 pb-6 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-200/65">Build</p>
+            <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Choose a workspace</h1>
           </div>
-        </Card>
-        <div className="mt-8 grid gap-4 lg:grid-cols-3">
-          {libraryNotes.map(([title, copy]) => (
-            <Card key={title} className="p-5">
-              <p className="text-sm font-semibold text-orange-100">{title}</p>
-              <p className="mt-2 text-sm leading-6 text-orange-50/62">{copy}</p>
-            </Card>
-          ))}
+          <p className="max-w-xl text-sm leading-6 text-orange-50/58 sm:text-right">Design a motor first, save it to your account, then use its thrust data in a rocket project.</p>
+        </div>
+
+        <div className="mt-6 grid overflow-hidden rounded-lg border border-white/12 bg-white/10 lg:grid-cols-2 lg:gap-px">
+          <WorkspaceCard
+            href="/build/motor"
+            icon={Flame}
+            number="01"
+            title="Motor"
+            copy="Model propulsion performance and save a reusable motor record."
+            features={["Internal ballistics", "Nozzle design and CFD", "Thrust and pressure curves"]}
+            cta="Open Motor Builder"
+          />
+          <WorkspaceCard
+            href="/build/rocket"
+            icon={Rocket}
+            number="02"
+            title="Rocket"
+            copy="Assemble the airframe and simulate flight with a saved motor."
+            features={["Airframe and components", "Motor integration", "Stability and flight results"]}
+            cta="Open Rocket Builder"
+          />
+        </div>
+
+        <div className="mt-5 flex flex-col gap-4 rounded-lg border border-white/10 bg-black/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3 text-sm text-orange-50/68">
+            <Library className="h-5 w-5 shrink-0 text-orange-200" />
+            <p><span className="font-semibold text-orange-50">Motor Builder</span> <ChevronRight className="mx-1 inline h-4 w-4" /> Save to account <ChevronRight className="mx-1 inline h-4 w-4" /> <span className="font-semibold text-orange-50">Rocket Builder</span></p>
+          </div>
+          <p className="flex items-center gap-2 text-xs text-orange-50/42"><ShieldCheck className="h-4 w-4" />Simulation results are estimates, not certification.</p>
         </div>
       </div>
     </main>
@@ -2976,14 +2969,30 @@ function SafetyStrip() {
   );
 }
 
-function WorkspaceCard({ href, icon: Icon, title, copy, cta }: { href: string; icon: typeof Flame; title: string; copy: string; cta: string }) {
+function WorkspaceCard({ href, icon: Icon, number, title, copy, features, cta }: { href: string; icon: typeof Flame; number: string; title: string; copy: string; features: string[]; cta: string }) {
   return (
-    <Card className="p-6">
-      <Icon className="h-7 w-7 text-orange-200" />
-      <h2 className="mt-5 text-2xl font-semibold">{title}</h2>
-      <p className="mt-3 text-orange-50/66">{copy}</p>
-      <Button href={href} asChild className="mt-6">{cta}<ChevronRight className="h-4 w-4" /></Button>
-    </Card>
+    <article className="group relative min-h-[340px] bg-[#090c12] p-6 transition-colors hover:bg-[#0d1119] sm:p-8">
+      <div className="flex items-start justify-between gap-4">
+        <div className="grid h-12 w-12 place-items-center rounded-md border border-orange-300/25 bg-orange-400/10">
+          <Icon className="h-6 w-6 text-orange-200" />
+        </div>
+        <p className="font-mono text-xs text-orange-50/35">{number}</p>
+      </div>
+      <h2 className="mt-6 text-3xl font-semibold">{title}</h2>
+      <p className="mt-2 max-w-md text-sm leading-6 text-orange-50/60">{copy}</p>
+      <ul className="mt-6 grid gap-2.5 text-sm text-orange-50/78">
+        {features.map((feature) => (
+          <li key={feature} className="flex items-center gap-2.5">
+            <Check className="h-4 w-4 text-emerald-300" />
+            {feature}
+          </li>
+        ))}
+      </ul>
+      <Button href={href} asChild className="mt-7 w-full justify-between sm:w-auto">
+        {cta}
+        <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+      </Button>
+    </article>
   );
 }
 
