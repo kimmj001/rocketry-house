@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Archive, Boxes, Calculator, Check, ChevronRight, Cpu, Crosshair, Download, Eye, FileUp, Flame, Gauge, Layers, Library, PackagePlus, Play, Rocket, Ruler, Save, ShieldCheck, UploadCloud, Wind } from "lucide-react";
+import { ArrowDown, ArrowUp, Boxes, Calculator, Check, ChevronRight, Copy, Cpu, Crosshair, Download, Eye, FileUp, Flame, Gauge, Layers, Library, PackagePlus, Play, Rocket, Ruler, Save, ShieldCheck, Trash2, UploadCloud, Wind } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { RocketViewer3D } from "@/components/rocket-viewer-3d";
@@ -15,7 +15,6 @@ import { loadPersistentRecords, savePersistentRecord } from "@/lib/cloud-persist
 import { analyzeNozzleFlow, defaultMotorParameters, propellantProfiles, simulateMotor } from "@/lib/motor-simulation";
 import { runRocketEstimateWithMotor } from "@/lib/rocket-simulation";
 import { sortComponents, totalLength } from "@/lib/cad/geometry";
-import { flightEquations, flightGraphOutputs, motorEquations, motorGraphOutputs } from "@/lib/platform-content";
 import type { MotorParameters, MotorSimulationResult, SavedMotor } from "@/types/motor";
 import type { NozzleCfdField, NozzleCfdResult } from "@/types/cfd";
 import { SAVED_NOZZLE_COLLECTION, type SavedNozzleDesign } from "@/types/nozzle";
@@ -521,11 +520,13 @@ export function RocketBuilder() {
   const [result, setResult] = useState<SimulationResult>(() => runRocketEstimateWithMotor(project.components, undefined, { windSpeedMps: 1.7 }));
   const [launchRun, setLaunchRun] = useState(0);
   const [selectedComponentId, setSelectedComponentId] = useState(project.components[0]?.id ?? "");
-  const [designView, setDesignView] = useState<"Side view" | "3D Figure">("Side view");
+  const [designView, setDesignView] = useState<"Side view" | "3D Figure">("3D Figure");
   const draftRequestRef = useRef(0);
   const selectedMotor = motors.find((motor) => motor.id === selectedMotorId);
   const componentsWithMotor = useMemo(() => selectedMotor ? insertMotorComponent(components, selectedMotor) : components, [components, selectedMotor]);
   const selectedComponent = components.find((component) => component.id === selectedComponentId) ?? components[0];
+  const loadedMass = componentsWithMotor.reduce((sum, component) => sum + component.mass, 0);
+  const primaryWarning = result.warnings.find((warning) => warning.level === "critical") ?? result.warnings[0];
 
   useEffect(() => {
     const sync = () => {
@@ -660,78 +661,77 @@ export function RocketBuilder() {
   }
 
   return (
-    <main className={buildPageClass}>
+    <main className="min-h-screen bg-space-radial px-4 pb-28 pt-20 sm:px-6">
       <div className="mx-auto max-w-[1600px]">
-        <BuilderHeader eyebrow="Build > Rocket" title="Rocket CAD workspace with motor-aware simulation" copy="Design the airframe, insert an account-saved motor, and integrate its thrust curve directly for rocket-level flight analysis." />
-        <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="space-y-5">
-            <Card className="p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="flex items-center gap-2 font-semibold"><Rocket className="h-5 w-5 text-orange-200" />Web CAD live 3D workspace</h2>
-                  <p className="mt-1 text-sm text-orange-50/62">This is the primary browser CAD view. Component edits, selected motor metadata, fins, launch guides, and aft hardware update the rocket model live.</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button href="/upload" asChild variant="outline"><UploadCloud className="h-4 w-4" />Publish project</Button>
-                  <Button variant="outline" onClick={simulateRocket}><Play className="h-4 w-4" />Run simulation</Button>
-                </div>
-              </div>
-              <div className="mt-4">
-                <RocketViewer3D components={componentsWithMotor} selectedComponentId={selectedComponentId} onSelectComponent={setSelectedComponentId} />
-              </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Metric label="Selected component" value={selectedComponent ? selectedComponent.name : "None"} />
-                <Metric label="Selected motor" value={selectedMotor ? `${selectedMotor.name}` : "None"} />
-                <Metric label="CG / CP" value={`${result.cgMm} / ${result.cpMm} mm`} />
-                <Metric label="Apogee" value={`${result.predictedAltitudeM} m`} />
-              </div>
-            </Card>
-            <RocketDesignWorkbench
-              components={components}
-              renderedComponents={componentsWithMotor}
-              selectedComponentId={selectedComponentId}
-              setSelectedComponentId={setSelectedComponentId}
-              updateComponent={updateComponent}
-              addComponent={addRocketComponent}
-              duplicateSelected={duplicateSelected}
-              deleteSelected={deleteSelected}
-              moveSelected={moveSelected}
-              result={result}
-              designView={designView}
-              setDesignView={setDesignView}
-              selectedMotor={selectedMotor}
-            />
-            <RocketLaunchScene runId={launchRun} result={result} hasMotor={Boolean(selectedMotor)} components={componentsWithMotor} windSpeedMps={windSpeedMps} setWindSpeedMps={setWindSpeedMps} onRun={simulateRocket} />
-            <RocketCADWorkspace components={components} updateComponent={updateComponent} addPayloadBay={addPayloadBay} selectedComponentId={selectedComponentId} />
-            <RocketGraphSet result={result} />
-            <EngineeringReferencePanel title="Rocket flight model" equations={flightEquations} outputs={flightGraphOutputs} />
+        <header className="flex flex-col gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-200/65">Build / Rocket</p>
+            <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Rocket Builder</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-orange-50/58">Assemble the vehicle, edit each component, select a saved motor, and save the complete design.</p>
           </div>
-          <div className="space-y-5">
-            <MotorLibraryPicker motors={motors} selectedMotorId={selectedMotorId} setSelectedMotorId={setSelectedMotorId} />
-            <Card className="p-5">
-              <h2 className="font-semibold">CG / CP and simulation</h2>
-              <div className="mt-4 grid gap-3 text-sm text-orange-50/70">
-                <Metric label="CG" value={`${result.cgMm} mm`} />
-                <Metric label="CP" value={`${result.cpMm} mm`} />
-                <Metric label="Stability" value={`${result.stabilityMargin} calibers`} />
-                <Metric label="Apogee" value={`${result.predictedAltitudeM} m`} />
-                <Metric label="Wind drift" value={`${result.maxDriftM ?? 0} m @ ${windSpeedMps.toFixed(1)} m/s`} />
-              </div>
-              <div className="mt-4 space-y-2">
-                {result.warnings.map((warning) => <p key={warning.message} className={`rounded-md p-2 text-xs ${warning.level === "critical" ? "bg-red-500/12 text-red-100" : "bg-white/[0.04] text-orange-50/65"}`}>{warning.message}</p>)}
-              </div>
-            </Card>
-            <Card className="p-5">
-              <h2 className="font-semibold">Project actions</h2>
-              <p className="mt-3 rounded-md bg-white/[0.04] p-3 text-xs leading-5 text-orange-50/62">{saveStatus}</p>
-              <div className="mt-4 grid gap-2">
-                <Button variant="outline" onClick={saveRocketProject}><Save className="h-4 w-4" />Save rocket project</Button>
-                <Button variant="outline"><Archive className="h-4 w-4" />Create fork-ready package</Button>
-                <Button><ChevronRight className="h-4 w-4" />Publish / Fork / Review</Button>
-              </div>
-            </Card>
+          <div className="flex flex-col items-stretch gap-2 sm:items-end">
+            <div className="flex flex-wrap gap-2">
+              <Button href="/upload" asChild variant="outline"><UploadCloud className="h-4 w-4" />Publish</Button>
+              <Button onClick={saveRocketProject}><Save className="h-4 w-4" />Save project</Button>
+            </div>
+            <p className="max-w-md text-xs text-orange-50/45 sm:text-right">{saveStatus}</p>
           </div>
+        </header>
+
+        <div className="mt-5 grid grid-cols-2 overflow-hidden rounded-lg border border-white/10 bg-white/10 xl:grid-cols-[minmax(300px,1.5fr)_repeat(4,minmax(0,1fr))] xl:gap-px">
+          <MotorLibraryPicker motors={motors} selectedMotorId={selectedMotorId} setSelectedMotorId={setSelectedMotorId} />
+          <RocketBuildMetric label="Length" value={`${Math.round(totalLength(components))} mm`} />
+          <RocketBuildMetric label="Loaded mass" value={`${Math.round(loadedMass)} g`} />
+          <RocketBuildMetric label="Stability" value={`${result.stabilityMargin} cal`} />
+          <RocketBuildMetric label="Apogee" value={`${result.predictedAltitudeM} m`} />
         </div>
+
+        {primaryWarning ? (
+          <div className={`mt-3 flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${primaryWarning.level === "critical" ? "border-red-300/25 bg-red-400/10 text-red-100" : "border-amber-200/20 bg-amber-300/8 text-amber-50/75"}`}>
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>{primaryWarning.message}</p>
+          </div>
+        ) : null}
+
+        <div className="mt-5">
+          <RocketDesignWorkbench
+            components={components}
+            renderedComponents={componentsWithMotor}
+            selectedComponentId={selectedComponentId}
+            setSelectedComponentId={setSelectedComponentId}
+            updateComponent={updateComponent}
+            addComponent={addRocketComponent}
+            duplicateSelected={duplicateSelected}
+            deleteSelected={deleteSelected}
+            moveSelected={moveSelected}
+            result={result}
+            designView={designView}
+            setDesignView={setDesignView}
+            selectedMotor={selectedMotor}
+          />
+        </div>
+
+        <section className="mt-7">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-200/55">Test</p>
+              <h2 className="mt-1 text-xl font-semibold">Launch Simulation</h2>
+            </div>
+            <p className="text-xs text-orange-50/45">Uses the current geometry, selected motor, and wind setting.</p>
+          </div>
+          <RocketLaunchScene runId={launchRun} result={result} hasMotor={Boolean(selectedMotor)} components={componentsWithMotor} windSpeedMps={windSpeedMps} setWindSpeedMps={setWindSpeedMps} onRun={simulateRocket} />
+        </section>
+
+        <details className="mt-5 rounded-lg border border-white/10 bg-black/15 p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-orange-50">Detailed component table</summary>
+          <div className="mt-4">
+            <RocketCADWorkspace components={components} updateComponent={updateComponent} addPayloadBay={addPayloadBay} selectedComponentId={selectedComponentId} />
+          </div>
+        </details>
+        <details className="mt-3 rounded-lg border border-white/10 bg-black/15 p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-orange-50">Flight result graphs</summary>
+          <div className="mt-4"><RocketGraphSet result={result} /></div>
+        </details>
       </div>
     </main>
   );
@@ -773,73 +773,105 @@ function RocketDesignWorkbench({
 
   return (
     <Card className="overflow-hidden p-0">
-      <div className="grid min-h-[760px] lg:grid-cols-[280px_minmax(0,1fr)]">
-        <div className="border-b border-white/10 bg-white/[0.03] p-4 lg:border-b-0 lg:border-r">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="flex items-center gap-2 font-semibold"><Layers className="h-5 w-5 text-cyan-200" />Rocket design tree</h2>
-            <span className="rounded-md bg-white/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-orange-50/52">Sustainer</span>
-          </div>
-          <RocketComponentTree components={components} selectedId={selectedComponentId} select={setSelectedComponentId} />
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            <Button variant="outline" size="sm" onClick={() => moveSelected(-10)}>Move up</Button>
-            <Button variant="outline" size="sm" onClick={() => moveSelected(10)}>Move down</Button>
-            <Button variant="outline" size="sm" onClick={duplicateSelected}>Duplicate</Button>
-            <Button variant="outline" size="sm" onClick={deleteSelected}>Delete</Button>
-          </div>
-          <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.04] p-3 text-xs leading-5 text-orange-50/62">
-            <p className="font-semibold text-orange-50">Current design</p>
-            <p>Length {Math.round(rocketLength)} mm, max diameter {Math.round(result.diameterMm)} mm</p>
-            <p>Dry mass {Math.round(dryMass)} g</p>
-            <p>Loaded mass {Math.round(loadedMass)} g</p>
-            <p>Selected motor {selectedMotor ? `${selectedMotor.estimatedClass}${selectedMotor.averageThrustN}` : "none"}</p>
-          </div>
+      <div className="flex flex-col gap-3 border-b border-white/10 bg-[#090c12] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="flex items-center gap-2 font-semibold"><Rocket className="h-5 w-5 text-orange-200" />Live Web CAD</h2>
+          <p className="mt-1 text-xs text-orange-50/45">Select a component in the tree or directly in the model to edit it.</p>
         </div>
-
-        <div className="min-w-0">
-          <div className="border-b border-white/10 bg-white/[0.025] p-4">
-            <h2 className="flex items-center gap-2 font-semibold"><PackagePlus className="h-5 w-5 text-orange-200" />Add new component</h2>
-            <div className="mt-4 space-y-4">
-              {rocketComponentPalette.map((group) => (
-                <div key={group.category}>
-                  <p className="mb-2 text-xs uppercase tracking-[0.14em] text-orange-50/42">{group.category}</p>
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    {group.items.map(([type, label, note]) => (
-                      <button key={`${group.category}-${label}`} type="button" onClick={() => addComponent(type, label)} className="rounded-md border border-white/10 bg-white/[0.04] p-3 text-left transition hover:border-orange-200/40 hover:bg-white/[0.075]">
-                        <span className="block text-sm font-semibold text-orange-50">{label}</span>
-                        <span className="mt-1 block text-[11px] leading-4 text-orange-50/46">{note}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid gap-0">
-            <div className="min-w-0 p-4">
-              <RocketViewportToolbar designView={designView} setDesignView={setDesignView} result={result} selectedMotor={selectedMotor} />
-              {designView === "3D Figure" ? (
-                <div className="mt-3 rounded-lg border border-white/10 bg-[#f7f9fc] p-3">
-                  <RocketViewer3D components={renderedComponents} selectedComponentId={selectedComponentId} onSelectComponent={setSelectedComponentId} />
-                </div>
-              ) : (
-                <RocketSideProfile components={renderedComponents} result={result} selectedId={selectedComponentId} select={setSelectedComponentId} />
-              )}
-            </div>
-            <div className="border-t border-white/10 p-4">
-              {selectedComponent ? <ComponentConfigurationPanel component={selectedComponent} updateComponent={updateComponent} /> : null}
-            </div>
-          </div>
+        <div className="inline-flex w-full rounded-md border border-white/10 bg-white/[0.04] p-1 sm:w-auto" role="group" aria-label="CAD view">
+          {(["3D Figure", "Side view"] as const).map((view) => (
+            <button
+              key={view}
+              type="button"
+              onClick={() => setDesignView(view)}
+              className={`min-h-9 flex-1 rounded px-3 text-xs font-semibold transition sm:flex-none ${designView === view ? "bg-orange-300 text-[#171009]" : "text-orange-50/58 hover:bg-white/[0.06] hover:text-orange-50"}`}
+            >
+              {view === "3D Figure" ? "3D CAD" : "Side profile"}
+            </button>
+          ))}
         </div>
       </div>
+
+      <div className="grid xl:grid-cols-[270px_minmax(0,1fr)_360px]">
+        <aside className="order-2 border-t border-white/10 bg-white/[0.025] p-4 xl:order-1 xl:border-r xl:border-t-0">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="flex items-center gap-2 text-sm font-semibold"><Layers className="h-4 w-4 text-cyan-200" />Components</h3>
+            <span className="rounded bg-white/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-orange-50/45">{components.length}</span>
+          </div>
+          <RocketComponentTree components={components} selectedId={selectedComponentId} select={setSelectedComponentId} />
+          <div className="mt-3 flex gap-2">
+            <Button variant="outline" size="icon" onClick={() => moveSelected(-10)} title="Move selected component forward" aria-label="Move selected component forward"><ArrowUp className="h-4 w-4" /></Button>
+            <Button variant="outline" size="icon" onClick={() => moveSelected(10)} title="Move selected component aft" aria-label="Move selected component aft"><ArrowDown className="h-4 w-4" /></Button>
+            <Button variant="outline" size="icon" onClick={duplicateSelected} title="Duplicate selected component" aria-label="Duplicate selected component"><Copy className="h-4 w-4" /></Button>
+            <Button variant="outline" size="icon" onClick={deleteSelected} disabled={components.length <= 1} title="Delete selected component" aria-label="Delete selected component"><Trash2 className="h-4 w-4" /></Button>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/10 bg-white/10 text-xs">
+            <div className="bg-[#0b0f17] p-2"><p className="text-orange-50/38">Length</p><p className="mt-1 font-semibold">{Math.round(rocketLength)} mm</p></div>
+            <div className="bg-[#0b0f17] p-2"><p className="text-orange-50/38">Diameter</p><p className="mt-1 font-semibold">{Math.round(result.diameterMm)} mm</p></div>
+            <div className="bg-[#0b0f17] p-2"><p className="text-orange-50/38">Dry mass</p><p className="mt-1 font-semibold">{Math.round(dryMass)} g</p></div>
+            <div className="bg-[#0b0f17] p-2"><p className="text-orange-50/38">Loaded</p><p className="mt-1 font-semibold">{Math.round(loadedMass)} g</p></div>
+          </div>
+          <RocketComponentPalette addComponent={addComponent} />
+        </aside>
+
+        <section className="order-1 min-w-0 bg-[#070a10] p-4 xl:order-2">
+          <RocketViewportToolbar result={result} selectedMotor={selectedMotor} />
+          {designView === "3D Figure" ? (
+            <div className="mt-3">
+              <RocketViewer3D components={renderedComponents} selectedComponentId={selectedComponentId} onSelectComponent={setSelectedComponentId} />
+            </div>
+          ) : (
+            <RocketSideProfile components={renderedComponents} result={result} selectedId={selectedComponentId} select={setSelectedComponentId} />
+          )}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-3 text-xs text-orange-50/48">
+            <p>Selected: <span className="font-semibold text-orange-50/80">{selectedComponent?.name ?? "None"}</span></p>
+            <p>Motor: <span className="font-semibold text-orange-50/80">{selectedMotor?.name ?? "Not selected"}</span></p>
+          </div>
+        </section>
+
+        <aside className="order-3 border-t border-white/10 bg-white/[0.025] p-4 xl:max-h-[610px] xl:overflow-y-auto xl:border-l xl:border-t-0">
+          {selectedComponent ? <ComponentConfigurationPanel component={selectedComponent} updateComponent={updateComponent} /> : null}
+        </aside>
+      </div>
     </Card>
+  );
+}
+
+function RocketComponentPalette({ addComponent }: { addComponent: (type: RocketComponentType, label?: string) => void }) {
+  return (
+    <div className="mt-4 border-t border-white/10 pt-4">
+      <h3 className="flex items-center gap-2 text-sm font-semibold"><PackagePlus className="h-4 w-4 text-orange-200" />Add component</h3>
+      <div className="mt-3 space-y-2">
+        {rocketComponentPalette.map((group) => (
+          <details key={group.category} className="rounded-md border border-white/10 bg-white/[0.025]">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-orange-50/70">
+              {group.category}
+              <span className="font-mono text-[10px] text-orange-50/32">{group.items.length}</span>
+            </summary>
+            <div className="grid grid-cols-2 gap-1 border-t border-white/10 p-2">
+              {group.items.map(([type, label, note]) => (
+                <button
+                  key={`${group.category}-${label}`}
+                  type="button"
+                  onClick={() => addComponent(type, label)}
+                  title={note}
+                  className="min-h-9 rounded border border-white/10 bg-white/[0.035] px-2 py-1.5 text-left text-[11px] font-medium text-orange-50/72 transition hover:border-orange-200/35 hover:bg-orange-200/[0.07] hover:text-orange-50"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </details>
+        ))}
+      </div>
+    </div>
   );
 }
 
 export function RocketComponentTree({ components, selectedId, select }: { components: RocketComponent[]; selectedId: string; select: (id: string) => void }) {
   const sorted = sortComponents(components);
   return (
-    <div className="mt-4 max-h-[420px] overflow-y-auto rounded-lg border border-white/10 bg-[#070a12]/70 p-2">
+    <div className="mt-3 max-h-[260px] overflow-y-auto rounded-md border border-white/10 bg-[#070a12]/70 p-2">
       <button type="button" className="mb-1 w-full rounded-md px-2 py-2 text-left text-xs font-semibold text-orange-50/70">Sustainer</button>
       <div className="space-y-1 pl-3">
         {sorted.map((component) => (
@@ -854,27 +886,15 @@ export function RocketComponentTree({ components, selectedId, select }: { compon
   );
 }
 
-export function RocketViewportToolbar({ designView, setDesignView, result, selectedMotor }: { designView: "Side view" | "3D Figure"; setDesignView: (view: "Side view" | "3D Figure") => void; result: SimulationResult; selectedMotor?: SavedMotor }) {
+export function RocketViewportToolbar({ result, selectedMotor }: { result: SimulationResult; selectedMotor?: SavedMotor }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
-      <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr]">
-        <label className="text-xs text-orange-50/50">View type
-          <select value={designView} onChange={(event) => setDesignView(event.target.value as "Side view" | "3D Figure")} className="mt-1 w-full rounded-md border border-white/10 bg-[#121421] px-2 py-2 text-sm text-orange-50">
-            <option>Side view</option>
-            <option>3D Figure</option>
-          </select>
-        </label>
-        <label className="text-xs text-orange-50/50">Flight configuration
-          <select className="mt-1 w-full rounded-md border border-white/10 bg-[#121421] px-2 py-2 text-sm text-orange-50">
-            <option>{selectedMotor ? `[${selectedMotor.estimatedClass}${selectedMotor.averageThrustN}]` : "[no motor selected]"}</option>
-          </select>
-        </label>
-        <div className="flex flex-wrap items-end gap-2 text-xs text-orange-50/62">
-          <span className="rounded-md bg-white/[0.06] px-2 py-2"><Crosshair className="mr-1 inline h-3.5 w-3.5" />CG {Math.round(result.cgMm)} mm</span>
-          <span className="rounded-md bg-white/[0.06] px-2 py-2">CP {Math.round(result.cpMm)} mm</span>
-          <span className="rounded-md bg-white/[0.06] px-2 py-2">Stability {result.stabilityMargin} cal</span>
-        </div>
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-white/10 bg-white/[0.035] px-3 py-2 text-xs text-orange-50/62">
+      <div className="flex flex-wrap gap-2">
+        <span className="rounded bg-white/[0.06] px-2 py-1.5"><Crosshair className="mr-1 inline h-3.5 w-3.5" />CG {Math.round(result.cgMm)} mm</span>
+        <span className="rounded bg-white/[0.06] px-2 py-1.5">CP {Math.round(result.cpMm)} mm</span>
+        <span className="rounded bg-white/[0.06] px-2 py-1.5">Stability {result.stabilityMargin} cal</span>
       </div>
+      <p className="text-orange-50/45">{selectedMotor ? `${selectedMotor.estimatedClass}-class / ${selectedMotor.name}` : "No motor selected"}</p>
     </div>
   );
 }
@@ -2101,16 +2121,27 @@ function RocketGraphSet({ result }: { result: SimulationResult }) {
   );
 }
 
+function RocketBuildMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-h-[92px] bg-[#0a0e16] p-4">
+      <p className="text-[11px] uppercase tracking-[0.12em] text-orange-50/38">{label}</p>
+      <p className="mt-2 text-lg font-semibold text-orange-50">{value}</p>
+    </div>
+  );
+}
+
 function MotorLibraryPicker({ motors, selectedMotorId, setSelectedMotorId }: { motors: SavedMotor[]; selectedMotorId: string; setSelectedMotorId: (id: string) => void }) {
   return (
-    <Card className="p-5">
-      <h2 className="flex items-center gap-2 font-semibold"><Library className="h-5 w-5 text-orange-200" />Motor Library</h2>
-      <select value={selectedMotorId} onChange={(event) => setSelectedMotorId(event.target.value)} className="mt-4 w-full rounded-md border border-white/10 bg-[#121421] px-3 py-2 text-sm text-orange-50">
+    <div className="col-span-2 min-h-[92px] bg-[#0a0e16] p-4 xl:col-span-1">
+      <div className="flex items-center justify-between gap-3">
+        <label htmlFor="rocket-motor-library" className="flex items-center gap-2 text-xs font-semibold text-orange-50/72"><Library className="h-4 w-4 text-orange-200" />Motor</label>
+        <Button href="/build/motor" asChild variant="ghost" size="sm" className="h-7 px-2 text-xs text-orange-50/52"><Flame className="h-3.5 w-3.5" />New motor</Button>
+      </div>
+      <select id="rocket-motor-library" value={selectedMotorId} onChange={(event) => setSelectedMotorId(event.target.value)} className="mt-2 w-full rounded-md border border-white/12 bg-[#121421] px-3 py-2 text-sm text-orange-50">
         <option value="">Select a saved motor</option>
         {motors.map((motor) => <option key={motor.id} value={motor.id}>{motor.name} - {motor.estimatedClass}{motor.averageThrustN}</option>)}
       </select>
-      <Button href="/build/motor" asChild variant="outline" className="mt-3 w-full"><Flame className="h-4 w-4" />Design another motor</Button>
-    </Card>
+    </div>
   );
 }
 
@@ -2931,29 +2962,6 @@ function exportRaspMotor(parameters: MotorParameters, result: MotorSimulationRes
   anchor.download = `${parameters.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "motor"}.eng`;
   anchor.click();
   URL.revokeObjectURL(url);
-}
-
-function EngineeringReferencePanel({ title, equations, outputs }: { title: string; equations: readonly (readonly [string, string, string])[]; outputs: readonly string[] }) {
-  return (
-    <Card className="p-5">
-      <h2 className="flex items-center gap-2 font-semibold"><Calculator className="h-5 w-5 text-cyan-200" />{title}</h2>
-      <p className="mt-2 text-sm leading-6 text-orange-50/60">
-        These blocks document the analysis model so builders understand what the graphs mean. Values are estimates for education, design review, and comparison against measured evidence.
-      </p>
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        {equations.map(([name, equation, note]) => (
-          <div key={name} className="rounded-md border border-white/10 bg-[#0b101b] p-3">
-            <p className="text-sm font-semibold text-orange-100">{name}</p>
-            <p className="mt-2 font-mono text-xs text-cyan-100">{equation}</p>
-            <p className="mt-2 text-xs leading-5 text-orange-50/52">{note}</p>
-          </div>
-        ))}
-      </div>
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-        {outputs.map((output) => <p key={output} className="rounded-md bg-white/[0.04] p-2 text-xs text-orange-50/62">{output}</p>)}
-      </div>
-    </Card>
-  );
 }
 
 function SafetyStrip() {
