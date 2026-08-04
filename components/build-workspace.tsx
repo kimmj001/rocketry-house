@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowDown, ArrowUp, Boxes, Calculator, Check, ChevronRight, Copy, Cpu, Crosshair, Download, Eye, FileUp, Flame, Gauge, Layers, Library, PackagePlus, Play, Rocket, Ruler, Save, ShieldCheck, Trash2, UploadCloud, Wind } from "lucide-react";
+import { ArrowDown, ArrowUp, Boxes, Check, ChevronRight, Copy, Cpu, Crosshair, Download, Eye, FileUp, Flame, Gauge, Layers, Library, PackagePlus, Play, Rocket, Ruler, Save, ShieldCheck, Trash2, UploadCloud, Wind } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { RocketViewer3D } from "@/components/rocket-viewer-3d";
@@ -263,8 +263,9 @@ function summarizeMotor(result: MotorSimulationResult, parameters: MotorParamete
   const maxPressure = Math.max(0, ...result.curve.map((point) => point.pressure));
   const averagePressure = active.length ? active.reduce((sum, point) => sum + point.pressure, 0) / active.length : 0;
   const averageIsp = active.length ? active.reduce((sum, point) => sum + (point.specificImpulseS ?? 0), 0) / active.length : 0;
-  const exitMach = 1.4 + Math.sqrt(Math.max((parameters.nozzleExitMm / Math.max(parameters.nozzleThroatMm, 1)) ** 2 - 1, 0)) * 0.55;
-  const expansionRatio = ((parameters.nozzleExitMm / Math.max(parameters.nozzleThroatMm, 1)) ** 2);
+  const nozzleFlow = analyzeNozzleFlow(parameters, result.averagePressureMPa ?? averagePressure);
+  const exitMach = nozzleFlow.exitMach;
+  const expansionRatio = nozzleFlow.areaRatio;
   return {
     classLoad: classPercent(result.totalImpulseNs, result.motorClass),
     maxPressure: Number((result.maxPressureMPa ?? maxPressure).toFixed(2)),
@@ -375,15 +376,43 @@ export function BuildHome() {
 
 export function MotorBuilder() {
   const [parameters, setParameters] = useState<MotorParameters>(defaultMotorParameters);
-  const [result, setResult] = useState<MotorSimulationResult>(() => simulateMotor(defaultMotorParameters));
+  const [analysis, setAnalysis] = useState(() => ({
+    parameters: { ...defaultMotorParameters },
+    result: simulateMotor(defaultMotorParameters),
+    key: JSON.stringify(defaultMotorParameters)
+  }));
+  const [analysisStatus, setAnalysisStatus] = useState<"current" | "updating" | "invalid">("current");
   const [modalOpen, setModalOpen] = useState(false);
   const [savedName, setSavedName] = useState(defaultMotorParameters.projectName);
   const [visibility, setVisibility] = useState<"private" | "public" | "unlisted">("private");
   const [license, setLicense] = useState("CC BY-NC 4.0");
   const [nozzleOpen, setNozzleOpen] = useState(false);
-  const [compareMotors, setCompareMotors] = useState(false);
   const [saveStatus, setSaveStatus] = useState("Motor not saved yet.");
-  const summary = summarizeMotor(result, parameters);
+  const parameterKey = JSON.stringify(parameters);
+  const result = analysis.result;
+  const analysisCurrent = analysis.key === parameterKey && analysisStatus === "current";
+  const summary = summarizeMotor(result, analysis.parameters);
+
+  useEffect(() => {
+    const issues = validateMotorInputs(parameters);
+    if (issues.length) {
+      setAnalysisStatus("invalid");
+      return;
+    }
+    if (analysis.key === parameterKey) {
+      setAnalysisStatus("current");
+      return;
+    }
+
+    setAnalysisStatus("updating");
+    const timer = window.setTimeout(() => {
+      const inputSnapshot = { ...parameters };
+      setAnalysis({ parameters: inputSnapshot, result: simulateMotor(inputSnapshot), key: parameterKey });
+      setAnalysisStatus("current");
+      setSaveStatus("Analysis current. Unsaved changes.");
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [analysis.key, parameterKey, parameters]);
 
   function update<K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) {
     setParameters((current) => ({ ...current, [key]: value }));
@@ -391,12 +420,9 @@ export function MotorBuilder() {
     setSaveStatus("Unsaved changes.");
   }
 
-  function runSimulation() {
-    setResult(simulateMotor(parameters));
-    setSaveStatus("Analysis updated. Unsaved changes.");
-  }
-
   async function saveMotor() {
+    if (!analysisCurrent) return;
+    const analyzedParameters = analysis.parameters;
     const motor: SavedMotor = {
       id: `motor-${Date.now()}`,
       name: savedName,
@@ -411,9 +437,9 @@ export function MotorBuilder() {
       averageThrustN: result.averageThrustN,
       peakThrustN: result.peakThrustN,
       burnTimeS: result.burnTimeS,
-      propellantProfileName: parameters.propellantProfileName,
+      propellantProfileName: analyzedParameters.propellantProfileName,
       verificationStatus: "Pre-flight analysis",
-      parameters,
+      parameters: analyzedParameters,
       simulation: result,
       createdAt: new Date().toISOString().slice(0, 10),
       updatedAt: new Date().toISOString().slice(0, 10)
@@ -434,13 +460,16 @@ export function MotorBuilder() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-200/65">Build / Motor</p>
             <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Motor Builder</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-orange-50/58">Define the chamber, grain, and nozzle, review the live section, then run and save the performance model.</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-orange-50/58">Define the chamber, grain, and nozzle, then review the synchronized geometry and sourced pre-flight prediction.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className={`flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold ${analysisStatus === "current" ? "border-emerald-200/20 bg-emerald-200/10 text-emerald-100" : analysisStatus === "updating" ? "border-cyan-200/20 bg-cyan-200/10 text-cyan-100" : "border-rose-300/25 bg-rose-300/10 text-rose-200"}`}>
+              {analysisStatus === "current" ? <Check className="h-4 w-4" /> : <Cpu className={`h-4 w-4 ${analysisStatus === "updating" ? "animate-pulse" : ""}`} />}
+              {analysisStatus === "current" ? "Live result current" : analysisStatus === "updating" ? "Updating result" : "Resolve input limits"}
+            </div>
             <Button variant="outline" onClick={() => setNozzleOpen(true)}><Gauge className="h-4 w-4" />Nozzle design</Button>
             <Button asChild href="/build/motor/cfd" variant="outline"><Wind className="h-4 w-4" />Run CFD</Button>
-            <Button variant="outline" onClick={() => setModalOpen(true)}><Save className="h-4 w-4" />Save</Button>
-            <Button onClick={runSimulation}><Play className="h-4 w-4 fill-current" />Run analysis</Button>
+            <Button variant="outline" disabled={!analysisCurrent} onClick={() => setModalOpen(true)}><Save className="h-4 w-4" />Save</Button>
           </div>
         </header>
 
@@ -458,11 +487,11 @@ export function MotorBuilder() {
 
         <section className="mt-5 grid min-w-0 gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
           <aside className="min-w-0 xl:sticky xl:top-24 xl:self-start">
-            <MotorParameterPanel parameters={parameters} update={update} runSimulation={runSimulation} />
+            <MotorParameterPanel parameters={parameters} update={update} />
           </aside>
           <div className="min-w-0 space-y-5">
             <MotorCrossSectionView parameters={parameters} />
-            <MotorPerformanceSummary result={result} parameters={parameters} compareMotors={compareMotors} setCompareMotors={setCompareMotors} onSave={() => setModalOpen(true)} onNozzle={() => setNozzleOpen(true)} onExportRasp={() => exportRaspMotor(parameters, result)} />
+            <MotorPerformanceSummary result={result} parameters={analysis.parameters} analysisReady={analysisCurrent} onSave={() => setModalOpen(true)} onNozzle={() => setNozzleOpen(true)} onExportRasp={() => exportRaspMotor(analysis.parameters, result)} />
             <MotorCurveChart result={result} measuredCurve={undefined} />
           </div>
         </section>
@@ -1818,7 +1847,7 @@ function MotorNumberField({ label, value, unit, help, bounds, onCommit }: { labe
   );
 }
 
-function MotorParameterPanel({ parameters, update, runSimulation }: { parameters: MotorParameters; update: <K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) => void; runSimulation: () => void }) {
+function MotorParameterPanel({ parameters, update }: { parameters: MotorParameters; update: <K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) => void }) {
   const validationIssues = validateMotorInputs(parameters);
   const grainMode = parameters.grainConfiguration ?? "BATES";
   const mainFields: Array<[MotorNumericFieldKey, string, string, string]> = [
@@ -1855,7 +1884,7 @@ function MotorParameterPanel({ parameters, update, runSimulation }: { parameters
         <p className="mt-1 text-xs text-orange-50/48">SI dimensions update the geometry preview immediately.</p>
       </div>
       <label className="mt-4 block text-sm text-orange-50/65">Motor project name<input value={parameters.projectName} onChange={(event) => update("projectName", event.target.value)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" /></label>
-      <label className="mt-4 block text-sm text-orange-50/65">Propellant profile<select value={parameters.propellantProfileName} onChange={(event) => update("propellantProfileName", event.target.value)} className="mt-1 w-full rounded-md border border-white/10 bg-[#121421] px-3 py-2 text-orange-50">{propellantProfiles.map((profile) => <option key={profile}>{profile}</option>)}</select><span className="mt-1 block text-[11px] text-orange-50/42">Public metadata profile only. Exact formulation and process notes are intentionally excluded.</span></label>
+      <label className="mt-4 block text-sm text-orange-50/65">Propellant profile<select value={parameters.propellantProfileName} onChange={(event) => update("propellantProfileName", event.target.value)} className="mt-1 w-full rounded-md border border-white/10 bg-[#121421] px-3 py-2 text-orange-50">{propellantProfiles.map((profile) => <option key={profile}>{profile}</option>)}</select><span className="mt-1 block text-[11px] text-orange-50/42">Pressure-regime strand-burner data. Batch-specific static-fire calibration remains required.</span></label>
       <label className="mt-4 block text-sm text-orange-50/65">Starting geometry
         <select
           defaultValue=""
@@ -1925,7 +1954,6 @@ function MotorParameterPanel({ parameters, update, runSimulation }: { parameters
       ) : (
         <p className="mt-4 rounded-md border border-emerald-200/20 bg-emerald-200/10 px-3 py-2 text-xs text-emerald-100">Inputs pass the pre-computation geometry checks.</p>
       )}
-      <Button className="mt-5 w-full" onClick={runSimulation}><Calculator className="h-4 w-4" />Simulate motor</Button>
     </Card>
   );
 }
@@ -2228,7 +2256,7 @@ function MotorCallout({ x, y, text }: { x: number; y: number; text: string }) {
   );
 }
 
-function MotorPerformanceSummary({ result, parameters, compareMotors, setCompareMotors, onSave, onNozzle, onExportRasp }: { result: MotorSimulationResult; parameters: MotorParameters; compareMotors: boolean; setCompareMotors: (value: boolean) => void; onSave: () => void; onNozzle: () => void; onExportRasp: () => void }) {
+function MotorPerformanceSummary({ result, parameters, analysisReady, onSave, onNozzle, onExportRasp }: { result: MotorSimulationResult; parameters: MotorParameters; analysisReady: boolean; onSave: () => void; onNozzle: () => void; onExportRasp: () => void }) {
   const summary = summarizeMotor(result, parameters);
   const copyCsv = () => {
     const rows = [
@@ -2250,7 +2278,7 @@ function MotorPerformanceSummary({ result, parameters, compareMotors, setCompare
     ["Thrust time", `${result.burnTimeS} s`, "computed burn duration"],
     ["Max thrust", `${result.peakThrustN} N`, "peak curve value"],
     ["Total impulse", `${result.totalImpulseNs} N-s`, "integrated thrust"],
-    ["Delivered Isp", `${summary.averageIsp} s`, "curve average estimate"],
+    ["Predicted Isp", `${summary.averageIsp} s`, "impulse / consumed propellant"],
     ["Max CP", `${summary.maxPressureBar} bar`, `${summary.maxPressure} MPa`],
     ["Average CP", `${summary.averagePressureBar} bar`, `${summary.averagePressure} MPa`],
     ["Exit velocity", `Mach ${summary.exitMach}`, "derived cue"],
@@ -2262,12 +2290,12 @@ function MotorPerformanceSummary({ result, parameters, compareMotors, setCompare
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold">Motor performance</h2>
-          <p className="mt-1 text-sm text-orange-50/58">Internal-ballistics summary generated from the current input deck.</p>
+          <p className="mt-1 text-sm text-orange-50/58">Sourced transient internal-ballistics prediction synchronized to the current input deck.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={onSave}><Save className="h-4 w-4" />Save motor</Button>
-          <Button variant="outline" onClick={copyCsv}><Download className="h-4 w-4" />CSV</Button>
-          <Button variant="outline" onClick={onExportRasp}><Download className="h-4 w-4" />RASP export</Button>
+          <Button disabled={!analysisReady} onClick={onSave}><Save className="h-4 w-4" />Save motor</Button>
+          <Button disabled={!analysisReady} variant="outline" onClick={copyCsv}><Download className="h-4 w-4" />CSV</Button>
+          <Button disabled={!analysisReady} variant="outline" onClick={onExportRasp}><Download className="h-4 w-4" />RASP export</Button>
           <Button variant="outline" onClick={onNozzle}><Gauge className="h-4 w-4" />Nozzle design</Button>
           <Button asChild href="/build/motor/cfd" variant="outline"><Wind className="h-4 w-4" />Run CFD</Button>
         </div>
@@ -2284,13 +2312,22 @@ function MotorPerformanceSummary({ result, parameters, compareMotors, setCompare
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm text-cyan-100">
           <p>Expansion ratio: {summary.expansionRatio}:1 · optimum estimate: {summary.optimumExpansionRatio}:1 · port/throat: {summary.portToThroatRatio}</p>
-          <p className="mt-1 text-xs text-orange-50/46">{result.engineName ?? "SRM internal ballistics"} · combustion eff {summary.combustionEfficiency}% · nozzle eff {summary.nozzleEfficiency}% · delivered c* {summary.deliveredCStar || "n/a"} m/s</p>
+          <p className="mt-1 text-xs text-orange-50/46">{result.engineName ?? "SRM internal ballistics"} · combustion eff {summary.combustionEfficiency}% · nozzle eff {summary.nozzleEfficiency}% · model c* {summary.deliveredCStar || "n/a"} m/s</p>
         </div>
-        <label className="flex items-center gap-2 text-sm text-orange-50/65">
-          <input type="checkbox" checked={compareMotors} onChange={(event) => setCompareMotors(event.target.checked)} className="accent-orange-300" />
-          Compare measured curve
-        </label>
+        <p className="text-xs font-semibold text-amber-100/72">Predicted curve · no static-fire trace attached</p>
       </div>
+      <details className="mt-4 border-t border-white/10 pt-3">
+        <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.12em] text-orange-100/58">Method and limits</summary>
+        <div className="mt-3 grid gap-2 lg:grid-cols-2">
+          <div className="space-y-2">
+            {result.engineSource ? <p className="text-xs leading-5 text-cyan-100/68">{result.engineSource}</p> : null}
+            {result.modelNotes?.map((note) => <p key={note} className="text-xs leading-5 text-orange-50/52">{note}</p>)}
+          </div>
+          <div className="space-y-2">
+            {result.warnings.map((warning) => <p key={warning} className="rounded-md border border-amber-200/15 bg-amber-200/[0.06] px-3 py-2 text-xs leading-5 text-amber-100/78">{warning}</p>)}
+          </div>
+        </div>
+      </details>
     </Card>
   );
 }

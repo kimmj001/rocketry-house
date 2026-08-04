@@ -7,6 +7,7 @@
     "build": "node scripts/build-for-hosting.mjs",
     "build:next": "next build",
     "test:cfd": "tsx --test tests/cfd/*.test.ts",
+    "test:motor": "tsx --test tests/motor/*.test.ts",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
