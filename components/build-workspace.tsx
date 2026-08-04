@@ -1668,26 +1668,186 @@ function FinShapeDesigner({ component, updateComponent }: { component: RocketCom
   );
 }
 
+type MotorNumericFieldKey =
+  | "casingInnerDiameterMm"
+  | "casingOuterDiameterMm"
+  | "casingLengthMm"
+  | "dryMassG"
+  | "grainCount"
+  | "grainLengthMm"
+  | "grainOuterDiameterMm"
+  | "coreDiameterMm"
+  | "nozzleThroatMm"
+  | "nozzleExitMm"
+  | "expansionRatio"
+  | "slotOffsetMm"
+  | "slotWidthMm"
+  | "slotDepthMm";
+
+type MotorNumberBounds = {
+  min: number;
+  max: number;
+  step?: number;
+  integer?: boolean;
+  minMessage?: string;
+  maxMessage?: string;
+};
+
+function getMotorNumberBounds(parameters: MotorParameters, key: MotorNumericFieldKey): MotorNumberBounds {
+  const grainStackLength = Math.max(parameters.grainCount, 1) * Math.max(parameters.grainLengthMm, 0.1);
+  const slotOffset = Math.max(parameters.slotOffsetMm ?? 0, 0);
+  const slotWidth = Math.max(parameters.slotWidthMm ?? 0.5, 0.5);
+
+  switch (key) {
+    case "casingInnerDiameterMm": {
+      const min = Math.max(2, parameters.grainOuterDiameterMm + 0.5);
+      const max = Math.max(min, parameters.casingOuterDiameterMm - 0.5);
+      return {
+        min,
+        max,
+        step: 0.1,
+        minMessage: `Geometry lower limit reached: chamber ID must remain at least 0.5 mm larger than the ${parameters.grainOuterDiameterMm} mm grain OD.`,
+        maxMessage: `Geometry upper limit reached: chamber ID must remain smaller than the ${parameters.casingOuterDiameterMm} mm case OD.`
+      };
+    }
+    case "casingOuterDiameterMm":
+      return { min: parameters.casingInnerDiameterMm + 0.5, max: 1000, step: 0.1, minMessage: `Geometry lower limit reached: case OD must exceed the ${parameters.casingInnerDiameterMm} mm chamber ID.` };
+    case "casingLengthMm":
+      return { min: grainStackLength, max: 5000, step: 0.1, minMessage: `Geometry lower limit reached: the current grain stack occupies ${Number(grainStackLength.toFixed(2))} mm.` };
+    case "dryMassG":
+      return { min: 1, max: 100000, step: 1 };
+    case "grainCount": {
+      const max = Math.max(1, Math.min(50, Math.floor(parameters.casingLengthMm / Math.max(parameters.grainLengthMm, 0.1))));
+      return { min: 1, max, step: 1, integer: true, maxMessage: `Geometry upper limit reached: only ${max} current-length grain segment${max === 1 ? " fits" : "s fit"} inside the ${parameters.casingLengthMm} mm chamber.` };
+    }
+    case "grainLengthMm":
+      return { min: 1, max: Math.max(1, parameters.casingLengthMm / Math.max(parameters.grainCount, 1)), step: 0.1, maxMessage: `Geometry upper limit reached: ${parameters.grainCount} segments must fit inside the ${parameters.casingLengthMm} mm chamber.` };
+    case "grainOuterDiameterMm":
+      return {
+        min: parameters.coreDiameterMm + 0.5,
+        max: Math.max(parameters.coreDiameterMm + 0.5, parameters.casingInnerDiameterMm - 0.5),
+        step: 0.1,
+        minMessage: `Geometry lower limit reached: grain OD must remain larger than the ${parameters.coreDiameterMm} mm core.`,
+        maxMessage: `Geometry upper limit reached: grain OD requires 0.5 mm diametral clearance inside the ${parameters.casingInnerDiameterMm} mm chamber.`
+      };
+    case "coreDiameterMm":
+      return { min: 0.5, max: Math.max(0.5, parameters.grainOuterDiameterMm - 0.5), step: 0.1, maxMessage: `Mathematical upper limit reached: core diameter must remain smaller than the ${parameters.grainOuterDiameterMm} mm grain OD.` };
+    case "nozzleThroatMm": {
+      const max = Math.max(0.5, Math.min(parameters.casingInnerDiameterMm * 0.6 - 0.1, parameters.nozzleExitMm - 0.1));
+      return { min: 0.5, max, step: 0.1, maxMessage: `Flow-geometry upper limit reached: throat diameter must remain below both 60% of chamber ID and the ${parameters.nozzleExitMm} mm exit.` };
+    }
+    case "nozzleExitMm":
+      return { min: parameters.nozzleThroatMm + 0.1, max: 500, step: 0.1, minMessage: `Mathematical lower limit reached: exit diameter must exceed the ${parameters.nozzleThroatMm} mm throat for a diverging section.` };
+    case "expansionRatio":
+      return { min: 1.01, max: Math.min(100, (500 / Math.max(parameters.nozzleThroatMm, 0.5)) ** 2), step: 0.01, minMessage: "Mathematical lower limit reached: expansion ratio must be greater than 1.00." };
+    case "slotOffsetMm": {
+      const max = Math.max(0, parameters.grainOuterDiameterMm / 2 - slotWidth / 2 - 0.25);
+      return { min: 0, max, step: 0.1, maxMessage: `Geometry upper limit reached: the slot must remain inside the ${parameters.grainOuterDiameterMm} mm grain OD.` };
+    }
+    case "slotWidthMm": {
+      const max = Math.max(0.5, parameters.grainOuterDiameterMm - slotOffset * 2 - 0.5);
+      return { min: 0.5, max, step: 0.1, maxMessage: `Geometry upper limit reached: slot width must remain inside the grain at the current ${slotOffset} mm offset.` };
+    }
+    case "slotDepthMm":
+      return { min: 0.5, max: Math.max(0.5, parameters.grainOuterDiameterMm / 2 - slotOffset - 0.25), step: 0.1, maxMessage: "Geometry upper limit reached: slot depth has reached the outer grain boundary." };
+  }
+}
+
+function MotorNumberField({ label, value, unit, help, bounds, onCommit }: { label: string; value: number; unit?: string; help?: string; bounds: MotorNumberBounds; onCommit: (value: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+  const [warning, setWarning] = useState<string | null>(null);
+  const committedValueRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setDraft(String(value));
+    if (committedValueRef.current !== null && Math.abs(committedValueRef.current - value) < 0.0001) {
+      committedValueRef.current = null;
+    } else {
+      setWarning(null);
+    }
+  }, [bounds.max, bounds.min, value]);
+
+  const normalize = (rawValue: string, commit: boolean) => {
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) {
+      if (commit) {
+        setDraft(String(value));
+        setWarning("A finite number is required. The last valid value was kept.");
+      }
+      return;
+    }
+
+    const wholeValue = bounds.integer ? Math.round(parsed) : parsed;
+    const nextValue = Math.min(bounds.max, Math.max(bounds.min, wholeValue));
+    let nextWarning: string | null = null;
+    if (parsed < bounds.min) nextWarning = bounds.minMessage ?? `Lower limit reached: minimum ${Number(bounds.min.toFixed(3))}${unit ? ` ${unit}` : ""}.`;
+    else if (parsed > bounds.max) nextWarning = bounds.maxMessage ?? `Upper limit reached: maximum ${Number(bounds.max.toFixed(3))}${unit ? ` ${unit}` : ""}.`;
+    else if (bounds.integer && parsed !== wholeValue) nextWarning = `Whole number required: rounded to ${wholeValue}.`;
+
+    if (commit || nextWarning === null) {
+      committedValueRef.current = nextValue;
+      onCommit(nextValue);
+      if (commit) setDraft(String(Number(nextValue.toFixed(bounds.integer ? 0 : 3))));
+    }
+    setWarning(nextWarning);
+  };
+
+  return (
+    <label className="block text-xs text-orange-50/58">{label}
+      <input
+        type="number"
+        min={bounds.min}
+        max={bounds.max}
+        step={bounds.step ?? 0.1}
+        value={draft}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          normalize(event.target.value, false);
+        }}
+        onBlur={() => normalize(draft, true)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+        }}
+        aria-invalid={warning ? true : undefined}
+        className={`mt-1 w-full rounded-md border bg-white/5 px-3 py-2 text-sm text-orange-50 ${warning ? "border-rose-400/70" : "border-white/10"}`}
+      />
+      {unit ? <span className="mt-1 block text-[10px] text-orange-50/40">{unit}</span> : null}
+      {help ? <span className="mt-1 block text-[10px] text-orange-50/36">{help}</span> : null}
+      {warning ? <span className="mt-1 block text-[10px] font-semibold leading-4 text-rose-300">{warning}</span> : null}
+    </label>
+  );
+}
+
 function MotorParameterPanel({ parameters, update, runSimulation }: { parameters: MotorParameters; update: <K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) => void; runSimulation: () => void }) {
   const validationIssues = validateMotorInputs(parameters);
   const grainMode = parameters.grainConfiguration ?? "BATES";
-  const mainFields: Array<[keyof MotorParameters, string, string, string]> = [
+  const mainFields: Array<[MotorNumericFieldKey, string, string, string]> = [
     ["casingInnerDiameterMm", "Combustion chamber diameter", "mm", "Inside case / liner clearance"],
     ["nozzleThroatMm", "Throat diameter", "mm", "Used for Kn and pressure estimate"],
     ["casingLengthMm", "Combustion chamber length", "mm", "From forward bulkhead to throat"],
     ["dryMassG", "Dry hardware mass", "g", "Case, closures, nozzle, retention"]
   ];
-  const grainFields: Array<[keyof MotorParameters, string, string]> = [
+  const grainFields: Array<[MotorNumericFieldKey, string, string]> = [
     ["grainOuterDiameterMm", "Grain outer diameter", "mm"],
     ["coreDiameterMm", "Grain core diameter", "mm"],
     ["grainLengthMm", "Grain segment length", "mm"],
     ["grainCount", "Number of segments", ""]
   ];
-  const cSlotFields: Array<[keyof MotorParameters, string, string]> = [
+  const cSlotFields: Array<[MotorNumericFieldKey, string, string]> = [
     ["slotOffsetMm", "Slot offset", "mm"],
     ["slotWidthMm", "Slot width", "mm"],
     ["slotDepthMm", "Slot depth", "mm"]
   ];
+  const commitNumber = (key: MotorNumericFieldKey, value: number) => {
+    update(key, value as never);
+    if (key === "nozzleThroatMm" || key === "nozzleExitMm") {
+      const throat = key === "nozzleThroatMm" ? value : parameters.nozzleThroatMm;
+      const exit = key === "nozzleExitMm" ? value : parameters.nozzleExitMm;
+      update("expansionRatio", Number(((exit / Math.max(throat, 0.5)) ** 2).toFixed(2)) as never);
+    } else if (key === "expansionRatio") {
+      update("nozzleExitMm", Number((parameters.nozzleThroatMm * Math.sqrt(value)).toFixed(2)) as never);
+    }
+  };
   return (
     <Card className="p-5 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto xl:[scrollbar-color:rgba(255,255,255,0.18)_transparent] xl:[scrollbar-width:thin]">
       <div>
@@ -1714,11 +1874,7 @@ function MotorParameterPanel({ parameters, update, runSimulation }: { parameters
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3">
         {mainFields.map(([key, label, unit, help]) => (
-          <label key={key} className="text-xs text-orange-50/58">{label}
-            <input type="number" value={parameters[key] as number} onChange={(event) => update(key, Number(event.target.value) as never)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-orange-50" />
-            {unit ? <span className="mt-1 block text-[10px] text-orange-50/40">{unit}</span> : null}
-            <span className="mt-1 block text-[10px] text-orange-50/36">{help}</span>
-          </label>
+          <MotorNumberField key={key} label={label} value={(parameters[key] as number | undefined) ?? 0} unit={unit} help={help} bounds={getMotorNumberBounds(parameters, key)} onCommit={(value) => commitNumber(key, value)} />
         ))}
       </div>
       <div className="mt-5 border-t border-white/10 pt-4">
@@ -1728,10 +1884,7 @@ function MotorParameterPanel({ parameters, update, runSimulation }: { parameters
       <p className="mt-2 text-xs leading-5 text-orange-50/48">{grainGeometryModes.find(([name]) => name === grainMode)?.[1]}</p>
       <div className="mt-4 grid grid-cols-2 gap-3">
         {grainFields.map(([key, label, unit]) => (
-          <label key={key} className="text-xs text-orange-50/58">{label}
-            <input type="number" value={parameters[key] as number} onChange={(event) => update(key, Number(event.target.value) as never)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-orange-50" />
-            {unit ? <span className="mt-1 block text-[10px] text-orange-50/40">{unit}</span> : null}
-          </label>
+          <MotorNumberField key={key} label={label} value={(parameters[key] as number | undefined) ?? 0} unit={unit} bounds={getMotorNumberBounds(parameters, key)} onCommit={(value) => commitNumber(key, value)} />
         ))}
       </div>
       <div className="mt-4 grid grid-cols-3 gap-2">
@@ -1748,19 +1901,21 @@ function MotorParameterPanel({ parameters, update, runSimulation }: { parameters
           <p className="text-sm font-semibold text-cyan-100">C-slot parameters</p>
           <div className="mt-3 grid grid-cols-3 gap-2">
             {cSlotFields.map(([key, label, unit]) => (
-              <label key={key} className="text-xs text-orange-50/58">{label}
-                <input type="number" value={(parameters[key] as number | undefined) ?? 0} onChange={(event) => update(key, Number(event.target.value) as never)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-2 py-2 text-xs text-orange-50" />
-                <span className="mt-1 block text-[10px] text-orange-50/40">{unit}</span>
-              </label>
+              <MotorNumberField key={key} label={label} value={(parameters[key] as number | undefined) ?? 0} unit={unit} bounds={getMotorNumberBounds(parameters, key)} onCommit={(value) => commitNumber(key, value)} />
             ))}
           </div>
         </div>
       ) : null}
       <div className="mt-4 grid grid-cols-2 gap-3">
         {(["casingOuterDiameterMm", "nozzleExitMm", "expansionRatio"] as const).map((key) => (
-          <label key={key} className="text-xs text-orange-50/58">{key === "casingOuterDiameterMm" ? "Case outer diameter" : key === "nozzleExitMm" ? "Nozzle exit diameter" : "Expansion ratio"}
-            <input type="number" value={parameters[key] as number} onChange={(event) => update(key, Number(event.target.value) as never)} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-orange-50" />
-          </label>
+          <MotorNumberField
+            key={key}
+            label={key === "casingOuterDiameterMm" ? "Case outer diameter" : key === "nozzleExitMm" ? "Nozzle exit diameter" : "Expansion ratio"}
+            value={parameters[key]}
+            unit={key === "expansionRatio" ? undefined : "mm"}
+            bounds={getMotorNumberBounds(parameters, key)}
+            onCommit={(value) => commitNumber(key, value)}
+          />
         ))}
       </div>
       {validationIssues.length ? (
@@ -2405,6 +2560,8 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
     const nextExitRadius = throatRadius + safeValue * Math.tan((divergenceAngle * Math.PI) / 180);
     updateExit(Number(Math.max(parameters.nozzleThroatMm, nextExitRadius * 2).toFixed(1)));
   };
+  const convergenceLengthMax = Math.max(0.1, (((parameters.casingOuterDiameterMm - 0.5) / 2 - throatRadius) / Math.max(Math.tan((convergenceAngle * Math.PI) / 180), 0.001)));
+  const divergenceLengthMax = Math.max(0.1, ((250 - throatRadius) / Math.max(Math.tan((divergenceAngle * Math.PI) / 180), 0.001)));
   const saveNozzle = async () => {
     const trimmedName = nozzleName.trim();
     if (!trimmedName) {
@@ -2451,24 +2608,36 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
             </label>
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <label className="text-sm text-orange-50/65">Throat diameter
-              <input type="number" min="1" value={parameters.nozzleThroatMm} onChange={(event) => updateThroat(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
-            </label>
-            <label className="text-sm text-orange-50/65">Exit diameter
-              <input type="number" min="1" value={parameters.nozzleExitMm} onChange={(event) => updateExit(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
-            </label>
-            <label className="text-sm text-orange-50/65">Convergence angle
-              <input type="number" min="1" max="89" step="0.5" value={convergenceAngle} onChange={(event) => updateConvergenceAngle(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
-            </label>
-            <label className="text-sm text-orange-50/65">Divergence angle
-              <input type="number" min="1" max="89" step="0.5" value={divergenceAngle} onChange={(event) => updateDivergenceAngle(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
-            </label>
-            <label className="text-sm text-orange-50/65">Convergence length
-              <input type="number" step="0.1" value={Number(convergenceLength.toFixed(1))} onChange={(event) => updateConvergenceLength(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
-            </label>
-            <label className="text-sm text-orange-50/65">Divergence length
-              <input type="number" step="0.1" value={Number(divergenceLength.toFixed(1))} onChange={(event) => updateDivergenceLength(Number(event.target.value))} className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-orange-50" />
-            </label>
+            <MotorNumberField label="Throat diameter" value={parameters.nozzleThroatMm} unit="mm" bounds={getMotorNumberBounds(parameters, "nozzleThroatMm")} onCommit={updateThroat} />
+            <MotorNumberField label="Exit diameter" value={parameters.nozzleExitMm} unit="mm" bounds={getMotorNumberBounds(parameters, "nozzleExitMm")} onCommit={updateExit} />
+            <MotorNumberField
+              label="Convergence angle"
+              value={convergenceAngle}
+              unit="deg"
+              bounds={{ min: 5, max: 85, step: 0.5, minMessage: "Trigonometric lower limit reached: convergence angle is held above 5 deg.", maxMessage: "Trigonometric upper limit reached: convergence angle is held below 85 deg." }}
+              onCommit={updateConvergenceAngle}
+            />
+            <MotorNumberField
+              label="Divergence angle"
+              value={divergenceAngle}
+              unit="deg"
+              bounds={{ min: 5, max: 85, step: 0.5, minMessage: "Trigonometric lower limit reached: divergence angle is held above 5 deg.", maxMessage: "Trigonometric upper limit reached: divergence angle is held below 85 deg." }}
+              onCommit={updateDivergenceAngle}
+            />
+            <MotorNumberField
+              label="Convergence length"
+              value={Number(convergenceLength.toFixed(1))}
+              unit="mm"
+              bounds={{ min: 0.1, max: convergenceLengthMax, step: 0.1, maxMessage: `Geometry upper limit reached: convergence length is capped by the ${parameters.casingOuterDiameterMm} mm case OD.` }}
+              onCommit={updateConvergenceLength}
+            />
+            <MotorNumberField
+              label="Divergence length"
+              value={Number(divergenceLength.toFixed(1))}
+              unit="mm"
+              bounds={{ min: 0.1, max: divergenceLengthMax, step: 0.1, maxMessage: "Geometry upper limit reached: the resulting exit diameter has reached 500 mm." }}
+              onCommit={updateDivergenceLength}
+            />
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Metric label="Throat area" value={`${throatAreaMm2.toFixed(1)} mm2`} />
