@@ -81,6 +81,7 @@ export type SavedMotor = {
   burnTimeS: number;
   propellantProfileName: string;
   verificationStatus: MotorVerificationStatus;
+  nozzleDesignId?: string;
   parameters: MotorParameters;
   simulation: MotorSimulationResult;
   measuredCurve?: MotorCurvePoint[];

@@ -13,6 +13,7 @@ import { mockProjects } from "@/lib/mock-data";
 import { readMockUser } from "@/lib/auth";
 import { loadPersistentRecords, savePersistentRecord } from "@/lib/cloud-persistence";
 import { analyzeNozzleFlow, defaultMotorParameters, propellantProfiles, simulateMotor } from "@/lib/motor-simulation";
+import { applySavedNozzleToMotor, createSavedNozzleDesign, isSavedNozzleDesign, motorMatchesSavedNozzle } from "@/lib/nozzle-library";
 import { runRocketEstimateWithMotor } from "@/lib/rocket-simulation";
 import { sortComponents, totalLength } from "@/lib/cad/geometry";
 import type { MotorParameters, MotorSimulationResult, SavedMotor } from "@/types/motor";
@@ -387,11 +388,28 @@ export function MotorBuilder() {
   const [visibility, setVisibility] = useState<"private" | "public" | "unlisted">("private");
   const [license, setLicense] = useState("CC BY-NC 4.0");
   const [nozzleOpen, setNozzleOpen] = useState(false);
+  const [savedNozzles, setSavedNozzles] = useState<SavedNozzleDesign[]>([]);
+  const [savedNozzle, setSavedNozzle] = useState<SavedNozzleDesign | null>(null);
   const [saveStatus, setSaveStatus] = useState("Motor not saved yet.");
   const parameterKey = JSON.stringify(parameters);
   const result = analysis.result;
   const analysisCurrent = analysis.key === parameterKey && analysisStatus === "current";
+  const nozzleCurrent = savedNozzle ? motorMatchesSavedNozzle(parameters, savedNozzle) : false;
   const summary = summarizeMotor(result, analysis.parameters);
+
+  useEffect(() => {
+    let active = true;
+    void loadPersistentRecords<SavedNozzleDesign>(SAVED_NOZZLE_COLLECTION).then((records) => {
+      if (!active) return;
+      setSavedNozzles(records
+        .map((record) => record.payload)
+        .filter(isSavedNozzleDesign)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const issues = validateMotorInputs(parameters);
@@ -420,6 +438,19 @@ export function MotorBuilder() {
     setSaveStatus("Unsaved changes.");
   }
 
+  function loadSavedNozzle(nozzleId: string) {
+    const nozzle = savedNozzles.find((item) => item.id === nozzleId);
+    if (!nozzle) return;
+    setParameters((current) => applySavedNozzleToMotor(current, nozzle));
+    setSavedNozzle(nozzle);
+    setSaveStatus(`Loaded saved nozzle: ${nozzle.name}.`);
+  }
+
+  function handleNozzleSaved(nozzle: SavedNozzleDesign) {
+    setSavedNozzle(nozzle);
+    setSavedNozzles((current) => [nozzle, ...current.filter((item) => item.id !== nozzle.id)]);
+  }
+
   async function saveMotor() {
     if (!analysisCurrent) return;
     const analyzedParameters = analysis.parameters;
@@ -439,6 +470,7 @@ export function MotorBuilder() {
       burnTimeS: result.burnTimeS,
       propellantProfileName: analyzedParameters.propellantProfileName,
       verificationStatus: "Pre-flight analysis",
+      nozzleDesignId: nozzleCurrent ? savedNozzle?.id : undefined,
       parameters: analyzedParameters,
       simulation: result,
       createdAt: new Date().toISOString().slice(0, 10),
@@ -468,7 +500,7 @@ export function MotorBuilder() {
               {analysisStatus === "current" ? "Live result current" : analysisStatus === "updating" ? "Updating result" : "Resolve input limits"}
             </div>
             <Button variant="outline" onClick={() => setNozzleOpen(true)}><Gauge className="h-4 w-4" />Nozzle design</Button>
-            <Button asChild href="/build/motor/cfd" variant="outline"><Wind className="h-4 w-4" />Run CFD</Button>
+            <SavedNozzleCfdButton nozzleId={nozzleCurrent ? savedNozzle?.id : undefined} />
             <Button variant="outline" disabled={!analysisCurrent} onClick={() => setModalOpen(true)}><Save className="h-4 w-4" />Save</Button>
           </div>
         </header>
@@ -482,16 +514,21 @@ export function MotorBuilder() {
 
         <div className="mt-3 flex flex-col gap-2 border-y border-white/8 bg-black/15 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
           <p className="flex items-center gap-2 text-orange-50/58"><ShieldCheck className="h-4 w-4 shrink-0 text-amber-200" />Pre-flight estimate only. Follow applicable safety codes.</p>
-          <p className="shrink-0 text-orange-100/58">{saveStatus}</p>
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-right">
+            <p className="shrink-0 text-orange-100/58">{saveStatus}</p>
+            <p className={`shrink-0 font-semibold ${nozzleCurrent ? "text-emerald-200" : "text-amber-200"}`}>
+              {nozzleCurrent ? `CFD linked to saved nozzle: ${savedNozzle?.name}` : savedNozzle ? "Nozzle changed. Save it again before CFD." : "Save the nozzle before CFD."}
+            </p>
+          </div>
         </div>
 
         <section className="mt-5 grid min-w-0 gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
           <aside className="min-w-0 xl:sticky xl:top-24 xl:self-start">
-            <MotorParameterPanel parameters={parameters} update={update} />
+            <MotorParameterPanel parameters={parameters} update={update} savedNozzles={savedNozzles} activeNozzleId={nozzleCurrent ? savedNozzle?.id : undefined} onLoadNozzle={loadSavedNozzle} />
           </aside>
           <div className="min-w-0 space-y-5">
             <MotorCrossSectionView parameters={parameters} />
-            <MotorPerformanceSummary result={result} parameters={analysis.parameters} analysisReady={analysisCurrent} onSave={() => setModalOpen(true)} onNozzle={() => setNozzleOpen(true)} onExportRasp={() => exportRaspMotor(analysis.parameters, result)} />
+            <MotorPerformanceSummary result={result} parameters={analysis.parameters} analysisReady={analysisCurrent} cfdNozzleId={nozzleCurrent ? savedNozzle?.id : undefined} onSave={() => setModalOpen(true)} onNozzle={() => setNozzleOpen(true)} onExportRasp={() => exportRaspMotor(analysis.parameters, result)} />
             <MotorCurveChart result={result} measuredCurve={undefined} />
           </div>
         </section>
@@ -522,7 +559,7 @@ export function MotorBuilder() {
           onSave={saveMotor}
         />
       ) : null}
-      {nozzleOpen ? <NozzleDesignModal parameters={parameters} update={update} onClose={() => setNozzleOpen(false)} /> : null}
+      {nozzleOpen ? <NozzleDesignModal parameters={parameters} update={update} savedNozzle={savedNozzle} onSaved={handleNozzleSaved} onClose={() => setNozzleOpen(false)} /> : null}
     </main>
   );
 }
@@ -1847,7 +1884,7 @@ function MotorNumberField({ label, value, unit, help, bounds, onCommit }: { labe
   );
 }
 
-function MotorParameterPanel({ parameters, update }: { parameters: MotorParameters; update: <K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) => void }) {
+function MotorParameterPanel({ parameters, update, savedNozzles, activeNozzleId, onLoadNozzle }: { parameters: MotorParameters; update: <K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) => void; savedNozzles: SavedNozzleDesign[]; activeNozzleId?: string; onLoadNozzle: (nozzleId: string) => void }) {
   const validationIssues = validateMotorInputs(parameters);
   const grainMode = parameters.grainConfiguration ?? "BATES";
   const mainFields: Array<[MotorNumericFieldKey, string, string, string]> = [
@@ -1901,6 +1938,13 @@ function MotorParameterPanel({ parameters, update }: { parameters: MotorParamete
       <div className="mt-5 border-t border-white/10 pt-4">
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-orange-100/52">Case and nozzle</p>
       </div>
+      <label className="mt-3 block text-sm text-orange-50/65">Saved nozzle revision
+        <select value={activeNozzleId ?? ""} onChange={(event) => onLoadNozzle(event.target.value)} className="mt-1 w-full rounded-md border border-white/10 bg-[#121421] px-3 py-2 text-orange-50">
+          <option value="" disabled>{savedNozzles.length ? "Choose a saved nozzle" : "No saved nozzles"}</option>
+          {savedNozzles.map((nozzle) => <option key={nozzle.id} value={nozzle.id}>{nozzle.name}</option>)}
+        </select>
+        <span className="mt-1 block text-[11px] leading-4 text-orange-50/42">Loading a revision updates the motor nozzle fields. Any later edit becomes a synchronized draft until you save the nozzle again.</span>
+      </label>
       <div className="mt-3 grid grid-cols-2 gap-3">
         {mainFields.map(([key, label, unit, help]) => (
           <MotorNumberField key={key} label={label} value={(parameters[key] as number | undefined) ?? 0} unit={unit} help={help} bounds={getMotorNumberBounds(parameters, key)} onCommit={(value) => commitNumber(key, value)} />
@@ -2256,7 +2300,14 @@ function MotorCallout({ x, y, text }: { x: number; y: number; text: string }) {
   );
 }
 
-function MotorPerformanceSummary({ result, parameters, analysisReady, onSave, onNozzle, onExportRasp }: { result: MotorSimulationResult; parameters: MotorParameters; analysisReady: boolean; onSave: () => void; onNozzle: () => void; onExportRasp: () => void }) {
+function SavedNozzleCfdButton({ nozzleId }: { nozzleId?: string }) {
+  if (!nozzleId) {
+    return <Button variant="outline" disabled title="Save the current nozzle design before running CFD."><Wind className="h-4 w-4" />Run CFD</Button>;
+  }
+  return <Button asChild href={`/build/motor/cfd?nozzle=${encodeURIComponent(nozzleId)}`} variant="outline"><Wind className="h-4 w-4" />Run CFD</Button>;
+}
+
+function MotorPerformanceSummary({ result, parameters, analysisReady, cfdNozzleId, onSave, onNozzle, onExportRasp }: { result: MotorSimulationResult; parameters: MotorParameters; analysisReady: boolean; cfdNozzleId?: string; onSave: () => void; onNozzle: () => void; onExportRasp: () => void }) {
   const summary = summarizeMotor(result, parameters);
   const copyCsv = () => {
     const rows = [
@@ -2297,7 +2348,7 @@ function MotorPerformanceSummary({ result, parameters, analysisReady, onSave, on
           <Button disabled={!analysisReady} variant="outline" onClick={copyCsv}><Download className="h-4 w-4" />CSV</Button>
           <Button disabled={!analysisReady} variant="outline" onClick={onExportRasp}><Download className="h-4 w-4" />RASP export</Button>
           <Button variant="outline" onClick={onNozzle}><Gauge className="h-4 w-4" />Nozzle design</Button>
-          <Button asChild href="/build/motor/cfd" variant="outline"><Wind className="h-4 w-4" />Run CFD</Button>
+          <SavedNozzleCfdButton nozzleId={cfdNozzleId} />
         </div>
       </div>
       <div className="mt-5 grid gap-3 md:grid-cols-3 xl:grid-cols-5">
@@ -2522,9 +2573,9 @@ function MotorSaveModal(props: {
   );
 }
 
-function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorParameters; update: <K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) => void; onClose: () => void }) {
-  const [nozzleId] = useState(() => `nozzle-${Date.now()}`);
-  const [nozzleName, setNozzleName] = useState(() => `${parameters.projectName || "Untitled motor"} nozzle`);
+function NozzleDesignModal({ parameters, update, savedNozzle, onSaved, onClose }: { parameters: MotorParameters; update: <K extends keyof MotorParameters>(key: K, value: MotorParameters[K]) => void; savedNozzle: SavedNozzleDesign | null; onSaved: (nozzle: SavedNozzleDesign) => void; onClose: () => void }) {
+  const [nozzleId] = useState(() => savedNozzle?.id ?? `nozzle-${Date.now()}`);
+  const [nozzleName, setNozzleName] = useState(() => savedNozzle?.name ?? `${parameters.projectName || "Untitled motor"} nozzle`);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const convergenceAngle = Math.max(1, Math.min(89, parameters.convergenceAngleDeg ?? 60));
@@ -2607,26 +2658,18 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
     }
 
     const now = new Date().toISOString();
-    const nozzle: SavedNozzleDesign = {
+    const nozzle = createSavedNozzleDesign(parameters, {
       id: nozzleId,
       name: trimmedName,
-      sourceMotorName: parameters.projectName,
-      chamberDiameterMm: parameters.casingInnerDiameterMm,
-      throatDiameterMm: parameters.nozzleThroatMm,
-      exitDiameterMm: parameters.nozzleExitMm,
-      chamberLengthMm: Number(Math.max(parameters.casingInnerDiameterMm * 1.7, 60).toFixed(2)),
-      convergenceLengthMm: Number(convergenceLength.toFixed(3)),
-      divergenceLengthMm: Number(divergenceLength.toFixed(3)),
-      convergenceAngleDeg: convergenceAngle,
-      divergenceAngleDeg: divergenceAngle,
-      createdAt: now,
-      updatedAt: now
-    };
+      now,
+      createdAt: savedNozzle?.id === nozzleId ? savedNozzle.createdAt : undefined
+    });
 
     setSaving(true);
     setSaveStatus("Saving nozzle...");
     const result = await savePersistentRecord(SAVED_NOZZLE_COLLECTION, nozzle.id, nozzle);
     setSaving(false);
+    onSaved(nozzle);
     setSaveStatus(result.cloud ? "Nozzle saved to your account." : "Nozzle saved on this device.");
     window.dispatchEvent(new Event("rocketry-nozzles-change"));
   };
@@ -2713,13 +2756,13 @@ function NozzleDesignModal({ parameters, update, onClose }: { parameters: MotorP
             <text x={throatX + 54} y="285" fill="#bfdbfe" fontSize="13">divergence</text>
             <text x="68" y="306" fill="#94a3b8" fontSize="12">Saved geometry is transferred directly to the CFD body-fitted mesh.</text>
           </svg>
-          <p className="mt-4 rounded-md border border-amber-200/20 bg-amber-200/8 p-3 text-xs leading-5 text-amber-50/82">Rocketry House records nozzle geometry for analysis and data comparison. It does not provide manufacturing certification or hazardous build instructions.</p>
+          <p className="mt-4 rounded-md border border-amber-200/20 bg-amber-200/8 p-3 text-xs leading-5 text-amber-50/82">Saving commits this exact nozzle to Motor Builder and enables CFD for this saved revision. Later motor or nozzle edits stay synchronized as a draft, but CFD remains locked until the nozzle is saved again.</p>
           {saveStatus ? <p className="mt-3 text-sm text-emerald-200" role="status">{saveStatus}</p> : null}
         </div>
         <div className="shrink-0 border-t border-white/10 bg-[#111827]/95 px-5 py-4 backdrop-blur">
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose}>Close</Button>
-            <Button onClick={saveNozzle} disabled={saving || !nozzleName.trim()}><Save className="h-4 w-4" />{saving ? "Saving..." : "Save nozzle"}</Button>
+            <Button onClick={saveNozzle} disabled={saving || !nozzleName.trim()}><Save className="h-4 w-4" />{saving ? "Saving..." : savedNozzle ? "Update saved nozzle" : "Save nozzle"}</Button>
           </div>
         </div>
       </Card>

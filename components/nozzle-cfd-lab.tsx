@@ -502,7 +502,7 @@ function NumberControl({
 
 export function NozzleCfdLab() {
   const workerRef = useRef<Worker | null>(null);
-  const initialConfigRef = useRef<RansSolverConfig>(createInteractiveConfig());
+  const workerInitializedRef = useRef(false);
   const [config, setConfig] = useState<RansSolverConfig>(createInteractiveConfig);
   const [snapshot, setSnapshot] = useState<SolverSnapshot | null>(null);
   const [running, setRunning] = useState(false);
@@ -518,7 +518,8 @@ export function NozzleCfdLab() {
   const [colorSensitivity, setColorSensitivity] = useState(1);
   const [residualHistory, setResidualHistory] = useState<SolverResidualPoint[]>([]);
   const [savedNozzles, setSavedNozzles] = useState<SavedNozzleDesign[]>([]);
-  const [selectedNozzleId, setSelectedNozzleId] = useState("default");
+  const [selectedNozzleId, setSelectedNozzleId] = useState("");
+  const [loadingNozzles, setLoadingNozzles] = useState(true);
 
   useEffect(() => {
     const worker = new Worker(new URL("../lib/cfd/worker/cfd.worker.ts", import.meta.url), { type: "module" });
@@ -549,16 +550,17 @@ export function NozzleCfdLab() {
         return [...current.slice(-119), residual];
       });
     };
-    transferFreeMessage(worker, { type: "initialize", config: initialConfigRef.current });
     return () => {
       worker.terminate();
       workerRef.current = null;
+      workerInitializedRef.current = false;
     };
   }, []);
 
   useEffect(() => {
     let active = true;
     const loadNozzles = async () => {
+      setLoadingNozzles(true);
       const records = await loadPersistentRecords<SavedNozzleDesign>(SAVED_NOZZLE_COLLECTION);
       if (!active) return;
       const nozzles = records
@@ -566,16 +568,30 @@ export function NozzleCfdLab() {
         .filter(isSavedNozzleDesign)
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
       setSavedNozzles(nozzles);
-      const latest = nozzles[0];
-      if (!latest) return;
-      setSelectedNozzleId(latest.id);
+      const requestedId = new URLSearchParams(window.location.search).get("nozzle");
+      const selected = requestedId ? nozzles.find((nozzle) => nozzle.id === requestedId) : nozzles[0];
+      setLoadingNozzles(false);
+      if (!selected) {
+        setSelectedNozzleId("");
+        setSnapshot(null);
+        setReady(false);
+        return;
+      }
+      setSelectedNozzleId(selected.id);
       setConfig((current) => {
-        const next = { ...current, geometry: savedNozzleToGeometry(latest, current.geometry) };
-        initialConfigRef.current = next;
+        const next = { ...current, geometry: savedNozzleToGeometry(selected, current.geometry) };
         setDirty(false);
         setError(null);
         setResidualHistory([]);
-        if (workerRef.current) transferFreeMessage(workerRef.current, { type: "reset", config: next });
+        setSnapshot(null);
+        setReady(false);
+        if (workerRef.current) {
+          transferFreeMessage(workerRef.current, {
+            type: workerInitializedRef.current ? "reset" : "initialize",
+            config: next
+          });
+          workerInitializedRef.current = true;
+        }
         return next;
       });
     };
@@ -599,25 +615,25 @@ export function NozzleCfdLab() {
     setConfig(next);
     setDirty(true);
   };
-  const updateGeometry = (key: keyof RansSolverConfig["geometry"], value: number) => {
-    setSelectedNozzleId("custom");
-    updateConfig({ ...config, geometry: { ...config.geometry, [key]: value } });
-  };
   const selectNozzle = (id: string) => {
-    setSelectedNozzleId(id);
     const savedNozzle = savedNozzles.find((nozzle) => nozzle.id === id);
-    const geometry = id === "default"
-      ? structuredClone(DEFAULT_RANS_CONFIG.geometry)
-      : savedNozzle
-        ? savedNozzleToGeometry(savedNozzle, config.geometry)
-        : config.geometry;
-    const next = { ...config, geometry };
+    if (!savedNozzle) return;
+    setSelectedNozzleId(id);
+    const next = { ...config, geometry: savedNozzleToGeometry(savedNozzle, config.geometry) };
     setConfig(next);
     setDirty(false);
     setError(null);
     setResidualHistory([]);
     setRunning(false);
-    if (workerRef.current) transferFreeMessage(workerRef.current, { type: "reset", config: next });
+    setSnapshot(null);
+    setReady(false);
+    if (workerRef.current) {
+      transferFreeMessage(workerRef.current, {
+        type: workerInitializedRef.current ? "reset" : "initialize",
+        config: next
+      });
+      workerInitializedRef.current = true;
+    }
   };
   const applyAndReset = () => {
     if (!workerRef.current) return;
@@ -628,7 +644,9 @@ export function NozzleCfdLab() {
     transferFreeMessage(workerRef.current, { type: "reset", config });
   };
 
-  const status = diagnostics?.failed
+  const status = !selectedNozzle
+    ? loadingNozzles ? "Loading saved nozzles" : "No saved nozzle"
+    : diagnostics?.failed
     ? "Failed"
     : diagnostics?.converged
       ? "Converged"
@@ -657,7 +675,7 @@ export function NozzleCfdLab() {
                 if (!workerRef.current) return;
                 transferFreeMessage(workerRef.current, { type: running ? "pause" : "start" });
               }}
-              disabled={!ready || Boolean(diagnostics?.failed)}
+              disabled={!selectedNozzle || !ready || Boolean(diagnostics?.failed)}
             >
               {running ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
               {running ? "Pause" : diagnostics?.iteration ? "Resume" : "Start"}
@@ -666,12 +684,12 @@ export function NozzleCfdLab() {
               size="sm"
               variant="outline"
               onClick={() => workerRef.current && transferFreeMessage(workerRef.current, { type: "step", iterations: 1 })}
-              disabled={!ready || running || Boolean(diagnostics?.failed)}
+              disabled={!selectedNozzle || !ready || running || Boolean(diagnostics?.failed)}
             >
               <StepForward className="h-4 w-4" />
               Step
             </Button>
-            <Button size="sm" variant="outline" onClick={applyAndReset} disabled={!ready}>
+            <Button size="sm" variant="outline" onClick={applyAndReset} disabled={!selectedNozzle || !ready}>
               <RotateCcw className="h-4 w-4" />
               {dirty ? "Apply & reset" : "Reset"}
             </Button>
@@ -686,8 +704,7 @@ export function NozzleCfdLab() {
               <h2 className="flex items-center gap-2 text-sm font-semibold"><FolderOpen className="h-4 w-4 text-orange-300" /> Saved nozzle</h2>
               <div className="mt-3 grid gap-3">
                 <SelectControl label="Nozzle geometry" value={selectedNozzleId} onChange={selectNozzle}>
-                  <option value="default">Default reference nozzle</option>
-                  {selectedNozzleId === "custom" ? <option value="custom">Custom geometry</option> : null}
+                  <option value="" disabled>{loadingNozzles ? "Loading saved nozzles..." : savedNozzles.length ? "Choose a saved nozzle" : "No saved nozzles"}</option>
                   {savedNozzles.map((nozzle) => <option key={nozzle.id} value={nozzle.id}>{nozzle.name}</option>)}
                 </SelectControl>
                 {selectedNozzle ? (
@@ -697,7 +714,10 @@ export function NozzleCfdLab() {
                 ) : savedNozzles.length ? (
                   <p className="text-xs leading-5 text-white/48">Select a saved nozzle to apply its exact geometry.</p>
                 ) : (
-                  <p className="text-xs leading-5 text-white/48">Save a nozzle from Motor performance to load its exact design here.</p>
+                  <div className="grid gap-3">
+                    <p className="text-xs leading-5 text-amber-100/72">CFD accepts saved nozzle revisions only. Save the current nozzle from Motor Builder first.</p>
+                    <Button asChild href="/build/motor" size="sm" variant="outline">Open Motor Builder</Button>
+                  </div>
                 )}
               </div>
             </section>
@@ -774,16 +794,18 @@ export function NozzleCfdLab() {
             </section>
 
             <details className="border-t border-white/10 pt-5">
-              <summary className="cursor-pointer text-sm font-semibold text-white/80">Geometry</summary>
-              <div className="mt-3 grid gap-3">
-                <NumberControl label="Chamber radius" value={config.geometry.chamberRadiusM * 1000} step={1} min={2} onChange={(value) => updateGeometry("chamberRadiusM", value / 1000)} suffix="mm" />
-                <NumberControl label="Throat radius" value={config.geometry.throatRadiusM * 1000} step={0.5} min={1} onChange={(value) => updateGeometry("throatRadiusM", value / 1000)} suffix="mm" />
-                <NumberControl label="Exit radius" value={config.geometry.exitRadiusM * 1000} step={1} min={1} onChange={(value) => updateGeometry("exitRadiusM", value / 1000)} suffix="mm" />
-                <NumberControl label="Chamber length" value={config.geometry.chamberLengthM * 1000} step={5} min={5} onChange={(value) => updateGeometry("chamberLengthM", value / 1000)} suffix="mm" />
-                <NumberControl label="Convergent length" value={config.geometry.convergentLengthM * 1000} step={5} min={5} onChange={(value) => updateGeometry("convergentLengthM", value / 1000)} suffix="mm" />
-                <NumberControl label="Divergent length" value={config.geometry.divergentLengthM * 1000} step={5} min={5} onChange={(value) => updateGeometry("divergentLengthM", value / 1000)} suffix="mm" />
-                <NumberControl label="External domain length" value={config.geometry.externalLengthM} step={0.1} min={0.1} max={20} onChange={(value) => updateGeometry("externalLengthM", value)} suffix="m" />
-                <NumberControl label="Farfield radius" value={config.geometry.farfieldRadiusM * 1000} step={10} min={10} max={2000} onChange={(value) => updateGeometry("farfieldRadiusM", value / 1000)} suffix="mm" />
+              <summary className="cursor-pointer text-sm font-semibold text-white/80">Saved geometry and domain</summary>
+              <div className="mt-3 grid gap-2 text-xs text-white/58">
+                <p className="flex justify-between gap-3"><span>Chamber radius</span><span className="font-mono text-white/82">{(config.geometry.chamberRadiusM * 1000).toFixed(2)} mm</span></p>
+                <p className="flex justify-between gap-3"><span>Throat radius</span><span className="font-mono text-white/82">{(config.geometry.throatRadiusM * 1000).toFixed(2)} mm</span></p>
+                <p className="flex justify-between gap-3"><span>Exit radius</span><span className="font-mono text-white/82">{(config.geometry.exitRadiusM * 1000).toFixed(2)} mm</span></p>
+                <p className="flex justify-between gap-3"><span>Chamber length</span><span className="font-mono text-white/82">{(config.geometry.chamberLengthM * 1000).toFixed(2)} mm</span></p>
+                <p className="flex justify-between gap-3"><span>Convergent length</span><span className="font-mono text-white/82">{(config.geometry.convergentLengthM * 1000).toFixed(2)} mm</span></p>
+                <p className="flex justify-between gap-3"><span>Divergent length</span><span className="font-mono text-white/82">{(config.geometry.divergentLengthM * 1000).toFixed(2)} mm</span></p>
+              </div>
+              <div className="mt-4 grid gap-3 border-t border-white/10 pt-4">
+                <NumberControl label="External domain length" value={config.geometry.externalLengthM} step={0.1} min={0.1} max={20} onChange={(value) => updateConfig({ ...config, geometry: { ...config.geometry, externalLengthM: value } })} suffix="m" />
+                <NumberControl label="Farfield radius" value={config.geometry.farfieldRadiusM * 1000} step={10} min={10} max={2000} onChange={(value) => updateConfig({ ...config, geometry: { ...config.geometry, farfieldRadiusM: value / 1000 } })} suffix="mm" />
               </div>
             </details>
           </div>
