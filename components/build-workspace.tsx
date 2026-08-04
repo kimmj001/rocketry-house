@@ -1777,75 +1777,167 @@ function MotorParameterPanel({ parameters, update, runSimulation }: { parameters
 
 function MotorCrossSectionView({ parameters }: { parameters: MotorParameters }) {
   const grainMode = parameters.grainConfiguration ?? "Hollow cylinder";
-  const grainCount = Math.min(5, Math.max(1, Math.round(parameters.grainCount)));
-  const grainWidth = 330 / grainCount;
-  const throatRadius = Math.min(11, Math.max(4, (parameters.nozzleThroatMm / Math.max(parameters.nozzleExitMm, 1)) * 17));
-  const exitRadius = Math.min(34, Math.max(16, (parameters.nozzleExitMm / Math.max(parameters.casingInnerDiameterMm, 1)) * 42));
-  const portRadius = Math.min(31, Math.max(8, (parameters.coreDiameterMm / Math.max(parameters.grainOuterDiameterMm, 1)) * 48));
+  const inputGrainCount = Math.max(1, Math.round(parameters.grainCount));
+  const visibleGrainCount = Math.min(8, inputGrainCount);
+  const centerY = 150;
+  const chamberRadius = 54;
+  const caseRadius = 66;
+  const grainRadius = Math.min(51, Math.max(28, (parameters.grainOuterDiameterMm / Math.max(parameters.casingInnerDiameterMm, 1)) * chamberRadius));
+  const portRadius = Math.min(30, Math.max(7, (parameters.coreDiameterMm / Math.max(parameters.grainOuterDiameterMm, 1)) * grainRadius));
+  const throatRadius = Math.min(15, Math.max(5, (parameters.nozzleThroatMm / Math.max(parameters.casingInnerDiameterMm, 1)) * chamberRadius));
+  const exitRadius = Math.min(40, Math.max(15, (parameters.nozzleExitMm / Math.max(parameters.casingInnerDiameterMm, 1)) * chamberRadius));
+  const grainStackLength = inputGrainCount * parameters.grainLengthMm;
+  const grainSpan = Math.min(430, Math.max(150, (grainStackLength / Math.max(parameters.casingLengthMm, 1)) * 430));
+  const grainStartX = 104;
+  const grainGap = visibleGrainCount > 1 ? 5 : 0;
+  const grainWidth = Math.max(12, (grainSpan - grainGap * (visibleGrainCount - 1)) / visibleGrainCount);
+  const chamberTop = centerY - chamberRadius;
+  const chamberBottom = centerY + chamberRadius;
+  const grainTop = centerY - grainRadius;
+  const grainBottom = centerY + grainRadius;
+  const throatX = 650;
+  const exitX = 772;
   const isFinocyl = grainMode === "Finocyl" || grainMode === "Star";
   const isCSlot = grainMode === "C-slot";
+  const isMoonBurner = grainMode === "Moon burner";
   const finCount = isFinocyl ? 6 : 0;
+  const expansionRatio = ((parameters.nozzleExitMm / Math.max(parameters.nozzleThroatMm, 1)) ** 2).toFixed(2);
+  const unallocatedLength = Math.max(parameters.casingLengthMm - grainStackLength, 0);
+  const grainOccupancy = Math.min(100, (grainStackLength / Math.max(parameters.casingLengthMm, 1)) * 100);
+  const surfaceCode = (value: string | undefined, fallback: "Exposed" | "Inhibited") => (value ?? fallback) === "Exposed" ? "E" : "I";
 
   return (
     <Card className="p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="flex items-center gap-2 font-semibold"><Boxes className="h-5 w-5 text-cyan-200" />Live geometry preview</h2>
-          <p className="mt-1 text-sm text-orange-50/58">Side section and cross section update directly from the motor input deck.</p>
+          <h2 className="flex items-center gap-2 font-semibold"><Boxes className="h-5 w-5 text-cyan-200" />Motor geometry</h2>
+          <p className="mt-1 text-sm text-orange-50/58">Dimensioned longitudinal and grain sections from the current input deck.</p>
         </div>
         <span className="rounded-md border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-orange-50/70">{grainMode}</span>
       </div>
-      <div className="mt-5 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.55fr)_280px]">
-        <div className="min-w-0 rounded-lg border border-white/10 bg-slate-50 p-4 text-slate-800">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Side section</p>
-          <svg viewBox="0 0 740 270" role="img" aria-label="Solid rocket motor live side section preview" className="mt-3 h-auto w-full">
+      <div className="mt-5 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.6fr)_320px]">
+        <div className="min-w-0 self-start border border-white/10 bg-[#070b12] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-orange-50/48">Longitudinal section</p>
+            <p className="font-mono text-[11px] text-cyan-100/55">All dimensions in mm</p>
+          </div>
+          <svg viewBox="0 0 820 330" role="img" aria-label="Dimensioned solid rocket motor longitudinal section" className="mt-2 h-auto w-full">
             <defs>
-              <linearGradient id="liveCase" x1="0" x2="1"><stop offset="0%" stopColor="#425669" /><stop offset="100%" stopColor="#607689" /></linearGradient>
-              <linearGradient id="liveGrain" x1="0" x2="1"><stop offset="0%" stopColor="#f8fafc" /><stop offset="48%" stopColor="#e2e8f0" /><stop offset="100%" stopColor="#f8fafc" /></linearGradient>
-              <linearGradient id="liveNozzle" x1="0" x2="1"><stop offset="0%" stopColor="#94a3b8" /><stop offset="50%" stopColor="#f8fafc" /><stop offset="100%" stopColor="#94a3b8" /></linearGradient>
+              <marker id="motorDimensionArrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#67e8f9" />
+              </marker>
             </defs>
-            <rect x="24" y="64" width="492" height="118" rx="3" fill="url(#liveCase)" />
-            <rect x="43" y="80" width="452" height="86" rx="2" fill="#eef2f7" />
-            <rect x="58" y="92" width="418" height="62" rx="1" fill="url(#liveGrain)" stroke="#cbd5e1" />
-            {Array.from({ length: grainCount }, (_, index) => (
-              <line key={index} x1={58 + grainWidth * index} x2={58 + grainWidth * index} y1="92" y2="154" stroke="#94a3b8" strokeOpacity="0.75" />
+            <line x1="34" y1={centerY} x2="796" y2={centerY} stroke="#94a3b8" strokeDasharray="7 7" strokeOpacity="0.28" />
+
+            <rect x="58" y={centerY - caseRadius} width="510" height={caseRadius * 2} rx="5" fill="#94a3b8" />
+            <rect x="70" y={chamberTop - 4} width="486" height={chamberRadius * 2 + 8} fill="#22d3ee" fillOpacity="0.55" />
+            <rect x="76" y={chamberTop} width="474" height={chamberRadius * 2} fill="#111827" />
+            <rect x="38" y={centerY - caseRadius} width="42" height={caseRadius * 2} rx="4" fill="#cbd5e1" />
+            <rect x="51" y={centerY - 31} width="34" height="62" fill="#64748b" />
+
+            {Array.from({ length: visibleGrainCount }, (_, index) => (
+              <rect
+                key={index}
+                x={grainStartX + index * (grainWidth + grainGap)}
+                y={grainTop}
+                width={grainWidth}
+                height={grainRadius * 2}
+                rx="2"
+                fill="#f59e0b"
+                stroke="#fcd34d"
+                strokeOpacity="0.55"
+              />
             ))}
-            <rect x="84" y={123 - portRadius / 2} width="374" height={portRadius} rx={portRadius / 2} fill="#334155" />
-            <rect x="4" y="86" width="48" height="76" rx="4" fill="#52677a" />
-            <rect x="30" y="106" width="36" height="36" fill="#eef2f7" />
-            <path d={`M492 89 L532 ${123 - throatRadius} H548 L618 ${123 - exitRadius} M492 157 L532 ${123 + throatRadius} H548 L618 ${123 + exitRadius}`} fill="none" stroke="#64748b" strokeWidth="5" strokeLinejoin="miter" />
-            <rect x="532" y={123 - throatRadius} width="18" height={throatRadius * 2} rx="2" fill="#334155" />
-            <line x1="618" x2="618" y1={123 - exitRadius} y2={123 + exitRadius} stroke="#64748b" strokeWidth="3" />
-            <line x1="24" y1="123" x2="708" y2="123" stroke="#64748b" strokeDasharray="7 7" strokeOpacity="0.4" />
-            <text x="24" y="214" fill="#475569" fontSize="15">exit dia {parameters.nozzleExitMm} mm</text>
-            <text x="236" y="214" fill="#475569" fontSize="15">{grainCount} grain segment{grainCount > 1 ? "s" : ""}</text>
-            <text x="462" y="214" fill="#475569" fontSize="15">{parameters.nozzleThroatMm} mm throat</text>
+            <rect x={grainStartX} y={centerY - portRadius} width={grainSpan} height={portRadius * 2} rx={portRadius} fill="#111827" />
+
+            <path d={`M550 ${chamberTop} L${throatX - 12} ${centerY - throatRadius - 8} H${throatX + 12} L${exitX} ${centerY - exitRadius - 7} V${centerY + exitRadius + 7} L${throatX + 12} ${centerY + throatRadius + 8} H${throatX - 12} L550 ${chamberBottom} Z`} fill="#cbd5e1" />
+            <path d={`M550 ${centerY - 34} L${throatX - 12} ${centerY - throatRadius} H${throatX + 12} L${exitX} ${centerY - exitRadius} V${centerY + exitRadius} L${throatX + 12} ${centerY + throatRadius} H${throatX - 12} L550 ${centerY + 34} Z`} fill="#111827" />
+            <rect x={throatX - 12} y={centerY - throatRadius} width="24" height={throatRadius * 2} fill="#0b0f17" />
+
+            <line x1="58" y1="55" x2="568" y2="55" stroke="#67e8f9" strokeWidth="1.5" markerStart="url(#motorDimensionArrow)" markerEnd="url(#motorDimensionArrow)" />
+            <line x1="58" y1="63" x2="58" y2="45" stroke="#67e8f9" />
+            <line x1="568" y1="63" x2="568" y2="45" stroke="#67e8f9" />
+            <text x="313" y="43" textAnchor="middle" fill="#a5f3fc" fontSize="18" fontWeight="600">CASE LENGTH {parameters.casingLengthMm}</text>
+
+            <line x1="92" y1={chamberTop} x2="92" y2={chamberBottom} stroke="#67e8f9" strokeWidth="1.5" markerStart="url(#motorDimensionArrow)" markerEnd="url(#motorDimensionArrow)" />
+            <text x="82" y={centerY + 5} textAnchor="end" fill="#a5f3fc" fontSize="17">ID {parameters.casingInnerDiameterMm}</text>
+
+            <line x1={grainStartX} y1="253" x2={grainStartX + grainSpan} y2="253" stroke="#67e8f9" strokeWidth="1.5" markerStart="url(#motorDimensionArrow)" markerEnd="url(#motorDimensionArrow)" />
+            <line x1={grainStartX} y1={grainBottom + 5} x2={grainStartX} y2="261" stroke="#67e8f9" strokeOpacity="0.6" />
+            <line x1={grainStartX + grainSpan} y1={grainBottom + 5} x2={grainStartX + grainSpan} y2="261" stroke="#67e8f9" strokeOpacity="0.6" />
+            <text x={grainStartX + grainSpan / 2} y="275" textAnchor="middle" fill="#a5f3fc" fontSize="17">GRAIN STACK {grainStackLength} · {inputGrainCount} × {parameters.grainLengthMm}</text>
+
+            <line x1={throatX} y1={centerY - throatRadius} x2={throatX} y2={centerY + throatRadius} stroke="#fb923c" strokeWidth="2" markerStart="url(#motorDimensionArrow)" markerEnd="url(#motorDimensionArrow)" />
+            <text x={throatX} y="228" textAnchor="middle" fill="#fdba74" fontSize="16">THROAT Ø {parameters.nozzleThroatMm}</text>
+            <line x1={exitX} y1={centerY - exitRadius} x2={exitX} y2={centerY + exitRadius} stroke="#fb923c" strokeWidth="2" markerStart="url(#motorDimensionArrow)" markerEnd="url(#motorDimensionArrow)" />
+            <text x={exitX} y={centerY - exitRadius - 18} textAnchor="middle" fill="#fdba74" fontSize="16">EXIT Ø {parameters.nozzleExitMm}</text>
+
+            <text x="45" y="309" fill="#cbd5e1" fontSize="15">FORWARD CLOSURE</text>
+            <line x1="97" y1="295" x2="62" y2={centerY + caseRadius - 5} stroke="#64748b" />
+            <text x="304" y="309" fill="#fcd34d" fontSize="15">PROPELLANT GRAIN</text>
+            <line x1="374" y1="295" x2="374" y2={grainBottom - 8} stroke="#a16207" />
+            <text x="618" y="309" fill="#cbd5e1" fontSize="15">NOZZLE</text>
+            <line x1="648" y1="295" x2="680" y2={centerY + 29} stroke="#64748b" />
           </svg>
+          <div className="border-t border-white/10 pt-3">
+            <div className="flex items-center justify-between gap-3 text-[11px]">
+              <p className="font-semibold uppercase tracking-[0.12em] text-orange-50/45">Axial occupancy</p>
+              <p className="font-mono text-orange-50/52">{grainOccupancy.toFixed(1)}% grain · {unallocatedLength} mm unallocated</p>
+            </div>
+            <div className="mt-2 flex h-2 overflow-hidden bg-slate-800">
+              <span className="bg-amber-500" style={{ width: `${grainOccupancy}%` }} />
+              <span className="bg-slate-700" style={{ width: `${100 - grainOccupancy}%` }} />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-orange-50/55">
+              <p className="flex items-center gap-2"><span className="h-2.5 w-2.5 bg-slate-300" />Case / closure</p>
+              <p className="flex items-center gap-2"><span className="h-2.5 w-2.5 bg-amber-500" />Propellant</p>
+              <p className="flex items-center gap-2"><span className="h-2.5 w-2.5 bg-slate-900 ring-1 ring-white/25" />Chamber / port</p>
+              <p className="flex items-center gap-2"><span className="h-2.5 w-2.5 bg-cyan-400/70" />ID boundary</p>
+            </div>
+          </div>
         </div>
-        <div className="rounded-lg border border-white/10 bg-slate-50 p-4 text-slate-800">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Cross section</p>
-          <svg viewBox="0 0 230 230" role="img" aria-label="Motor grain cross section preview" className="mx-auto mt-4 h-52 w-52">
-            <circle cx="115" cy="115" r="92" fill="#52677a" />
-            <circle cx="115" cy="115" r="76" fill="#f8fafc" />
-            <circle cx="115" cy="115" r="68" fill="#52677a" />
+        <div className="self-start border border-white/10 bg-[#070b12] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-orange-50/48">Grain section</p>
+          <svg viewBox="0 0 280 250" role="img" aria-label="Color coded motor grain cross section" className="mx-auto mt-2 h-60 w-full max-w-[280px]">
+            <circle cx="140" cy="122" r="105" fill="#cbd5e1" />
+            <circle cx="140" cy="122" r="93" fill="#22d3ee" fillOpacity="0.72" />
+            <circle cx="140" cy="122" r="84" fill="#f59e0b" />
             {isFinocyl ? Array.from({ length: finCount }, (_, index) => {
               const angle = (index / finCount) * 360;
-              return <rect key={index} x="109" y="34" width="12" height="84" rx="4" fill="#f8fafc" transform={`rotate(${angle} 115 115)`} />;
+              return <rect key={index} x="133" y={122 - portRadius - 31} width="14" height={portRadius + 33} rx="6" fill="#111827" transform={`rotate(${angle} 140 122)`} />;
             }) : null}
-            {isCSlot ? <path d="M115 62 A53 53 0 1 1 80 155" fill="none" stroke="#f8fafc" strokeWidth="18" strokeLinecap="round" /> : null}
-            <circle cx="115" cy="115" r={portRadius} fill="#f8fafc" />
-            <circle cx="115" cy="115" r={Math.max(3, portRadius - 8)} fill="#52677a" opacity={isFinocyl || isCSlot ? 0 : 1} />
+            {isCSlot ? <rect x="140" y={122 - portRadius} width="77" height={portRadius * 2} rx={portRadius} fill="#111827" /> : null}
+            <circle cx={isMoonBurner ? 156 : 140} cy="122" r={portRadius} fill="#111827" />
+            <line x1={140 - grainRadius * 1.55} y1="230" x2={140 + grainRadius * 1.55} y2="230" stroke="#67e8f9" markerStart="url(#motorDimensionArrow)" markerEnd="url(#motorDimensionArrow)" />
+            <text x="140" y="247" textAnchor="middle" fill="#a5f3fc" fontSize="12">GRAIN Ø {parameters.grainOuterDiameterMm}</text>
+            <line x1={isMoonBurner ? 156 - portRadius : 140 - portRadius} y1="122" x2={isMoonBurner ? 156 + portRadius : 140 + portRadius} y2="122" stroke="#fb923c" markerStart="url(#motorDimensionArrow)" markerEnd="url(#motorDimensionArrow)" />
+            <text x="140" y="127" textAnchor="middle" fill="#fed7aa" fontSize="11" fontWeight="600">Ø {parameters.coreDiameterMm}</text>
           </svg>
-          <div className="mt-2 rounded-md bg-slate-100 p-3 text-sm text-slate-600">
-            <p><span className="font-semibold text-slate-800">{grainMode}</span> - core {parameters.coreDiameterMm} mm</p>
-            <p className="mt-1">Grain OD {parameters.grainOuterDiameterMm} mm - propellant {parameters.propellantProfileName}</p>
+          <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs text-orange-50/62">
+            <p className="flex items-center gap-2"><span className="h-2.5 w-2.5 bg-slate-300" />Case · Ø {parameters.casingOuterDiameterMm}</p>
+            <p className="flex items-center gap-2"><span className="h-2.5 w-2.5 bg-cyan-400/70" />Chamber · ID {parameters.casingInnerDiameterMm}</p>
+            <p className="flex items-center gap-2"><span className="h-2.5 w-2.5 bg-amber-500" />Propellant · Ø {parameters.grainOuterDiameterMm}</p>
+            <p className="flex items-center gap-2"><span className="h-2.5 w-2.5 bg-slate-900 ring-1 ring-white/25" />Port · Ø {parameters.coreDiameterMm}</p>
           </div>
         </div>
       </div>
-      <p className="mt-3 rounded-md border border-amber-200/20 bg-amber-200/8 p-3 text-xs leading-5 text-amber-50/75">
-        Visual preview only. Geometry is for simulation and comparison, not fabrication instruction or motor safety certification.
-      </p>
+      <div className="mt-4 grid overflow-hidden border border-white/10 bg-white/10 sm:grid-cols-2 sm:gap-px xl:grid-cols-4">
+        <GeometryReadout label="Case" value={`Ø ${parameters.casingOuterDiameterMm} / ID ${parameters.casingInnerDiameterMm} / L ${parameters.casingLengthMm}`} />
+        <GeometryReadout label="Grain stack" value={`${inputGrainCount} × ${parameters.grainLengthMm} = ${grainStackLength} mm`} />
+        <GeometryReadout label="Nozzle" value={`Ø ${parameters.nozzleThroatMm} → ${parameters.nozzleExitMm} / ε ${expansionRatio}`} />
+        <GeometryReadout label="Burn surfaces" value={`Core ${surfaceCode(parameters.coreSurface, "Exposed")} · Outer ${surfaceCode(parameters.outerSurface, "Inhibited")} · Ends ${surfaceCode(parameters.endsSurface, "Exposed")}`} />
+      </div>
+      <p className="mt-3 text-xs leading-5 text-orange-50/42">Geometry visualization for simulation review and comparison. Not a manufacturing drawing or safety certification.</p>
     </Card>
+  );
+}
+
+function GeometryReadout({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-h-[70px] bg-[#0a0e16] px-3 py-3">
+      <p className="text-[10px] uppercase tracking-[0.13em] text-orange-50/38">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-orange-50/82">{value}</p>
+    </div>
   );
 }
 function Motor3DViewer({ parameters }: { parameters: MotorParameters }) {
