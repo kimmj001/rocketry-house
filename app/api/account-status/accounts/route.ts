@@ -13,6 +13,7 @@ import type {
   AccountStorageSummary,
   ManagedAccount
 } from "@/lib/account-status-types";
+import { sortAccountsByRecentActivity } from "@/lib/account-status-order";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,7 +63,9 @@ export async function GET(request: NextRequest) {
   }
 
   const response = await buildAccountDirectory();
-  return NextResponse.json(response);
+  return NextResponse.json(response, {
+    headers: { "Cache-Control": "private, no-store, max-age=0" }
+  });
 }
 
 export async function PATCH(request: NextRequest) {
@@ -242,11 +245,11 @@ async function buildAccountDirectory(): Promise<AccountDirectoryResponse> {
       lastReviewedAt: status.lastReviewedAt,
       sourceLabels: uniqueSources([...account.sourceLabels, "cloud-status"])
     };
-  }).sort((left, right) => left.name.localeCompare(right.name));
+  });
 
   const activityByAccount = buildActivityByAccount(activityResult, authUsers, mergedAccounts);
   const planUsageByAccount = buildPlanUsageByAccount(activityResult, mergedAccounts);
-  const accountsWithActivity = mergedAccounts.map((account) => {
+  const accountsWithActivity = sortAccountsByRecentActivity(mergedAccounts.map((account) => {
     const activities = activityByAccount.get(account.key) ?? [];
     return {
       ...account,
@@ -255,7 +258,7 @@ async function buildAccountDirectory(): Promise<AccountDirectoryResponse> {
       lastActiveAt: activities[0]?.occurredAt,
       planUsage: planUsageByAccount.get(account.key)
     };
-  });
+  }));
 
   return {
     accounts: accountsWithActivity,

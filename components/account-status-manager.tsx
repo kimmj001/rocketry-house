@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Activity, ChevronDown, ChevronUp, Clock3, Cloud, CreditCard, Database, Download, FolderKanban, Heart, Lock, MessageSquare, RefreshCw, Search, ShieldAlert, UserCog, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,10 +15,12 @@ import type {
   AccountStorageSummary,
   ManagedAccount
 } from "@/lib/account-status-types";
-import { readLocalAccountActivities } from "@/lib/account-activity";
+import { ACCOUNT_ACTIVITY_EVENT, ACCOUNT_ACTIVITY_SIGNAL_KEY, readLocalAccountActivities } from "@/lib/account-activity";
+import { sortAccountsByRecentActivity } from "@/lib/account-status-order";
 import { STANDARD_LIMITS } from "@/lib/usage-limits";
 
 const STATUS_STORAGE_KEY = "rocketry-house.account-status-overrides";
+const ACCOUNT_DIRECTORY_REFRESH_EVENT = "rocketry-account-directory-refresh";
 
 type LocalAccountRecord = {
   user: AuthUser;
@@ -63,8 +65,14 @@ const sourceLabels: Record<AccountDirectorySource, string> = {
   "current-session": "Current"
 };
 
+function requestDirectoryRefresh(silent = false) {
+  window.dispatchEvent(new CustomEvent(ACCOUNT_DIRECTORY_REFRESH_EVENT, { detail: { silent } }));
+}
+
 export function AccountStatusManager() {
   const router = useRouter();
+  const refreshInFlightRef = useRef(false);
+  const refreshQueuedRef = useRef(false);
   const [accounts, setAccounts] = useState<ManagedAccount[]>([]);
   const [storageSummary, setStorageSummary] = useState<AccountStorageSummary>({ totalRecords: 0, collections: [] });
   const [query, setQuery] = useState("");
@@ -111,58 +119,93 @@ export function AccountStatusManager() {
   }, [accounts, directoryStatus.cloudProfiles]);
 
   useEffect(() => {
+    const refreshDirectory = async (silent = false) => {
+      if (refreshInFlightRef.current) {
+        refreshQueuedRef.current = true;
+        return;
+      }
+
+      refreshInFlightRef.current = true;
+      if (!silent) setDirectoryStatus((current) => ({ ...current, loading: true }));
+      const localAccounts = readLocalManagedAccounts();
+      const localSummary = readLocalStorageSummary();
+
+      try {
+        const response = await fetch("/api/account-status/accounts", { cache: "no-store" });
+        if (!response.ok) throw new Error(`Cloud directory returned ${response.status}.`);
+        const directory = await response.json() as AccountDirectoryResponse;
+        const mergedAccounts = mergeAccounts([...directory.accounts, ...localAccounts]);
+        setAccounts(mergedAccounts);
+        setStorageSummary(mergeStorageSummaries(directory.storageSummary, localSummary));
+        setDirectoryStatus({
+          loading: false,
+          syncedAt: directory.syncedAt,
+          cloudMode: directory.cloud.mode,
+          cloudProfiles: directory.cloud.profileRecords,
+          cloudStatuses: directory.cloud.statusRecords,
+          canListAuthUsers: directory.cloud.canListAuthUsers,
+          errors: directory.cloud.errors
+        });
+        if (!silent) setNotice(`Unified ${mergedAccounts.length} accounts from cloud and this browser.`);
+      } catch (error) {
+        setAccounts(localAccounts);
+        setStorageSummary(localSummary);
+        setDirectoryStatus({
+          loading: false,
+          cloudMode: "offline",
+          cloudProfiles: 0,
+          cloudStatuses: 0,
+          canListAuthUsers: false,
+          errors: [error instanceof Error ? error.message : "Cloud directory could not be loaded."]
+        });
+        if (!silent) setNotice("Cloud directory unavailable. Showing this browser's accounts only.");
+      } finally {
+        refreshInFlightRef.current = false;
+        if (refreshQueuedRef.current) {
+          refreshQueuedRef.current = false;
+          window.setTimeout(() => void refreshDirectory(true), 0);
+        }
+      }
+    };
+
     void refreshDirectory();
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void refreshDirectory(true);
-    }, 5000);
+    }, 3000);
     const refreshVisible = () => {
       if (document.visibilityState === "visible") void refreshDirectory(true);
     };
+    const refreshFromStorage = (event: StorageEvent) => {
+      if (
+        event.key === ACCOUNT_ACTIVITY_SIGNAL_KEY ||
+        event.key === AUTH_ACCOUNTS_KEY ||
+        event.key === AUTH_STORAGE_KEY ||
+        event.key === STATUS_STORAGE_KEY ||
+        event.key?.startsWith("rocketry-house.account-activity:")
+      ) {
+        refreshVisible();
+      }
+    };
+    const refreshFromRequest = (event: Event) => {
+      const silent = (event as CustomEvent<{ silent?: boolean }>).detail?.silent ?? false;
+      void refreshDirectory(silent);
+    };
     window.addEventListener("focus", refreshVisible);
+    window.addEventListener(ACCOUNT_ACTIVITY_EVENT, refreshVisible);
+    window.addEventListener(ACCOUNT_DIRECTORY_REFRESH_EVENT, refreshFromRequest);
+    window.addEventListener("rocketry-auth-change", refreshVisible);
+    window.addEventListener("storage", refreshFromStorage);
     document.addEventListener("visibilitychange", refreshVisible);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshVisible);
+      window.removeEventListener(ACCOUNT_ACTIVITY_EVENT, refreshVisible);
+      window.removeEventListener(ACCOUNT_DIRECTORY_REFRESH_EVENT, refreshFromRequest);
+      window.removeEventListener("rocketry-auth-change", refreshVisible);
+      window.removeEventListener("storage", refreshFromStorage);
       document.removeEventListener("visibilitychange", refreshVisible);
     };
   }, []);
-
-  async function refreshDirectory(silent = false) {
-    if (!silent) setDirectoryStatus((current) => ({ ...current, loading: true }));
-    const localAccounts = readLocalManagedAccounts();
-    const localSummary = readLocalStorageSummary();
-
-    try {
-      const response = await fetch("/api/account-status/accounts", { cache: "no-store" });
-      if (!response.ok) throw new Error(`Cloud directory returned ${response.status}.`);
-      const directory = await response.json() as AccountDirectoryResponse;
-      const mergedAccounts = mergeAccounts([...directory.accounts, ...localAccounts]);
-      setAccounts(mergedAccounts);
-      setStorageSummary(mergeStorageSummaries(directory.storageSummary, localSummary));
-      setDirectoryStatus({
-        loading: false,
-        syncedAt: directory.syncedAt,
-        cloudMode: directory.cloud.mode,
-        cloudProfiles: directory.cloud.profileRecords,
-        cloudStatuses: directory.cloud.statusRecords,
-        canListAuthUsers: directory.cloud.canListAuthUsers,
-        errors: directory.cloud.errors
-      });
-      if (!silent) setNotice(`Unified ${mergedAccounts.length} accounts from cloud and this browser.`);
-    } catch (error) {
-      setAccounts(localAccounts);
-      setStorageSummary(localSummary);
-      setDirectoryStatus({
-        loading: false,
-        cloudMode: "offline",
-        cloudProfiles: 0,
-        cloudStatuses: 0,
-        canListAuthUsers: false,
-        errors: [error instanceof Error ? error.message : "Cloud directory could not be loaded."]
-      });
-      if (!silent) setNotice("Cloud directory unavailable. Showing this browser's accounts only.");
-    }
-  }
 
   async function lockPage() {
     await fetch("/api/account-status/session", { method: "DELETE" });
@@ -188,7 +231,7 @@ export function AccountStatusManager() {
 
     writeLocalStatusOverrides(updates, now);
     updateLocalAccountRecords(updates, now);
-    setAccounts((current) => current.map((account) => {
+    setAccounts((current) => sortAccountsByRecentActivity(current.map((account) => {
       const update = updates.find((item) => item.key === account.key);
       if (!update) return account;
       return {
@@ -199,10 +242,11 @@ export function AccountStatusManager() {
         approvalStatus: update.approvalStatus ?? account.approvalStatus,
         accessStatus: update.accessStatus ?? account.accessStatus,
         statusNote: update.statusNote ?? account.statusNote,
+        lastActiveAt: now,
         lastReviewedAt: now,
         sourceLabels: uniqueSources([...account.sourceLabels, "cloud-status"])
       };
-    }));
+    })));
 
     try {
       const response = await fetch("/api/account-status/accounts", {
@@ -215,7 +259,7 @@ export function AccountStatusManager() {
         throw new Error(body.detail || body.error || `Cloud save returned ${response.status}.`);
       }
       setNotice(`${updates.length} account${updates.length > 1 ? "s" : ""} saved to the unified directory.`);
-      await refreshDirectory();
+      requestDirectoryRefresh();
     } catch (error) {
       setNotice(`Saved locally. Cloud sync failed: ${error instanceof Error ? error.message : "Unknown error."}`);
     }
@@ -261,7 +305,7 @@ export function AccountStatusManager() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => void refreshDirectory()}>
+            <Button variant="outline" onClick={() => requestDirectoryRefresh()}>
               <RefreshCw className={`h-4 w-4 ${directoryStatus.loading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
@@ -294,6 +338,7 @@ export function AccountStatusManager() {
                 Integrated accounts
               </h2>
               <p className="mt-1 text-sm text-emerald-100/75">{notice}</p>
+              <p className="mt-1 text-xs text-orange-50/45">Newest activity first - live refresh every 3 seconds</p>
             </div>
             <div className="flex flex-col gap-2 lg:flex-row">
               <label className="relative block">
@@ -568,7 +613,7 @@ function readLocalManagedAccounts() {
     });
   }
 
-  return Array.from(mapped.values()).sort((left, right) => left.name.localeCompare(right.name));
+  return sortAccountsByRecentActivity(Array.from(mapped.values()));
 }
 
 function mergeAccounts(accounts: ManagedAccount[]) {
@@ -603,7 +648,7 @@ function mergeAccounts(accounts: ManagedAccount[]) {
       planUsage: account.planUsage ?? existing.planUsage
     });
   }
-  return Array.from(merged.values()).sort((left, right) => left.name.localeCompare(right.name));
+  return sortAccountsByRecentActivity(Array.from(merged.values()));
 }
 
 function writeLocalStatusOverrides(updates: AccountStatusUpdate[], now: string) {

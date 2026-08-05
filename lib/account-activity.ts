@@ -4,6 +4,8 @@ import { getSupabaseClient, isMockMode } from "@/lib/supabase";
 import type { AccountActivity, AccountActivityType } from "@/lib/account-status-types";
 
 export const ACCOUNT_ACTIVITY_COLLECTION = "account_activity";
+export const ACCOUNT_ACTIVITY_EVENT = "rocketry-account-activity";
+export const ACCOUNT_ACTIVITY_SIGNAL_KEY = "rocketry-house.account-activity-signal";
 
 type ActivityInput = {
   type: AccountActivityType;
@@ -39,6 +41,15 @@ function storeLocalActivity(accountId: string, activity: AccountActivity) {
   }
 }
 
+function notifyAccountActivity(activity: AccountActivity) {
+  window.dispatchEvent(new CustomEvent(ACCOUNT_ACTIVITY_EVENT, { detail: activity }));
+  try {
+    localStorage.setItem(ACCOUNT_ACTIVITY_SIGNAL_KEY, JSON.stringify({ id: activity.id, occurredAt: activity.occurredAt, notifiedAt: Date.now() }));
+  } catch {
+    // The same-window event still provides an immediate refresh when storage is unavailable.
+  }
+}
+
 export async function recordAccountActivity(input: ActivityInput) {
   const supabase = getSupabaseClient();
   if (!supabase || isMockMode) return { cloud: false, error: null };
@@ -63,6 +74,7 @@ export async function recordAccountActivity(input: ActivityInput) {
   };
 
   storeLocalActivity(user.id, activity);
+  notifyAccountActivity(activity);
 
   const query = supabase.from("user_data_records");
   const record = {
@@ -76,6 +88,7 @@ export async function recordAccountActivity(input: ActivityInput) {
     ? await query.upsert(record, { onConflict: "owner_key,collection,record_key" })
     : await query.insert(record);
 
+  notifyAccountActivity(activity);
   return { cloud: !error, error, activity };
 }
 
