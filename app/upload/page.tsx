@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import {
   BadgeCheck,
@@ -334,11 +334,13 @@ const evidence: EvidenceUploadItem[] = [
 ];
 
 export default function UploadPage() {
+  const publishingRef = useRef(false);
   const [active, setActive] = useState(0);
   const [parts, setParts] = useState(initialParts);
   const [selectedId, setSelectedId] = useState("upload-body");
   const [status, setStatus] = useState("Draft is local until cloud sync is available.");
   const [safetyOpen, setSafetyOpen] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [projectLimitPrompt, setProjectLimitPrompt] = useState<{ title: string; description: string } | null>(null);
@@ -412,7 +414,11 @@ export default function UploadPage() {
   }
 
   async function publishProject() {
-    setProjectLimitPrompt(null);
+    if (publishingRef.current) return;
+    publishingRef.current = true;
+    setPublishing(true);
+    try {
+      setProjectLimitPrompt(null);
     const usageClaim = await claimUsage("projectsCreatedCount");
     if (!usageClaim.ok) {
       const prompt = usageClaim.data.prompt ?? {
@@ -545,6 +551,10 @@ export default function UploadPage() {
     );
     void refreshUsage();
     setSafetyOpen(false);
+    } finally {
+      publishingRef.current = false;
+      setPublishing(false);
+    }
   }
 
   function updateComponent(id: string, patch: Partial<RocketComponent>) {
@@ -665,7 +675,7 @@ export default function UploadPage() {
           onClose={() => setPreviewOpen(false)}
         />
       ) : null}
-      {safetyOpen ? <SafetyModal onClose={() => setSafetyOpen(false)} onConfirm={publishProject} /> : null}
+      {safetyOpen ? <SafetyModal onClose={() => setSafetyOpen(false)} onConfirm={publishProject} publishing={publishing} /> : null}
     </main>
   );
 }
@@ -1057,7 +1067,7 @@ function PreviewModal({
   );
 }
 
-function SafetyModal({ onClose, onConfirm }: { onClose: () => void; onConfirm: () => void }) {
+function SafetyModal({ onClose, onConfirm, publishing }: { onClose: () => void; onConfirm: () => void; publishing: boolean }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
       <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-5 shadow-2xl">
@@ -1071,8 +1081,8 @@ function SafetyModal({ onClose, onConfirm }: { onClose: () => void; onConfirm: (
           <p>Users remain responsible for local laws, launch rules, club rules, and safety codes.</p>
         </div>
         <div className="mt-5 flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
-          <Button type="button" onClick={onConfirm} className="rounded-xl bg-orange-500 text-slate-950 hover:bg-orange-400">I understand, publish</Button>
+          <Button type="button" variant="outline" onClick={onClose} disabled={publishing} className="rounded-xl">Cancel</Button>
+          <Button type="button" onClick={onConfirm} disabled={publishing} className="rounded-xl bg-orange-500 text-slate-950 hover:bg-orange-400">{publishing ? "Publishing..." : "I understand, publish"}</Button>
         </div>
       </div>
     </div>

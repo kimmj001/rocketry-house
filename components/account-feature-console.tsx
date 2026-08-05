@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { BadgeCheck, BarChart3, FileDown, Mail, Megaphone, Newspaper, Plus, Send, ShieldCheck, Sparkles, Trophy, Users, type LucideIcon } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -60,12 +60,14 @@ const collections = [
 ] as const;
 
 export function AccountFeatureConsole({ user, statuses, usageLoading, usageError, claimUsage, refreshUsage }: AccountFeatureConsoleProps) {
+  const pendingUsageRef = useRef(false);
   const accountType = user.accountType;
   const tier = user.subscriptionTier ?? "standard";
   const isPro = tier === "pro";
   const [records, setRecords] = useState<Record<string, FeatureRecord[]>>({});
   const [notice, setNotice] = useState("");
   const [limitPrompt, setLimitPrompt] = useState<{ title: string; description: string } | null>(null);
+  const [pendingUsageField, setPendingUsageField] = useState<LimitedUsageField | null>(null);
   const [teamName, setTeamName] = useState(accountType === "team" ? "New avionics member" : "North Star Rocketry Team");
   const [broadcastText, setBroadcastText] = useState("Registration is open for the next static-fire review window.");
   const [eventTitle, setEventTitle] = useState("Regional Rocketry Design Review");
@@ -106,20 +108,28 @@ export function AccountFeatureConsole({ user, statuses, usageLoading, usageError
   }
 
   async function claimThenSave(field: LimitedUsageField, collection: typeof collections[number], title: string, body?: string) {
+    if (pendingUsageRef.current) return;
+    pendingUsageRef.current = true;
+    setPendingUsageField(field);
     setLimitPrompt(null);
-    const claim = await claimUsage(field);
-    if (!claim.ok) {
-      const prompt = claim.data.prompt ?? {
-        title: claim.data.message ?? "Cloud usage sync required.",
-        description: claim.data.error ?? "Sign in with a cloud account before using limited plan features."
-      };
-      setLimitPrompt(prompt);
-      setNotice(prompt.title);
-      return;
-    }
+    try {
+      const claim = await claimUsage(field);
+      if (!claim.ok) {
+        const prompt = claim.data.prompt ?? {
+          title: claim.data.message ?? "Cloud usage sync required.",
+          description: claim.data.error ?? "Sign in with a cloud account before using limited plan features."
+        };
+        setLimitPrompt(prompt);
+        setNotice(prompt.title);
+        return;
+      }
 
-    await saveFeatureRecord(collection, title, body);
-    await refreshUsage();
+      await saveFeatureRecord(collection, title, body);
+      await refreshUsage();
+    } finally {
+      pendingUsageRef.current = false;
+      setPendingUsageField(null);
+    }
   }
 
   function requirePro(action: () => void, description: string) {
@@ -238,7 +248,7 @@ export function AccountFeatureConsole({ user, statuses, usageLoading, usageError
           <>
             <FeatureCard icon={Users} title="Team members" detail="Team Standard includes up to 10 members; Team Pro removes the member limit.">
               <input value={teamName} onChange={(event) => setTeamName(event.target.value)} className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-orange-50 outline-none" />
-              <Button className="mt-3 w-full" onClick={() => void claimThenSave("memberTeamsCount", "team_members", teamName, "Team member")}>
+              <Button className="mt-3 w-full" disabled={Boolean(pendingUsageField)} onClick={() => void claimThenSave("memberTeamsCount", "team_members", teamName, "Team member")}>
                 <Plus className="h-4 w-4" />
                 Add member
               </Button>
@@ -262,21 +272,21 @@ export function AccountFeatureConsole({ user, statuses, usageLoading, usageError
           <>
             <FeatureCard icon={Users} title="Member teams" detail="Organization Standard includes 5 member teams; Organization Pro removes the limit.">
               <input value={teamName} onChange={(event) => setTeamName(event.target.value)} className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-orange-50 outline-none" />
-              <Button className="mt-3 w-full" onClick={() => void claimThenSave("memberTeamsCount", "organization_member_teams", teamName, "Approved member team")}>
+              <Button className="mt-3 w-full" disabled={Boolean(pendingUsageField)} onClick={() => void claimThenSave("memberTeamsCount", "organization_member_teams", teamName, "Approved member team")}>
                 <Plus className="h-4 w-4" />
                 Add member team
               </Button>
             </FeatureCard>
             <FeatureCard icon={Megaphone} title="Broadcast announcements" detail="Organization Standard includes 3 broadcasts per month.">
               <textarea value={broadcastText} onChange={(event) => setBroadcastText(event.target.value)} className="min-h-24 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-orange-50 outline-none" />
-              <Button className="mt-3 w-full" onClick={() => void claimThenSave("broadcastCount", "broadcasts", "Broadcast announcement", broadcastText)}>
+              <Button className="mt-3 w-full" disabled={Boolean(pendingUsageField)} onClick={() => void claimThenSave("broadcastCount", "broadcasts", "Broadcast announcement", broadcastText)}>
                 <Megaphone className="h-4 w-4" />
                 Publish broadcast
               </Button>
             </FeatureCard>
             <FeatureCard icon={Trophy} title="Event and competition pages" detail="Organization Standard includes 1 active event or competition page.">
               <input value={eventTitle} onChange={(event) => setEventTitle(event.target.value)} className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-orange-50 outline-none" />
-              <Button className="mt-3 w-full" onClick={() => void claimThenSave("activeEventPagesCount", "event_pages", eventTitle, "Active event page")}>
+              <Button className="mt-3 w-full" disabled={Boolean(pendingUsageField)} onClick={() => void claimThenSave("activeEventPagesCount", "event_pages", eventTitle, "Active event page")}>
                 <Plus className="h-4 w-4" />
                 Create event page
               </Button>

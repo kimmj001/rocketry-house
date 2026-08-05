@@ -44,25 +44,29 @@ export function useCloudUsage() {
 
   const refreshUsage = useCallback(async () => {
     setLoading(true);
-    const headers = await getCloudUsageAuthHeaders();
-    if (!headers) {
-      setError("Cloud sign-in is required to sync Standard plan usage.");
-      setLoading(false);
-      return null;
-    }
+    try {
+      const headers = await getCloudUsageAuthHeaders();
+      if (!headers) {
+        setError("Cloud sign-in is required to sync Standard plan usage.");
+        return null;
+      }
 
-    const response = await fetch("/api/usage/status", { headers, cache: "no-store" });
-    const data = (await response.json()) as UsageResponse & { error?: string };
-    if (!response.ok) {
-      setError(data.error ?? "Cloud usage status could not be loaded.");
-      setLoading(false);
-      return null;
-    }
+      const response = await fetch("/api/usage/status", { headers, cache: "no-store" });
+      const data = (await response.json()) as UsageResponse & { error?: string };
+      if (!response.ok) {
+        setError(data.error ?? "Cloud usage status could not be loaded.");
+        return null;
+      }
 
-    applyUsage(data);
-    setError("");
-    setLoading(false);
-    return data;
+      applyUsage(data);
+      setError("");
+      return data;
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Cloud usage status could not be loaded.");
+      return null;
+    } finally {
+      setLoading(false);
+    }
   }, [applyUsage]);
 
   const claimUsage = useCallback(async (field: LimitedUsageField) => {
@@ -77,22 +81,46 @@ export function useCloudUsage() {
       return { ok: false, data, status: 401 };
     }
 
-    const response = await fetch("/api/usage/claim", {
-      method: "POST",
-      headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify({ field })
-    });
-    const data = (await response.json()) as ClaimResponse;
+    try {
+      const response = await fetch("/api/usage/claim", {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ field })
+      });
+      const data = (await response.json()) as ClaimResponse;
 
-    if (data.usage && data.statuses) applyUsage(data);
-    if (!response.ok && data.error) setError(data.error);
-    else setError("");
+      if (data.usage && data.statuses) applyUsage(data);
+      if (!response.ok && data.error) setError(data.error);
+      else setError("");
 
-    return { ok: response.ok, data, status: response.status };
+      return { ok: response.ok, data, status: response.status };
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : "Cloud usage claim failed.";
+      const data: ClaimResponse = {
+        error: message,
+        usage: usage as UsageCounters,
+        statuses: statuses as Record<LimitedUsageField, UsageStatus>
+      };
+      setError(message);
+      return { ok: false, data, status: 503 };
+    }
   }, [applyUsage, statuses, usage]);
 
   useEffect(() => {
     void refreshUsage();
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void refreshUsage();
+    };
+    const interval = window.setInterval(refreshVisible, 10000);
+    window.addEventListener("focus", refreshVisible);
+    window.addEventListener("rocketry-auth-change", refreshVisible);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshVisible);
+      window.removeEventListener("rocketry-auth-change", refreshVisible);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
   }, [refreshUsage]);
 
   return {

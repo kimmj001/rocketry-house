@@ -17,7 +17,7 @@ import type {
 } from "@/lib/account-status-types";
 import { ACCOUNT_ACTIVITY_EVENT, ACCOUNT_ACTIVITY_SIGNAL_KEY, readLocalAccountActivities } from "@/lib/account-activity";
 import { sortAccountsByRecentActivity } from "@/lib/account-status-order";
-import { STANDARD_LIMITS } from "@/lib/usage-limits";
+import { STANDARD_LIMITS, usageFieldsForAccount } from "@/lib/usage-limits";
 
 const STATUS_STORAGE_KEY = "rocketry-house.account-status-overrides";
 const ACCOUNT_DIRECTORY_REFRESH_EVENT = "rocketry-account-directory-refresh";
@@ -446,7 +446,7 @@ export function AccountStatusManager() {
                       <select value={account.subscriptionTier} onChange={(event) => void applyUpdates([account], { subscriptionTier: event.target.value as NonNullable<AuthUser["subscriptionTier"]> })} className="block h-9 w-36 rounded-md border border-white/10 bg-[#151a27] px-2 text-orange-50 outline-none" aria-label={`Pricing plan for ${account.name}`}>
                         {subscriptionTiers.map((tier) => <option key={tier} value={tier}>{tier}</option>)}
                       </select>
-                      <p className="mt-2 max-w-40 text-xs leading-5 text-orange-50/48">{planUsageSummary(account)}</p>
+                      <p className="mt-2 max-w-48 text-xs leading-5 text-orange-50/48">{planUsageSummary(account)}</p>
                     </td>
                     <td className="px-3 py-3">
                       <select value={account.approvalStatus} onChange={(event) => void applyUpdates([account], { approvalStatus: event.target.value as AccountApprovalStatus })} className="h-9 w-32 rounded-md border border-white/10 bg-[#151a27] px-2 text-orange-50 outline-none">
@@ -844,11 +844,13 @@ function planName(account: ManagedAccount) {
 function planUsageSummary(account: ManagedAccount) {
   const usage = account.planUsage;
   if (!usage) return account.subscriptionTier === "pro" ? "Unlimited usage" : "No metered usage this period";
-  const projects = usage.projectsCreatedCount ?? 0;
-  const messages = usage.dmSentCount ?? 0;
-  if (account.subscriptionTier === "pro") return `Unlimited · ${projects} projects · ${messages} messages`;
   const limits = STANDARD_LIMITS[account.accountType];
-  return `${projects}/${limits.projectsCreatedCount} projects · ${messages}/${limits.dmSentCount} messages`;
+  return usageFieldsForAccount(account.accountType).map(({ field, label }) => {
+    const used = usage[field] ?? 0;
+    return account.subscriptionTier === "pro"
+      ? `${label}: ${used} tracked / unlimited`
+      : `${label}: ${used}/${limits[field]}`;
+  }).join(" - ");
 }
 
 function formatAdminDate(value?: string) {

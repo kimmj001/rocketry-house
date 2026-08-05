@@ -5,6 +5,8 @@ import {
   currentUsagePeriod,
   getAllUsageStatuses,
   getUsageStatus,
+  moveUsageToPeriod,
+  normalizeUsageCount,
   normalizeAccountType,
   normalizeSubscriptionTier,
   upgradePromptFor,
@@ -28,6 +30,7 @@ type UsageContext = {
   usagePeriod: string;
   ownerKey: string;
   recordKey: string;
+  legacyOwnerKey?: string;
 };
 
 type StoredUsageRecord = {
@@ -109,9 +112,11 @@ async function resolveUsageContext(request: Request): Promise<UsageContext> {
   const accountName = organizationName
     ? organizationName
     : user.id;
-  const accountId = accountType === "personal" ? user.id : `${accountType}:${accountName}`;
+  const legacyAccountId = accountType === "personal" ? user.id : `${accountType}:${accountName}`;
+  const accountId = user.id;
   const usagePeriod = currentUsagePeriod();
   const safeAccount = safeSegment(accountId);
+  const legacySafeAccount = safeSegment(legacyAccountId);
 
   return {
     supabase,
@@ -122,7 +127,8 @@ async function resolveUsageContext(request: Request): Promise<UsageContext> {
     subscriptionTier,
     usagePeriod,
     ownerKey: `usage:${safeAccount}`,
-    recordKey: `${safeAccount}:${usagePeriod}`
+    recordKey: `${safeAccount}:${usagePeriod}`,
+    legacyOwnerKey: legacySafeAccount === safeAccount ? undefined : `usage:${legacySafeAccount}`
   };
 }
 
@@ -136,15 +142,16 @@ function normalizeStoredUsage(context: UsageContext, payload: Partial<UsageCount
     now
   });
 
-  return {
+  const normalized = {
     ...empty,
     ...payload,
     userId: context.userId,
     accountId: context.accountId,
     accountType: context.accountType,
     subscriptionTier: context.subscriptionTier,
-    usagePeriod: context.usagePeriod
+    usagePeriod: payload?.usagePeriod || context.usagePeriod
   };
+  return moveUsageToPeriod(normalized, context.usagePeriod, now);
 }
 
 async function loadUsageRecord(context: UsageContext): Promise<StoredUsageRecord> {
@@ -160,10 +167,33 @@ async function loadUsageRecord(context: UsageContext): Promise<StoredUsageRecord
 
   if (error) throw error;
 
+  if (data) {
+    return {
+      usage: normalizeStoredUsage(context, data.payload as Partial<UsageCounters> | undefined, new Date().toISOString()),
+      exists: true,
+      updatedAt: typeof data.updated_at === "string" ? data.updated_at : undefined
+    };
+  }
+
+  const ownerKeys = [context.ownerKey, context.legacyOwnerKey].filter(Boolean) as string[];
+  const { data: previousRows, error: previousError } = await supabase
+    .from("user_data_records")
+    .select("owner_key,payload,updated_at")
+    .in("owner_key", ownerKeys)
+    .eq("collection", USAGE_COLLECTION)
+    .order("updated_at", { ascending: false })
+    .limit(36);
+
+  if (previousError) throw previousError;
+  const previous = (previousRows ?? []).find((row) => {
+    const payload = objectValue(row.payload);
+    const payloadUserId = stringValue(payload.userId);
+    return payloadUserId ? payloadUserId === context.userId : row.owner_key === context.ownerKey;
+  });
+
   return {
-    usage: normalizeStoredUsage(context, data?.payload as Partial<UsageCounters> | undefined, new Date().toISOString()),
-    exists: Boolean(data),
-    updatedAt: typeof data?.updated_at === "string" ? data.updated_at : undefined
+    usage: normalizeStoredUsage(context, previous?.payload as Partial<UsageCounters> | undefined, new Date().toISOString()),
+    exists: false
   };
 }
 
@@ -218,13 +248,14 @@ export async function getUsageForRequest(request: Request) {
 
 export async function claimUsageForRequest(request: Request, field: LimitedUsageField, delta = 1): Promise<UsageClaimResult> {
   const context = await resolveUsageContext(request);
+  const increment = Math.max(1, normalizeUsageCount(delta));
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const record = await loadUsageRecord(context);
     const { usage } = record;
     const status = getUsageStatus(usage, field);
 
-    if (usage.subscriptionTier === "standard" && status.limit !== null && status.used + delta > status.limit) {
+    if (usage.subscriptionTier === "standard" && status.limit !== null && status.used + increment > status.limit) {
       return {
         allowed: false,
         blocked: true,
@@ -238,7 +269,7 @@ export async function claimUsageForRequest(request: Request, field: LimitedUsage
     const now = new Date().toISOString();
     const nextUsage: UsageCounters = {
       ...usage,
-      [field]: Number(usage[field] ?? 0) + delta,
+      [field]: normalizeUsageCount(usage[field]) + increment,
       updatedAt: now,
       createdAt: usage.createdAt || now
     };
@@ -258,4 +289,40 @@ export async function claimUsageForRequest(request: Request, field: LimitedUsage
   }
 
   throw new Error("Usage quota changed while claiming. Please try again.");
+}
+
+export async function releaseUsageForRequest(request: Request, field: LimitedUsageField, delta = 1): Promise<UsageClaimResult> {
+  const context = await resolveUsageContext(request);
+  const decrement = Math.max(1, normalizeUsageCount(delta));
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const record = await loadUsageRecord(context);
+    const { usage } = record;
+    if (!record.exists || !record.updatedAt) {
+      return {
+        allowed: true,
+        blocked: false,
+        usage,
+        statuses: getAllUsageStatuses(usage)
+      };
+    }
+
+    const now = new Date().toISOString();
+    const nextUsage: UsageCounters = {
+      ...usage,
+      [field]: Math.max(0, normalizeUsageCount(usage[field]) - decrement),
+      updatedAt: now
+    };
+    const savedUsage = await updateUsageRecord(context, record.updatedAt, nextUsage);
+    if (savedUsage) {
+      return {
+        allowed: true,
+        blocked: false,
+        usage: savedUsage,
+        statuses: getAllUsageStatuses(savedUsage)
+      };
+    }
+  }
+
+  throw new Error("Usage quota changed while releasing a failed action. Please refresh usage.");
 }

@@ -14,6 +14,7 @@ import type {
   ManagedAccount
 } from "@/lib/account-status-types";
 import { sortAccountsByRecentActivity } from "@/lib/account-status-order";
+import { currentUsagePeriod, usageFieldResetsMonthly, type LimitedUsageField } from "@/lib/usage-limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -496,19 +497,24 @@ function buildActivityByAccount(records: UserDataRecord[], authUsers: User[], ac
 function buildPlanUsageByAccount(records: UserDataRecord[], accounts: ManagedAccount[]) {
   const usage = new Map<string, ManagedAccount["planUsage"]>();
   const lookup = buildAccountLookup(accounts);
+  const currentPeriod = currentUsagePeriod();
   for (const record of records) {
     if (record.collection !== "usage_counters") continue;
     const payload = objectValue(record.payload);
     const key = resolveAccountKey(lookup, stringValue(payload.userId), stringValue(payload.accountId));
     if (!key || usage.has(key)) continue;
+    const payloadPeriod = stringValue(payload.usagePeriod);
+    const count = (field: LimitedUsageField) => payloadPeriod !== currentPeriod && usageFieldResetsMonthly(field)
+      ? 0
+      : numberValue(payload[field]);
     usage.set(key, {
-      period: stringValue(payload.usagePeriod) || undefined,
-      projectsCreatedCount: numberValue(payload.projectsCreatedCount),
-      cfdRunsUsed: numberValue(payload.cfdRunsUsed),
-      dmSentCount: numberValue(payload.dmSentCount),
-      memberTeamsCount: numberValue(payload.memberTeamsCount),
-      broadcastCount: numberValue(payload.broadcastCount),
-      activeEventPagesCount: numberValue(payload.activeEventPagesCount)
+      period: currentPeriod,
+      projectsCreatedCount: count("projectsCreatedCount"),
+      cfdRunsUsed: count("cfdRunsUsed"),
+      dmSentCount: count("dmSentCount"),
+      memberTeamsCount: count("memberTeamsCount"),
+      broadcastCount: count("broadcastCount"),
+      activeEventPagesCount: count("activeEventPagesCount")
     });
   }
   return usage;

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { containsInternalTestMarker, isInternalTestMessageBody } from "@/lib/internal-test-data";
 import { getServerSupabaseClient } from "@/lib/supabase-server";
-import { claimUsageForRequest } from "@/lib/usage-cloud";
+import { claimUsageForRequest, releaseUsageForRequest } from "@/lib/usage-cloud";
 import { normalizeAccountType, normalizeSubscriptionTier, type AccountType, type SubscriptionTier } from "@/lib/usage-limits";
 
 export const runtime = "nodejs";
@@ -120,7 +120,13 @@ export async function POST(request: Request) {
       return NextResponse.json(usageClaim, { status: 402 });
     }
 
-    const message = await saveMessage(supabase, sender, recipient, messageBody);
+    let message: DirectMessage;
+    try {
+      message = await saveMessage(supabase, sender, recipient, messageBody);
+    } catch (saveError) {
+      await releaseUsageForRequest(request, "dmSentCount").catch(() => undefined);
+      throw saveError;
+    }
     await saveMessageActivity(supabase, message).catch(() => undefined);
     const messages = await loadMessagesForUser(supabase, user.id);
 

@@ -82,6 +82,18 @@ export const USAGE_FIELD_LABELS: Record<LimitedUsageField, string> = {
   activeEventPagesCount: "Event pages"
 };
 
+export const MONTHLY_USAGE_FIELDS = [
+  "cfdRunsUsed",
+  "dmSentCount",
+  "broadcastCount"
+] as const satisfies readonly LimitedUsageField[];
+
+export const PERSISTENT_USAGE_FIELDS = [
+  "projectsCreatedCount",
+  "memberTeamsCount",
+  "activeEventPagesCount"
+] as const satisfies readonly LimitedUsageField[];
+
 export const USAGE_FIELDS_BY_ACCOUNT: Record<AccountType, Array<{ field: LimitedUsageField; label: string; periodText?: string }>> = {
   personal: [
     { field: "projectsCreatedCount", label: "Projects" },
@@ -116,6 +128,35 @@ const UPGRADE_COPY: Record<LimitedUsageField, string> = {
 
 export function currentUsagePeriod(date = new Date()) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+export function normalizeUsageCount(value: unknown) {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0;
+}
+
+export function usageFieldResetsMonthly(field: LimitedUsageField) {
+  return (MONTHLY_USAGE_FIELDS as readonly LimitedUsageField[]).includes(field);
+}
+
+export function moveUsageToPeriod(usage: UsageCounters, usagePeriod: string, now = new Date().toISOString()): UsageCounters {
+  const periodChanged = usage.usagePeriod !== usagePeriod;
+  const next = {
+    ...usage,
+    usagePeriod,
+    projectsCreatedCount: normalizeUsageCount(usage.projectsCreatedCount),
+    cfdRunsUsed: normalizeUsageCount(usage.cfdRunsUsed),
+    dmSentCount: normalizeUsageCount(usage.dmSentCount),
+    memberTeamsCount: normalizeUsageCount(usage.memberTeamsCount),
+    broadcastCount: normalizeUsageCount(usage.broadcastCount),
+    activeEventPagesCount: normalizeUsageCount(usage.activeEventPagesCount),
+    updatedAt: periodChanged ? now : usage.updatedAt,
+    createdAt: periodChanged ? now : usage.createdAt
+  };
+
+  if (!periodChanged) return next;
+  for (const field of MONTHLY_USAGE_FIELDS) next[field] = 0;
+  return next;
 }
 
 export function createEmptyUsageCounters({
@@ -159,7 +200,7 @@ export function isUsageLimited(tier: SubscriptionTier) {
 }
 
 export function getUsageStatus(usage: UsageCounters, field: LimitedUsageField): UsageStatus {
-  const used = Number(usage[field] ?? 0);
+  const used = normalizeUsageCount(usage[field]);
 
   if (!isUsageLimited(usage.subscriptionTier)) {
     return {

@@ -19,7 +19,10 @@ export async function POST(request: Request) {
       ? Math.ceil(body.delta)
       : 1;
     const result = await claimUsageForRequest(request, body.field, delta);
-    return NextResponse.json(result, { status: result.blocked ? 402 : 200 });
+    return NextResponse.json(result, {
+      status: result.blocked ? 402 : 200,
+      headers: { "Cache-Control": "private, no-store, max-age=0" }
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Cloud usage claim failed." },

@@ -15,7 +15,10 @@ import {
 } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
+import { UpgradeLimitCard } from "@/components/usage-meter";
 import { loadPersistentRecords } from "@/lib/cloud-persistence";
+import { useCloudUsage } from "@/lib/use-cloud-usage";
+import { usageCounterText } from "@/lib/usage-limits";
 import {
   DEFAULT_RANS_CONFIG,
   INTERACTIVE_RANS_DIMENSIONS,
@@ -503,6 +506,8 @@ function NumberControl({
 export function NozzleCfdLab() {
   const workerRef = useRef<Worker | null>(null);
   const workerInitializedRef = useRef(false);
+  const runMeteredRef = useRef(false);
+  const usageClaimInFlightRef = useRef(false);
   const [config, setConfig] = useState<RansSolverConfig>(createInteractiveConfig);
   const [snapshot, setSnapshot] = useState<SolverSnapshot | null>(null);
   const [running, setRunning] = useState(false);
@@ -520,6 +525,9 @@ export function NozzleCfdLab() {
   const [savedNozzles, setSavedNozzles] = useState<SavedNozzleDesign[]>([]);
   const [selectedNozzleId, setSelectedNozzleId] = useState("");
   const [loadingNozzles, setLoadingNozzles] = useState(true);
+  const [claimingUsage, setClaimingUsage] = useState(false);
+  const [limitPrompt, setLimitPrompt] = useState<{ title: string; description: string } | null>(null);
+  const { usage, statuses, loading: usageLoading, error: usageError, claimUsage } = useCloudUsage();
 
   useEffect(() => {
     const worker = new Worker(new URL("../lib/cfd/worker/cfd.worker.ts", import.meta.url), { type: "module" });
@@ -580,6 +588,7 @@ export function NozzleCfdLab() {
       setSelectedNozzleId(selected.id);
       setConfig((current) => {
         const next = { ...current, geometry: savedNozzleToGeometry(selected, current.geometry) };
+        runMeteredRef.current = false;
         setDirty(false);
         setError(null);
         setResidualHistory([]);
@@ -625,6 +634,7 @@ export function NozzleCfdLab() {
     setError(null);
     setResidualHistory([]);
     setRunning(false);
+    runMeteredRef.current = false;
     setSnapshot(null);
     setReady(false);
     if (workerRef.current) {
@@ -637,12 +647,61 @@ export function NozzleCfdLab() {
   };
   const applyAndReset = () => {
     if (!workerRef.current) return;
+    runMeteredRef.current = false;
     setRunning(false);
     setError(null);
     setResidualHistory([]);
     setDirty(false);
     transferFreeMessage(workerRef.current, { type: "reset", config });
   };
+
+  const ensureRunMetered = async () => {
+    if (runMeteredRef.current) return true;
+    if (usageClaimInFlightRef.current) return false;
+
+    usageClaimInFlightRef.current = true;
+    setClaimingUsage(true);
+    setLimitPrompt(null);
+    try {
+      const claim = await claimUsage("cfdRunsUsed");
+      if (!claim.ok) {
+        const prompt = claim.data.prompt ?? {
+          title: claim.data.message ?? "Cloud usage sync required.",
+          description: claim.data.error ?? "Sign in with a cloud account before starting a metered CFD run."
+        };
+        setLimitPrompt({ title: prompt.title, description: prompt.description });
+        return false;
+      }
+
+      runMeteredRef.current = true;
+      return true;
+    } finally {
+      usageClaimInFlightRef.current = false;
+      setClaimingUsage(false);
+    }
+  };
+
+  const toggleRun = async () => {
+    if (!workerRef.current) return;
+    if (running) {
+      transferFreeMessage(workerRef.current, { type: "pause" });
+      return;
+    }
+    if (!await ensureRunMetered()) return;
+    transferFreeMessage(workerRef.current, { type: "start" });
+  };
+
+  const stepRun = async () => {
+    if (!workerRef.current || !await ensureRunMetered()) return;
+    transferFreeMessage(workerRef.current, { type: "step", iterations: 1 });
+  };
+
+  const cfdUsage = statuses?.cfdRunsUsed;
+  const cfdUsageText = usageLoading
+    ? "CFD runs: loading usage..."
+    : cfdUsage
+      ? usageCounterText("CFD runs", cfdUsage, "this month")
+      : usageError || "CFD runs: cloud usage sync required";
 
   const status = !selectedNozzle
     ? loadingNozzles ? "Loading saved nozzles" : "No saved nozzle"
@@ -663,6 +722,7 @@ export function NozzleCfdLab() {
           <div>
             <p className="text-xs uppercase tracking-[0.16em] text-orange-300/68">Motor analysis</p>
             <h1 className="mt-1 text-xl font-semibold">Axisymmetric Nozzle CFD</h1>
+            <p className="mt-1 text-xs text-white/48">{cfdUsageText}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className={`mr-2 inline-flex items-center gap-2 text-xs ${diagnostics?.failed ? "text-rose-300" : running ? "text-emerald-300" : "text-white/55"}`}>
@@ -671,20 +731,17 @@ export function NozzleCfdLab() {
             </span>
             <Button
               size="sm"
-              onClick={() => {
-                if (!workerRef.current) return;
-                transferFreeMessage(workerRef.current, { type: running ? "pause" : "start" });
-              }}
-              disabled={!selectedNozzle || !ready || Boolean(diagnostics?.failed)}
+              onClick={() => void toggleRun()}
+              disabled={!selectedNozzle || !ready || claimingUsage || Boolean(diagnostics?.failed)}
             >
               {running ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-              {running ? "Pause" : diagnostics?.iteration ? "Resume" : "Start"}
+              {claimingUsage ? "Checking plan" : running ? "Pause" : diagnostics?.iteration ? "Resume" : "Start"}
             </Button>
             <Button
               size="sm"
               variant="outline"
-              onClick={() => workerRef.current && transferFreeMessage(workerRef.current, { type: "step", iterations: 1 })}
-              disabled={!selectedNozzle || !ready || running || Boolean(diagnostics?.failed)}
+              onClick={() => void stepRun()}
+              disabled={!selectedNozzle || !ready || running || claimingUsage || Boolean(diagnostics?.failed)}
             >
               <StepForward className="h-4 w-4" />
               Step
@@ -696,6 +753,12 @@ export function NozzleCfdLab() {
           </div>
         </div>
       </div>
+
+      {limitPrompt ? (
+        <div className="mx-auto max-w-[1500px] px-5 pt-4">
+          <UpgradeLimitCard accountType={usage?.accountType} title={limitPrompt.title} description={limitPrompt.description} onDismiss={() => setLimitPrompt(null)} />
+        </div>
+      ) : null}
 
       <div className="mx-auto grid max-w-[1500px] gap-0 lg:grid-cols-[300px_minmax(0,1fr)]">
         <aside className="border-b border-white/10 bg-[#0a0d12] p-5 lg:border-b-0 lg:border-r">
