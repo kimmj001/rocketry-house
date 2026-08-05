@@ -1822,26 +1822,23 @@ function getMotorNumberBounds(parameters: MotorParameters, key: MotorNumericFiel
 function MotorNumberField({ label, value, unit, help, bounds, onCommit }: { label: string; value: number; unit?: string; help?: string; bounds: MotorNumberBounds; onCommit: (value: number) => void }) {
   const [draft, setDraft] = useState(String(value));
   const [warning, setWarning] = useState<string | null>(null);
-  const committedValueRef = useRef<number | null>(null);
+  const editingRef = useRef(false);
+  const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (editingRef.current) return;
     setDraft(String(value));
-    if (committedValueRef.current !== null && Math.abs(committedValueRef.current - value) < 0.0001) {
-      committedValueRef.current = null;
-    } else {
-      setWarning(null);
-    }
+    setWarning(null);
   }, [bounds.max, bounds.min, value]);
 
-  const normalize = (rawValue: string, commit: boolean) => {
+  useEffect(() => () => {
+    if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
+  }, []);
+
+  const resolveDraft = (rawValue: string) => {
+    if (!rawValue.trim()) return null;
     const parsed = Number(rawValue);
-    if (!Number.isFinite(parsed)) {
-      if (commit) {
-        setDraft(String(value));
-        setWarning("A finite number is required. The last valid value was kept.");
-      }
-      return;
-    }
+    if (!Number.isFinite(parsed)) return null;
 
     const wholeValue = bounds.integer ? Math.round(parsed) : parsed;
     const nextValue = Math.min(bounds.max, Math.max(bounds.min, wholeValue));
@@ -1850,12 +1847,23 @@ function MotorNumberField({ label, value, unit, help, bounds, onCommit }: { labe
     else if (parsed > bounds.max) nextWarning = bounds.maxMessage ?? `Upper limit reached: maximum ${Number(bounds.max.toFixed(3))}${unit ? ` ${unit}` : ""}.`;
     else if (bounds.integer && parsed !== wholeValue) nextWarning = `Whole number required: rounded to ${wholeValue}.`;
 
-    if (commit || nextWarning === null) {
-      committedValueRef.current = nextValue;
-      onCommit(nextValue);
-      if (commit) setDraft(String(Number(nextValue.toFixed(bounds.integer ? 0 : 3))));
+    return { nextValue, nextWarning };
+  };
+
+  const commitDraft = (rawValue: string) => {
+    if (commitTimerRef.current) {
+      clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
     }
-    setWarning(nextWarning);
+    const resolved = resolveDraft(rawValue);
+    if (!resolved) {
+      setDraft(String(value));
+      setWarning("A finite number is required. The last valid value was kept.");
+      return;
+    }
+    setDraft(String(Number(resolved.nextValue.toFixed(bounds.integer ? 0 : 3))));
+    setWarning(resolved.nextWarning);
+    if (Math.abs(resolved.nextValue - value) >= 0.0001) onCommit(resolved.nextValue);
   };
 
   return (
@@ -1866,11 +1874,26 @@ function MotorNumberField({ label, value, unit, help, bounds, onCommit }: { labe
         max={bounds.max}
         step={bounds.step ?? 0.1}
         value={draft}
-        onChange={(event) => {
-          setDraft(event.target.value);
-          normalize(event.target.value, false);
+        onFocus={() => {
+          editingRef.current = true;
         }}
-        onBlur={() => normalize(draft, true)}
+        onChange={(event) => {
+          const rawValue = event.target.value;
+          setDraft(rawValue);
+          if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
+          const resolved = resolveDraft(rawValue);
+          setWarning(resolved?.nextWarning ?? null);
+          if (resolved && resolved.nextWarning === null && Math.abs(resolved.nextValue - value) >= 0.0001) {
+            commitTimerRef.current = setTimeout(() => {
+              onCommit(resolved.nextValue);
+              commitTimerRef.current = null;
+            }, 220);
+          }
+        }}
+        onBlur={(event) => {
+          editingRef.current = false;
+          commitDraft(event.currentTarget.value);
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
         }}
