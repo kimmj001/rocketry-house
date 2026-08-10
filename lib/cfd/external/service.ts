@@ -59,7 +59,7 @@ export function createExternalCfdCacheKey(input: NormalizedExternalCfdInput) {
       aftDiameter: rounded(component.aftDiameter ?? 0)
     }))
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
-  return createHash("sha256").update(JSON.stringify({ geometry, mach: input.mach, angleOfAttack: input.angleOfAttack, solver: input.solver, resolution: input.resolution, version: 2 })).digest("hex").slice(0, 24);
+  return createHash("sha256").update(JSON.stringify({ geometry, mach: input.mach, angleOfAttack: input.angleOfAttack, solver: input.solver, resolution: input.resolution, version: 3 })).digest("hex").slice(0, 24);
 }
 
 export function prepareExternalCfdRun(value: unknown) {

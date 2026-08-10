@@ -42,20 +42,17 @@ export async function solveLbmExternalFlow(
   const relaxation = 1 / Math.max(0.515, 0.5 + 3 * viscosity);
   const maxIterations = EXTERNAL_CFD_PRESETS[input.resolution].lbmIterations;
   const started = Date.now();
-  const hasSolidBody = mask.some((value) => value === 1);
   let residual = 1;
   let priorProbe = 0;
 
   for (let i = 0; i < count; i += 1) {
-    for (let k = 0; k < 9; k += 1) populations[i * 9 + k] = equilibrium(k, 1, hasSolidBody ? 0 : freestreamX, hasSolidBody ? 0 : freestreamY);
+    for (let k = 0; k < 9; k += 1) populations[i * 9 + k] = equilibrium(k, 1, freestreamX, freestreamY);
   }
   await onProgress?.({ state: "initializing", progress: 0.12, iterations: maxIterations, message: "Initializing D2Q9 populations" });
 
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
     if (Date.now() - started > EXTERNAL_CFD_TIMEOUT_MS) throw new ExternalCfdError("TIMEOUT", "The FAST CFD solver exceeded its execution time limit.");
-    const inletRamp = hasSolidBody ? Math.min(1, (iteration + 1) / Math.min(100, Math.max(40, maxIterations * 0.18))) : 1;
-    const inletX = freestreamX * inletRamp;
-    const inletY = freestreamY * inletRamp;
+    const bodyRamp = Math.min(1, (iteration + 1) / Math.min(100, Math.max(40, maxIterations * 0.18)));
 
     for (let i = 0; i < count; i += 1) {
       const base = i * 9;
@@ -91,19 +88,28 @@ export async function solveLbmExternalFlow(
           const sx = x - D2Q9_CX[k];
           const sy = y - D2Q9_CY[k];
           if (sx < 0 || sy < 0 || sy >= height) {
-            next[base + k] = equilibrium(k, 1, inletX, inletY);
+            next[base + k] = equilibrium(k, 1, freestreamX, freestreamY);
           } else if (sx >= width) {
             next[base + k] = collided[(y * width + width - 2) * 9 + k];
           } else {
             const source = sy * width + sx;
-            next[base + k] = mask[source] ? collided[base + D2Q9_OPPOSITE[k]] : collided[source * 9 + k];
+            if (mask[source]) {
+              let localDensity = 0;
+              for (let direction = 0; direction < 9; direction += 1) localDensity += collided[base + direction];
+              const wallX = freestreamX * (1 - bodyRamp);
+              const wallY = freestreamY * (1 - bodyRamp);
+              next[base + k] = collided[base + D2Q9_OPPOSITE[k]]
+                + 6 * D2Q9_WEIGHT[k] * localDensity * (D2Q9_CX[k] * wallX + D2Q9_CY[k] * wallY);
+            } else {
+              next[base + k] = collided[source * 9 + k];
+            }
           }
         }
         const outletBlend = x > width * 0.88 ? ((x / (width - 1) - 0.88) / 0.12) ** 2 * 0.08 : 0;
         const edgeDistance = Math.min(y, height - 1 - y);
         const farfieldBlend = edgeDistance < 5 ? (5 - edgeDistance) / 5 * 0.12 : 0;
         const blend = Math.min(0.2, outletBlend + farfieldBlend);
-        if (blend) for (let k = 0; k < 9; k += 1) next[base + k] = next[base + k] * (1 - blend) + equilibrium(k, 1, inletX, inletY) * blend;
+        if (blend) for (let k = 0; k < 9; k += 1) next[base + k] = next[base + k] * (1 - blend) + equilibrium(k, 1, freestreamX, freestreamY) * blend;
       }
     }
     populations.set(next);
