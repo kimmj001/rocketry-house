@@ -13,9 +13,9 @@ export const EXTERNAL_CFD_PRESETS: Record<ExternalCfdResolution, {
   lbmIterations: number;
   compressibleIterations: number;
 }> = {
-  low: { width: 240, height: 96, lbmIterations: 150, compressibleIterations: 70 },
-  medium: { width: 320, height: 128, lbmIterations: 220, compressibleIterations: 100 },
-  high: { width: 420, height: 168, lbmIterations: 300, compressibleIterations: 140 }
+  low: { width: 240, height: 96, lbmIterations: 450, compressibleIterations: 70 },
+  medium: { width: 320, height: 128, lbmIterations: 600, compressibleIterations: 100 },
+  high: { width: 420, height: 168, lbmIterations: 750, compressibleIterations: 140 }
 };
 
 export const D2Q9_CX = new Int8Array([0, 1, 0, -1, 0, 1, -1, -1, 1]);

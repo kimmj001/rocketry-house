@@ -42,16 +42,20 @@ export async function solveLbmExternalFlow(
   const relaxation = 1 / Math.max(0.515, 0.5 + 3 * viscosity);
   const maxIterations = EXTERNAL_CFD_PRESETS[input.resolution].lbmIterations;
   const started = Date.now();
+  const hasSolidBody = mask.some((value) => value === 1);
   let residual = 1;
   let priorProbe = 0;
 
   for (let i = 0; i < count; i += 1) {
-    for (let k = 0; k < 9; k += 1) populations[i * 9 + k] = equilibrium(k, 1, freestreamX, freestreamY);
+    for (let k = 0; k < 9; k += 1) populations[i * 9 + k] = equilibrium(k, 1, hasSolidBody ? 0 : freestreamX, hasSolidBody ? 0 : freestreamY);
   }
   await onProgress?.({ state: "initializing", progress: 0.12, iterations: maxIterations, message: "Initializing D2Q9 populations" });
 
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
     if (Date.now() - started > EXTERNAL_CFD_TIMEOUT_MS) throw new ExternalCfdError("TIMEOUT", "The FAST CFD solver exceeded its execution time limit.");
+    const inletRamp = hasSolidBody ? Math.min(1, (iteration + 1) / Math.min(100, Math.max(40, maxIterations * 0.18))) : 1;
+    const inletX = freestreamX * inletRamp;
+    const inletY = freestreamY * inletRamp;
 
     for (let i = 0; i < count; i += 1) {
       const base = i * 9;
@@ -87,7 +91,7 @@ export async function solveLbmExternalFlow(
           const sx = x - D2Q9_CX[k];
           const sy = y - D2Q9_CY[k];
           if (sx < 0 || sy < 0 || sy >= height) {
-            next[base + k] = equilibrium(k, 1, freestreamX, freestreamY);
+            next[base + k] = equilibrium(k, 1, inletX, inletY);
           } else if (sx >= width) {
             next[base + k] = collided[(y * width + width - 2) * 9 + k];
           } else {
@@ -99,7 +103,7 @@ export async function solveLbmExternalFlow(
         const edgeDistance = Math.min(y, height - 1 - y);
         const farfieldBlend = edgeDistance < 5 ? (5 - edgeDistance) / 5 * 0.12 : 0;
         const blend = Math.min(0.2, outletBlend + farfieldBlend);
-        if (blend) for (let k = 0; k < 9; k += 1) next[base + k] = next[base + k] * (1 - blend) + equilibrium(k, 1, freestreamX, freestreamY) * blend;
+        if (blend) for (let k = 0; k < 9; k += 1) next[base + k] = next[base + k] * (1 - blend) + equilibrium(k, 1, inletX, inletY) * blend;
       }
     }
     populations.set(next);
