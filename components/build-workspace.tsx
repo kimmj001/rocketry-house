@@ -24,7 +24,7 @@ import type { RocketComponent, RocketComponentType, SimulationResult } from "@/l
 const MOTOR_STORAGE_KEY = "rocketry-house.saved-motors";
 type CfdDebugView = NozzleCfdField["name"] | "mesh" | "residual";
 
-type RocketBuilderSnapshot = {
+export type RocketBuilderSnapshot = {
   components: RocketComponent[];
   selectedMotorId?: string | null;
   windSpeedMps?: number;
@@ -745,6 +745,19 @@ export function RocketBuilder() {
     window.dispatchEvent(new Event("rocketry-rockets-change"));
   }
 
+  async function openExternalCfd() {
+    setSaveStatus("Saving the current geometry for external CFD...");
+    const result = await savePersistentRecord("rocket_builder_current", "current", {
+      components,
+      selectedMotorId: selectedMotor?.id ?? null,
+      windSpeedMps,
+      updatedAt: new Date().toISOString(),
+      name: "Latest Rocket Builder Design"
+    });
+    setSaveStatus(result.cloud ? "Current geometry saved. Opening CFD..." : "Local geometry saved. Opening CFD...");
+    window.location.assign("/build/rocket/cfd");
+  }
+
   function addPayloadBay() {
     const length = Math.max(...components.map((component) => component.position + component.length));
     setComponents((current) => [
@@ -765,6 +778,7 @@ export function RocketBuilder() {
           <div className="flex flex-col items-stretch gap-2 sm:items-end">
             <div className="flex flex-wrap gap-2">
               <Button href="/upload" asChild variant="outline"><UploadCloud className="h-4 w-4" />Publish</Button>
+              <Button onClick={openExternalCfd} variant="outline"><Wind className="h-4 w-4" />Run external CFD</Button>
               <Button onClick={saveRocketProject}><Save className="h-4 w-4" />Save project</Button>
             </div>
             <p className="max-w-md text-xs text-orange-50/45 sm:text-right">{saveStatus}</p>
