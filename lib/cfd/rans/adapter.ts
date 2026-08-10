@@ -44,6 +44,7 @@ function configFromInputs(inputs: NozzleCfdInputs): Partial<RansSolverConfig> {
     initializationMode: "quasiSteady",
     turbulence: inputs.turbulence ?? "spalartAllmaras",
     reconstruction: inputs.reconstruction ?? "musclVenkatakrishnan",
+    timeIntegrator: inputs.timeIntegrator ?? "sspRk2",
     cfl: inputs.cfl ?? 0.05,
     cflRamp: inputs.cflRamp ?? true,
     turbulentPrandtl: inputs.turbulentPrandtl ?? 0.9,
@@ -227,6 +228,7 @@ export function solveRansNozzleCfd(inputs: NozzleCfdInputs): NozzleCfdResult {
         computeResiduals: true,
         weightedLeastSquaresGradients: true,
         musclVenkatakrishnan: solver.config.reconstruction === "musclVenkatakrishnan",
+        sspRk2: solver.config.timeIntegrator === "sspRk2",
         viscousFlux: true,
         spalartAllmaras: solver.config.turbulence === "spalartAllmaras"
       },

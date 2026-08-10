@@ -200,6 +200,7 @@ export class AxisymmetricRansSolver {
   readonly mesh: BodyFittedMesh;
   private state: ConservativeState;
   private nextState: ConservativeState;
+  private stageState: ConservativeState;
   private primitive: PrimitiveArrays;
   private residual: ConservativeState;
   private gradients: GradientSet;
@@ -279,6 +280,7 @@ export class AxisymmetricRansSolver {
       chamberThermo.viscosity / this.referenceDensityKgM3;
     this.state = createConservativeState(this.mesh.cells);
     this.nextState = createConservativeState(this.mesh.cells);
+    this.stageState = createConservativeState(this.mesh.cells);
     this.primitive = createPrimitiveArrays(this.mesh.cells);
     this.residual = createConservativeState(this.mesh.cells);
     this.saSource = new Float64Array(this.mesh.cells);
@@ -1194,8 +1196,16 @@ export class AxisymmetricRansSolver {
     }
   }
 
-  private attemptUpdate(timeStepScale: number, minimumTimeStep: number) {
+  private attemptUpdate(
+    timeStepScale: number,
+    minimumTimeStep: number,
+    baseState: ConservativeState | null = null,
+    recordUpdate = true
+  ) {
+    const source = this.state;
     const next = this.nextState;
+    const baseWeight = baseState ? 0.5 : 0;
+    const stageWeight = 1 - baseWeight;
     for (let index = 0; index < this.mesh.cells; index += 1) {
       const dt = this.localTimeSteps[index] * timeStepScale;
       const turbulenceDt = this.config.turbulence === "spalartAllmaras" &&
@@ -1204,17 +1214,17 @@ export class AxisymmetricRansSolver {
         : dt;
       const factor = dt / this.mesh.volumes[index];
       const turbulenceFactor = turbulenceDt / this.mesh.volumes[index];
-      const proposedRho = this.state.rho[index] - factor * this.residual.rho[index];
-      const proposedRhoU = this.state.rhoU[index] - factor * this.residual.rhoU[index];
-      const proposedRhoV = this.state.rhoV[index] - factor * this.residual.rhoV[index];
-      const proposedRhoE = this.state.rhoE[index] - factor * this.residual.rhoE[index];
+      const proposedRho = source.rho[index] - factor * this.residual.rho[index];
+      const proposedRhoU = source.rhoU[index] - factor * this.residual.rhoU[index];
+      const proposedRhoV = source.rhoV[index] - factor * this.residual.rhoV[index];
+      const proposedRhoE = source.rhoE[index] - factor * this.residual.rhoE[index];
       // The diagnostic residual includes the full SA source. Remove it from
       // the transport update, then apply the split source treatment below.
       const saSourceResidual = this.config.turbulence === "spalartAllmaras"
         ? this.primitive.rho[index] * this.saSource[index] * this.mesh.volumes[index]
         : 0;
       const proposedRhoNuTilde =
-        this.state.rhoNuTilde[index] -
+        source.rhoNuTilde[index] -
         turbulenceFactor * (this.residual.rhoNuTilde[index] + saSourceResidual);
       if (
         !Number.isFinite(proposedRho) ||
@@ -1226,11 +1236,34 @@ export class AxisymmetricRansSolver {
         this.counters.nanCount += 1;
         return null;
       }
-      let acceptedRho = proposedRho;
-      let acceptedRhoU = proposedRhoU;
-      let acceptedRhoV = proposedRhoV;
-      let acceptedRhoE = proposedRhoE;
-      let acceptedRhoNuTilde = proposedRhoNuTilde;
+      let sourceUpdatedRhoNuTilde = proposedRhoNuTilde;
+      if (this.config.turbulence === "spalartAllmaras") {
+        const transportedNuTilde = Math.max(
+          proposedRhoNuTilde / Math.max(proposedRho, this.config.rhoMin),
+          0
+        );
+        const sourceUpdatedNuTilde = (
+          transportedNuTilde + turbulenceDt * this.saProduction[index]
+        ) / (
+          1 +
+          turbulenceDt * this.saDestruction[index] /
+            Math.max(this.primitive.nuTilde[index], 1e-20)
+        );
+        sourceUpdatedRhoNuTilde = Math.max(proposedRho, this.config.rhoMin) *
+          sourceUpdatedNuTilde;
+      }
+
+      const candidateRho = baseWeight * (baseState?.rho[index] ?? 0) + stageWeight * proposedRho;
+      const candidateRhoU = baseWeight * (baseState?.rhoU[index] ?? 0) + stageWeight * proposedRhoU;
+      const candidateRhoV = baseWeight * (baseState?.rhoV[index] ?? 0) + stageWeight * proposedRhoV;
+      const candidateRhoE = baseWeight * (baseState?.rhoE[index] ?? 0) + stageWeight * proposedRhoE;
+      const candidateRhoNuTilde = baseWeight * (baseState?.rhoNuTilde[index] ?? 0) +
+        stageWeight * sourceUpdatedRhoNuTilde;
+      let acceptedRho = candidateRho;
+      let acceptedRhoU = candidateRhoU;
+      let acceptedRhoV = candidateRhoV;
+      let acceptedRhoE = candidateRhoE;
+      let acceptedRhoNuTilde = candidateRhoNuTilde;
       if (
         !isPhysicalConservative(
           acceptedRho,
@@ -1246,16 +1279,16 @@ export class AxisymmetricRansSolver {
         let recovered = false;
         for (let correction = 0; correction < 48; correction += 1) {
           acceptedRho =
-            this.state.rho[index] + theta * (proposedRho - this.state.rho[index]);
+            source.rho[index] + theta * (candidateRho - source.rho[index]);
           acceptedRhoU =
-            this.state.rhoU[index] + theta * (proposedRhoU - this.state.rhoU[index]);
+            source.rhoU[index] + theta * (candidateRhoU - source.rhoU[index]);
           acceptedRhoV =
-            this.state.rhoV[index] + theta * (proposedRhoV - this.state.rhoV[index]);
+            source.rhoV[index] + theta * (candidateRhoV - source.rhoV[index]);
           acceptedRhoE =
-            this.state.rhoE[index] + theta * (proposedRhoE - this.state.rhoE[index]);
+            source.rhoE[index] + theta * (candidateRhoE - source.rhoE[index]);
           acceptedRhoNuTilde =
-            this.state.rhoNuTilde[index] +
-            theta * (proposedRhoNuTilde - this.state.rhoNuTilde[index]);
+            source.rhoNuTilde[index] +
+            theta * (candidateRhoNuTilde - source.rhoNuTilde[index]);
           if (
             isPhysicalConservative(
               acceptedRho,
@@ -1280,25 +1313,10 @@ export class AxisymmetricRansSolver {
       next.rhoV[index] = acceptedRhoV;
       next.rhoE[index] = acceptedRhoE;
       const nu = this.primitive.nu[index];
-      let sourceUpdatedRhoNuTilde = acceptedRhoNuTilde;
-      if (this.config.turbulence === "spalartAllmaras") {
-        const transportedNuTilde = Math.max(
-          acceptedRhoNuTilde / Math.max(acceptedRho, this.config.rhoMin),
-          0
-        );
-        const sourceUpdatedNuTilde = (
-          transportedNuTilde + turbulenceDt * this.saProduction[index]
-        ) / (
-          1 +
-          turbulenceDt * this.saDestruction[index] /
-            Math.max(this.primitive.nuTilde[index], 1e-20)
-        );
-        sourceUpdatedRhoNuTilde = acceptedRho * sourceUpdatedNuTilde;
-      }
       const maximumRhoNuTilde = next.rho[index] * nu *
         this.config.maxModifiedViscosityRatio;
       next.rhoNuTilde[index] = Math.min(
-        Math.max(sourceUpdatedRhoNuTilde, 0),
+        Math.max(acceptedRhoNuTilde, 0),
         maximumRhoNuTilde
       );
       const turbulenceTolerance = Math.max(
@@ -1306,16 +1324,19 @@ export class AxisymmetricRansSolver {
         next.rho[index] * nu * 1e-8
       );
       if (
-        sourceUpdatedRhoNuTilde < -turbulenceTolerance ||
-        sourceUpdatedRhoNuTilde > maximumRhoNuTilde + turbulenceTolerance
+        acceptedRhoNuTilde < -turbulenceTolerance ||
+        acceptedRhoNuTilde > maximumRhoNuTilde + turbulenceTolerance
       ) {
         this.counters.turbulenceClips += 1;
       }
-      this.lastUpdate[index] = Math.max(
-        Math.abs(next.rho[index] - this.state.rho[index]) / Math.max(Math.abs(this.state.rho[index]), 1e-12),
-        Math.abs(next.rhoU[index] - this.state.rhoU[index]) / Math.max(Math.abs(this.state.rhoU[index]), 1),
-        Math.abs(next.rhoE[index] - this.state.rhoE[index]) / Math.max(Math.abs(this.state.rhoE[index]), 1)
-      );
+      if (recordUpdate) {
+        const reference = baseState ?? source;
+        this.lastUpdate[index] = Math.max(
+          Math.abs(next.rho[index] - reference.rho[index]) / Math.max(Math.abs(reference.rho[index]), 1e-12),
+          Math.abs(next.rhoU[index] - reference.rhoU[index]) / Math.max(Math.abs(reference.rhoU[index]), 1),
+          Math.abs(next.rhoE[index] - reference.rhoE[index]) / Math.max(Math.abs(reference.rhoE[index]), 1)
+        );
+      }
     }
     return next;
   }
@@ -1335,25 +1356,58 @@ export class AxisymmetricRansSolver {
         kinematicViscosityM2S: this.referenceKinematicViscosityM2S
       }
     );
-    let next: ConservativeState | null = null;
+    let accepted = false;
     let retries = 0;
     let timeStepScale = 1;
     for (; retries < 12; retries += 1) {
-      next = this.attemptUpdate(timeStepScale, timeSteps.min);
-      if (next) break;
+      if (this.config.timeIntegrator === "forwardEuler") {
+        const next = this.attemptUpdate(timeStepScale, timeSteps.min);
+        if (next) {
+          this.nextState = this.state;
+          this.state = next;
+          accepted = true;
+        }
+      } else {
+        const baseState = this.state;
+        const firstStage = this.attemptUpdate(timeStepScale, timeSteps.min, null, false);
+        if (firstStage) {
+          const secondStageBuffer = this.stageState;
+          this.state = firstStage;
+          this.nextState = secondStageBuffer;
+          this.decodeState(false);
+          this.computeResidual();
+          const secondStage = this.attemptUpdate(
+            timeStepScale,
+            timeSteps.min,
+            baseState,
+            true
+          );
+          if (secondStage) {
+            this.state = secondStage;
+            this.nextState = baseState;
+            this.stageState = firstStage;
+            accepted = true;
+          } else {
+            this.state = baseState;
+            this.nextState = firstStage;
+            this.stageState = secondStageBuffer;
+            this.decodeState(false);
+          }
+        }
+      }
+      if (accepted) break;
       this.counters.rejectedSteps += 1;
       this.cflScale = Math.max(this.cflScale * 0.5, 0.02);
       this.effectiveCfl = Math.max(this.effectiveCfl * 0.5, 0.001);
       timeStepScale *= 0.5;
+      if (this.config.timeIntegrator === "sspRk2") this.computeResidual();
     }
-    if (!next) {
+    if (!accepted) {
       this.failed = true;
       this.failureReason = "The timestep remained nonphysical after adaptive CFL and positivity recovery.";
       return;
     }
     if (retries === 0) this.cflScale = Math.min(this.cflScale * 1.03, 1);
-    this.nextState = this.state;
-    this.state = next;
     this.iteration += 1;
     this.lastDtS = timeSteps.min * timeStepScale;
     this.maxLocalDtS = timeSteps.max * timeStepScale;
@@ -1443,6 +1497,7 @@ export class AxisymmetricRansSolver {
       dtS: this.lastDtS,
       maxLocalDtS: this.maxLocalDtS,
       timeStepping: this.config.timeStepping,
+      timeIntegrator: this.config.timeIntegrator,
       minDensityKgM3,
       minPressurePa,
       minTemperatureK,

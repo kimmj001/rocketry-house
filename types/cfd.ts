@@ -17,6 +17,7 @@ export type NozzleCfdInputs = {
   thermoModel?: "constantGas" | "hydroloxFrozen";
   turbulence?: "laminar" | "spalartAllmaras";
   reconstruction?: "firstOrder" | "musclVenkatakrishnan";
+  timeIntegrator?: "forwardEuler" | "sspRk2";
   cfl?: number;
   cflRamp?: boolean;
   turbulentPrandtl?: number;
@@ -113,6 +114,7 @@ export type NozzleCfdResult = {
       computeResiduals: boolean;
       weightedLeastSquaresGradients?: boolean;
       musclVenkatakrishnan?: boolean;
+      sspRk2?: boolean;
       viscousFlux?: boolean;
       spalartAllmaras?: boolean;
     };

@@ -44,7 +44,8 @@ function createInteractiveConfig(): RansSolverConfig {
     ...base,
     ...dimensions,
     reconstruction: "musclVenkatakrishnan",
-    iterationsPerBatch: 16
+    timeIntegrator: "sspRk2",
+    iterationsPerBatch: 8
   };
 }
 
@@ -842,6 +843,14 @@ export function NozzleCfdLab() {
                   <option value="localPseudoTime">Local pseudo-time - fast steady RANS</option>
                   <option value="global">Global explicit - transient</option>
                 </SelectControl>
+                <SelectControl
+                  label="Time integrator"
+                  value={config.timeIntegrator}
+                  onChange={(value) => updateConfig({ ...config, timeIntegrator: value as RansSolverConfig["timeIntegrator"] })}
+                >
+                  <option value="sspRk2">SSP-RK2 - shock-resolving</option>
+                  <option value="forwardEuler">Forward Euler - fast preview</option>
+                </SelectControl>
                 <NumberControl label="Initial CFL" value={config.cfl} step={0.01} min={0.005} max={0.5} onChange={(value) => updateConfig({ ...config, cfl: value })} />
                 <NumberControl label="Iterations per batch" value={config.iterationsPerBatch} step={1} min={1} max={64} onChange={(value) => updateConfig({ ...config, iterationsPerBatch: value })} />
                 <label className="flex items-center justify-between gap-3 text-xs text-white/58">
@@ -853,6 +862,9 @@ export function NozzleCfdLab() {
                     className="h-4 w-4 accent-orange-400"
                   />
                 </label>
+                <p className="border-l-2 border-orange-400/55 pl-3 text-[11px] leading-5 text-white/48">
+                  Compressible finite volume with MUSCL reconstruction, HLLC shock flux, and two-stage SSP-RK2 integration.
+                </p>
               </div>
             </section>
 
@@ -920,7 +932,7 @@ export function NozzleCfdLab() {
                   ? `${formatNumber(snapshot.ranges[fieldName].min)} to ${formatNumber(snapshot.ranges[fieldName].max)} ${selectedField.unit}`
                   : ""}
               </span>
-              <span>Cell-centered axisymmetric field · r &gt;= 0</span>
+              <span>Cell-centered axisymmetric field | r &gt;= 0</span>
             </div>
           </section>
 
@@ -931,9 +943,13 @@ export function NozzleCfdLab() {
             </div>
           ) : null}
 
-          <section className="grid border-b border-white/10 sm:grid-cols-3 xl:grid-cols-6">
+          <section className="grid border-b border-white/10 sm:grid-cols-3 xl:grid-cols-7">
             {[
               ["Iteration", diagnostics?.iteration.toLocaleString() ?? "0"],
+              [
+                "Integrator",
+                (diagnostics?.timeIntegrator ?? config.timeIntegrator) === "sspRk2" ? "SSP-RK2" : "Euler"
+              ],
               ["CFL", diagnostics ? diagnostics.cfl.toFixed(3) : "0.000"],
               [
                 diagnostics?.timeStepping === "localPseudoTime" ? "Local dt range" : "Global dt",

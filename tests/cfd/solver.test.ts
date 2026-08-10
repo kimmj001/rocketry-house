@@ -86,6 +86,36 @@ test("low-resolution nozzle remains finite and accelerates downstream", () => {
   assert.ok(downstreamMach > 1);
 });
 
+test("SSP-RK2 is the default and performs a distinct two-stage conservative update", () => {
+  assert.equal(DEFAULT_RANS_CONFIG.timeIntegrator, "sspRk2");
+  const shared = {
+    ...DEFAULT_RANS_CONFIG,
+    nx: 30,
+    nr: 10,
+    resolution: "development" as const,
+    initializationMode: "coldStart" as const,
+    turbulence: "laminar" as const,
+    reconstruction: "firstOrder" as const,
+    fixedTimeStepS: 1e-8,
+    cflRamp: false
+  };
+  const rk2 = new AxisymmetricRansSolver({ ...shared, timeIntegrator: "sspRk2" });
+  const euler = new AxisymmetricRansSolver({ ...shared, timeIntegrator: "forwardEuler" });
+  const rk2Snapshot = rk2.step(1);
+  const eulerSnapshot = euler.step(1);
+  const pressureDifference = rk2Snapshot.fields.pressure.reduce(
+    (sum, value, index) => sum + Math.abs(value - eulerSnapshot.fields.pressure[index]),
+    0
+  );
+
+  assert.equal(rk2Snapshot.diagnostics.timeIntegrator, "sspRk2");
+  assert.equal(rk2Snapshot.diagnostics.failed, false, rk2Snapshot.diagnostics.failureReason);
+  assert.equal(rk2Snapshot.diagnostics.nanCount, 0);
+  assert.ok(rk2Snapshot.diagnostics.minDensityKgM3 > 0);
+  assert.ok(rk2Snapshot.diagnostics.minPressurePa > 0);
+  assert.ok(pressureDifference > 1e-6, "RK2 must recompute and apply the second-stage flux");
+});
+
 test("default mesh includes a long, finite external plume domain at one atmosphere", () => {
   const solver = new AxisymmetricRansSolver({
     ...DEFAULT_RANS_CONFIG,

@@ -4,6 +4,7 @@ export type ThermoModel = "constantGas" | "hydroloxFrozen";
 export type ResolutionPreset = "development" | "standard" | "high";
 export type InitializationMode = "coldStart" | "quasiSteady";
 export type TimeSteppingMode = "global" | "localPseudoTime";
+export type TimeIntegrator = "forwardEuler" | "sspRk2";
 export type CfdFieldName =
   | "mach"
   | "pressure"
@@ -44,6 +45,7 @@ export type RansSolverConfig = {
   thermoModel: ThermoModel;
   initializationMode: InitializationMode;
   timeStepping: TimeSteppingMode;
+  timeIntegrator: TimeIntegrator;
   turbulence: TurbulenceMode;
   reconstruction: ReconstructionMode;
   cfl: number;
@@ -145,6 +147,7 @@ export type SolverDiagnostics = {
   dtS: number;
   maxLocalDtS: number;
   timeStepping: TimeSteppingMode;
+  timeIntegrator: TimeIntegrator;
   minDensityKgM3: number;
   minPressurePa: number;
   minTemperatureK: number;
@@ -219,6 +222,7 @@ export const DEFAULT_RANS_CONFIG: RansSolverConfig = {
   thermoModel: "hydroloxFrozen",
   initializationMode: "coldStart",
   timeStepping: "localPseudoTime",
+  timeIntegrator: "sspRk2",
   turbulence: "spalartAllmaras",
   reconstruction: "musclVenkatakrishnan",
   cfl: 0.05,
