@@ -40,13 +40,14 @@ import { SAVED_NOZZLE_COLLECTION, type SavedNozzleDesign } from "@/types/nozzle"
 
 function createInteractiveConfig(): RansSolverConfig {
   const base = structuredClone(DEFAULT_RANS_CONFIG);
+  base.resolution = "standard";
   const dimensions = INTERACTIVE_RANS_DIMENSIONS[base.resolution];
   return {
     ...base,
     ...dimensions,
     reconstruction: "musclVenkatakrishnan",
     timeIntegrator: "sspRk2",
-    iterationsPerBatch: 8
+    iterationsPerBatch: 4
   };
 }
 
@@ -980,6 +981,18 @@ export function NozzleCfdLab() {
             ))}
           </section>
 
+          {diagnostics ? (
+            <div className={`border-b px-5 py-3 text-xs ${
+              diagnostics.converged
+                ? "border-emerald-300/20 bg-emerald-300/8 text-emerald-100"
+                : "border-amber-300/20 bg-amber-300/8 text-amber-100"
+            }`}>
+              {diagnostics.converged
+                ? "Converged solution: residual and numerical mass-flow checks passed."
+                : "Not validated yet: the flow is still developing. Do not use pressure, velocity, thrust, or mass-flow values until residuals and mass-flow balance converge."}
+            </div>
+          ) : null}
+
           <div className="grid gap-0 xl:grid-cols-2">
             <section className="border-b border-white/10 p-5 xl:border-r">
               <div className="flex items-center justify-between">
@@ -1004,6 +1017,7 @@ export function NozzleCfdLab() {
 
             <section className="border-b border-white/10 p-5">
               <h2 className="text-sm font-semibold">Mass-flow balance</h2>
+              <p className="mt-1 text-xs text-white/40">Conservative numerical face-flux integral</p>
               <div className="mt-4 grid gap-2">
                 {(diagnostics?.massFlow ?? []).map((station) => (
                   <div key={station.station} className="grid grid-cols-[1fr_auto] items-center border-b border-white/8 py-2 text-sm">
@@ -1022,7 +1036,7 @@ export function NozzleCfdLab() {
                 ["Minimum temperature", diagnostics ? `${diagnostics.minTemperatureK.toFixed(2)} K` : "n/a"],
                 ["Max mu_t/mu", diagnostics ? diagnostics.maxTurbulentViscosityRatio.toFixed(2) : "n/a"],
                 ["Limited faces", diagnostics?.limitedFaces.toLocaleString() ?? "0"],
-                ["First-order fallbacks", diagnostics?.firstOrderFallbacks.toLocaleString() ?? "0"],
+                ["MUSCL fallback faces", diagnostics?.firstOrderFallbacks.toLocaleString() ?? "0"],
                 ["Rejected steps", diagnostics?.rejectedSteps.toLocaleString() ?? "0"],
                 ["Positivity corrections", diagnostics?.positivityCorrections.toLocaleString() ?? "0"],
                 ["SA variable clips", diagnostics?.turbulenceClips.toLocaleString() ?? "0"],

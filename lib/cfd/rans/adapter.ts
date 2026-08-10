@@ -45,7 +45,7 @@ function configFromInputs(inputs: NozzleCfdInputs): Partial<RansSolverConfig> {
     turbulence: inputs.turbulence ?? "spalartAllmaras",
     reconstruction: inputs.reconstruction ?? "musclVenkatakrishnan",
     timeIntegrator: inputs.timeIntegrator ?? "sspRk2",
-    cfl: inputs.cfl ?? 0.05,
+    cfl: inputs.cfl ?? 0.02,
     cflRamp: inputs.cflRamp ?? true,
     turbulentPrandtl: inputs.turbulentPrandtl ?? 0.9,
     nx: inputs.meshDensity === "coarse" ? 68 : undefined,

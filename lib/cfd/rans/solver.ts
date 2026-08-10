@@ -5,7 +5,6 @@ import {
   radialFaceAreaVector,
   radialFaceRadius,
   ransCellIndex,
-  ringAreaAtCell,
   throatX
 } from "./geometry";
 import {
@@ -58,6 +57,9 @@ const SA_CV1_CUBED = SA_CV1 * SA_CV1 * SA_CV1;
 const SA_CW3_SIXTH = SA_CW3 * SA_CW3 * SA_CW3 * SA_CW3 * SA_CW3 * SA_CW3;
 const LOCAL_DT_NEIGHBOR_RATIO = 2;
 const LOCAL_DT_GLOBAL_RATIO_CAP = 16;
+const COLD_START_STABILIZATION_ITERATIONS = 240;
+const RESIDUAL_SMOOTHING_PASSES = 3;
+const RESIDUAL_SMOOTHING_EPSILON = 0.11;
 
 type GradientSet = {
   rho: ScalarReconstruction;
@@ -203,6 +205,7 @@ export class AxisymmetricRansSolver {
   private stageState: ConservativeState;
   private primitive: PrimitiveArrays;
   private residual: ConservativeState;
+  private smoothedResidual: ConservativeState;
   private gradients: GradientSet;
   private saSource: Float64Array;
   private saProduction: Float64Array;
@@ -229,6 +232,9 @@ export class AxisymmetricRansSolver {
   private maxLocalDtS = 0;
   private effectiveCfl = 0;
   private cflScale = 1;
+  private axialMassFlowByFace: Float64Array;
+  private coldStartIgnited = false;
+  private highOrderUnlocked = false;
   private failed = false;
   private failureReason: string | undefined;
   private counters: Counters = {
@@ -244,6 +250,7 @@ export class AxisymmetricRansSolver {
 
   constructor(config: Partial<RansSolverConfig> = {}) {
     this.config = mergeConfig(config);
+    this.highOrderUnlocked = this.config.initializationMode !== "coldStart";
     this.mesh = createBodyFittedMesh(
       this.config.geometry,
       this.config.resolution,
@@ -283,6 +290,8 @@ export class AxisymmetricRansSolver {
     this.stageState = createConservativeState(this.mesh.cells);
     this.primitive = createPrimitiveArrays(this.mesh.cells);
     this.residual = createConservativeState(this.mesh.cells);
+    this.smoothedResidual = createConservativeState(this.mesh.cells);
+    this.axialMassFlowByFace = new Float64Array(this.mesh.nx + 1);
     this.saSource = new Float64Array(this.mesh.cells);
     this.saProduction = new Float64Array(this.mesh.cells);
     this.saDestruction = new Float64Array(this.mesh.cells);
@@ -328,6 +337,42 @@ export class AxisymmetricRansSolver {
         this.state.rhoNuTilde[index] = 0;
       }
     }
+  }
+
+  private igniteColdStartChamber() {
+    if (this.config.initializationMode !== "coldStart" || this.coldStartIgnited) return;
+    const pressure = Math.max(this.config.chamberPressurePa, this.config.pressureMin);
+    const temperature = Math.max(this.config.chamberTemperatureK, this.config.temperatureMin);
+    for (let i = 0; i < this.mesh.nx; i += 1) {
+      if (this.mesh.xCenters[i] > this.config.geometry.chamberLengthM) break;
+      const thermo = thermodynamicProperties(
+        this.thermoCoordinate(this.mesh.xCenters[i]),
+        temperature,
+        this.config
+      );
+      const rho = pressure / (thermo.gasConstant * temperature);
+      const nu = thermo.viscosity / Math.max(rho, this.config.rhoMin);
+      const nuTilde = this.config.turbulence === "spalartAllmaras" ? 3 * nu : 0;
+      const conserved = conservativeFromPrimitive({
+        rho,
+        u: 0,
+        v: 0,
+        p: pressure,
+        temperature,
+        nuTilde,
+        thermo
+      });
+      for (let j = 0; j < this.mesh.nr; j += 1) {
+        const index = ransCellIndex(i, j, this.mesh);
+        this.state.rho[index] = conserved[0];
+        this.state.rhoU[index] = conserved[1];
+        this.state.rhoV[index] = conserved[2];
+        this.state.rhoE[index] = conserved[3];
+        this.state.rhoNuTilde[index] = rho * nuTilde;
+      }
+    }
+    this.coldStartIgnited = true;
+    this.decodeState(false);
   }
 
   private initializeQuasiOneDimensional() {
@@ -552,7 +597,7 @@ export class AxisymmetricRansSolver {
     thermoBase: ThermodynamicBase,
     target: FacePrimitive
   ): FacePrimitive {
-    if (this.config.reconstruction === "firstOrder") {
+    if (!this.highOrderReconstructionActive()) {
       return this.cellCenteredFace(index, thermoBase, target);
     }
 
@@ -605,6 +650,32 @@ export class AxisymmetricRansSolver {
 
   private outletFace(interior: FacePrimitive): FacePrimitive {
     return characteristicAmbientFace(interior, 1, 0, this.config);
+  }
+
+  private highOrderReconstructionActive() {
+    if (this.config.reconstruction !== "musclVenkatakrishnan") return false;
+    return this.highOrderUnlocked;
+  }
+
+  private updateHighOrderUnlock() {
+    if (
+      this.highOrderUnlocked ||
+      this.config.reconstruction !== "musclVenkatakrishnan" ||
+      this.iteration < COLD_START_STABILIZATION_ITERATIONS
+    ) return;
+    const stationFlows = this.massFlowDiagnostics().map((station) => station.massFlowKgS);
+    const maximumFlow = Math.max(...stationFlows);
+    const minimumFlow = Math.min(...stationFlows);
+    if (maximumFlow > 1e-8 && minimumFlow > maximumFlow * 0.1) {
+      this.highOrderUnlocked = true;
+    }
+  }
+
+  private inletTotalConditions() {
+    return {
+      pressurePa: this.config.chamberPressurePa,
+      temperatureK: this.config.chamberTemperatureK
+    };
   }
 
   private farfieldFace(interior: FacePrimitive, normalX: number, normalR: number): FacePrimitive {
@@ -718,7 +789,7 @@ export class AxisymmetricRansSolver {
       Math.max(right.p + left.p, 1e-20);
     let inviscidLeft = left;
     let inviscidRight = right;
-    if (pressureSensor > 0.06) {
+    if (this.highOrderReconstructionActive() && pressureSensor > 0.12) {
       // Reconstructing through a discontinuity can create an undershoot before
       // the Riemann solver sees it. Use the exact cell averages at shocked
       // internal faces while retaining MUSCL everywhere else.
@@ -756,6 +827,7 @@ export class AxisymmetricRansSolver {
     const scalarFlux = hllc.massFlux * upwindNuTilde;
     if (leftIndex >= 0) addFlux(this.residual, leftIndex, 1, area, hllc.flux, viscous, scalarFlux);
     if (rightIndex >= 0) addFlux(this.residual, rightIndex, -1, area, hllc.flux, viscous, scalarFlux);
+    return hllc.massFlux;
   }
 
   private addAxisymmetricAndTurbulenceSources() {
@@ -874,7 +946,7 @@ export class AxisymmetricRansSolver {
           faceThermoBase,
           this.rightFaceScratch
         );
-        this.accumulateFace(
+        const massFlux = this.accumulateFace(
           leftIndex,
           rightIndex,
           left,
@@ -883,6 +955,7 @@ export class AxisymmetricRansSolver {
           0,
           area
         );
+        this.axialMassFlowByFace[faceI] += massFlux * area;
       }
       if (leftOuter <= rightOuter + 1e-14) leftJ += 1;
       if (rightOuter <= leftOuter + 1e-14) rightJ += 1;
@@ -920,8 +993,13 @@ export class AxisymmetricRansSolver {
 
   private computeResidual() {
     clearState(this.residual);
+    this.axialMassFlowByFace.fill(0);
+    this.counters.limitedFaces = 0;
+    this.counters.hllcFallbacks = 0;
+    this.counters.firstOrderFallbacks = 0;
     this.decodeState();
     this.gradients = this.computeGradients(this.gradients);
+    const inlet = this.inletTotalConditions();
 
     for (let faceI = 0; faceI <= this.mesh.nx; faceI += 1) {
       if (faceI === this.mesh.nozzleExitIndex + 1) {
@@ -946,15 +1024,22 @@ export class AxisymmetricRansSolver {
             faceThermoBase,
             this.rightFaceScratch
           );
-          this.accumulateFace(
+          const massFlux = this.accumulateFace(
             -1,
             rightIndex,
-            stagnationInletFace(right, this.config),
+            stagnationInletFace(
+              right,
+              this.config,
+              inlet.pressurePa,
+              inlet.temperatureK,
+              0.16
+            ),
             right,
             1,
             0,
             area
           );
+          this.axialMassFlowByFace[faceI] += massFlux * area;
         } else if (faceI === this.mesh.nx) {
           const leftIndex = ransCellIndex(this.mesh.nx - 1, j, this.mesh);
           const left = this.cellFace(
@@ -964,7 +1049,16 @@ export class AxisymmetricRansSolver {
             faceThermoBase,
             this.leftFaceScratch
           );
-          this.accumulateFace(leftIndex, -1, left, this.outletFace(left), 1, 0, area);
+          const massFlux = this.accumulateFace(
+            leftIndex,
+            -1,
+            left,
+            this.outletFace(left),
+            1,
+            0,
+            area
+          );
+          this.axialMassFlowByFace[faceI] += massFlux * area;
         } else {
           const leftIndex = ransCellIndex(faceI - 1, j, this.mesh);
           const rightIndex = ransCellIndex(faceI, j, this.mesh);
@@ -983,7 +1077,7 @@ export class AxisymmetricRansSolver {
             faceThermoBase,
             this.rightFaceScratch
           );
-          this.accumulateFace(
+          const massFlux = this.accumulateFace(
             leftIndex,
             rightIndex,
             left,
@@ -992,6 +1086,7 @@ export class AxisymmetricRansSolver {
             0,
             area
           );
+          this.axialMassFlowByFace[faceI] += massFlux * area;
         }
       }
     }
@@ -1067,24 +1162,81 @@ export class AxisymmetricRansSolver {
     this.addAxisymmetricAndTurbulenceSources();
   }
 
+  private smoothResidualForSteadyState() {
+    if (this.config.timeStepping !== "localPseudoTime") return;
+    const keys = ["rho", "rhoU", "rhoV", "rhoE", "rhoNuTilde"] as const;
+    const exchangePair = (
+      source: Float64Array,
+      target: Float64Array,
+      leftIndex: number,
+      rightIndex: number
+    ) => {
+      const leftVolume = this.mesh.volumes[leftIndex];
+      const rightVolume = this.mesh.volumes[rightIndex];
+      const exchange = RESIDUAL_SMOOTHING_EPSILON * Math.min(leftVolume, rightVolume) * (
+        source[rightIndex] / Math.max(rightVolume, 1e-30) -
+        source[leftIndex] / Math.max(leftVolume, 1e-30)
+      );
+      target[leftIndex] += exchange;
+      target[rightIndex] -= exchange;
+    };
+
+    for (let pass = 0; pass < RESIDUAL_SMOOTHING_PASSES; pass += 1) {
+      for (const key of keys) this.smoothedResidual[key].set(this.residual[key]);
+      for (let i = 0; i < this.mesh.nx; i += 1) {
+        for (let j = 1; j < this.mesh.nr; j += 1) {
+          const inner = ransCellIndex(i, j - 1, this.mesh);
+          const outer = ransCellIndex(i, j, this.mesh);
+          for (const key of keys) {
+            exchangePair(this.residual[key], this.smoothedResidual[key], inner, outer);
+          }
+        }
+      }
+      for (let i = 1; i < this.mesh.nx; i += 1) {
+        if (i === this.mesh.nozzleExitIndex + 1) continue;
+        for (let j = 0; j < this.mesh.nr; j += 1) {
+          const left = ransCellIndex(i - 1, j, this.mesh);
+          const right = ransCellIndex(i, j, this.mesh);
+          for (const key of keys) {
+            exchangePair(this.residual[key], this.smoothedResidual[key], left, right);
+          }
+        }
+      }
+      const previousResidual = this.residual;
+      this.residual = this.smoothedResidual;
+      this.smoothedResidual = previousResidual;
+    }
+  }
+
   private currentCfl() {
     const coldStart = this.config.initializationMode === "coldStart";
-    const firstRampEnd = coldStart ? 40 : 150;
-    const secondRampEnd = coldStart ? 120 : 350;
-    const thirdRampEnd = coldStart ? 240 : 700;
-    const ramp = !this.config.cflRamp
-      ? 1
-      : this.iteration < firstRampEnd
-        ? 1
-        : this.iteration < secondRampEnd
-          ? 2
-          : this.iteration < thirdRampEnd
-            ? 4
-            : 10;
-    const maximumCfl = coldStart && this.config.reconstruction === "musclVenkatakrishnan"
-      ? 0.2
-      : 0.5;
-    return clamp(this.config.cfl * ramp * this.cflScale, 0.001, maximumCfl);
+    const startupFactor = this.config.cflRamp && coldStart
+      ? 0.5 + 0.5 * clamp(this.iteration / COLD_START_STABILIZATION_ITERATIONS, 0, 1)
+      : 1;
+    const maximumCfl = this.config.reconstruction === "musclVenkatakrishnan" ? 0.12 : 0.2;
+    return clamp(this.config.cfl * startupFactor * this.cflScale, 0.002, maximumCfl);
+  }
+
+  private adaptCflFromResidual(point: SolverResidualPoint) {
+    if (!this.config.cflRamp) return;
+    if (
+      this.config.initializationMode === "coldStart" &&
+      this.iteration < COLD_START_STABILIZATION_ITERATIONS
+    ) return;
+    if (point.iteration % 8 !== 0 || this.residualHistory.length < 8) return;
+    const previous = this.residualHistory.at(-8);
+    if (!previous) return;
+    const metric = (sample: SolverResidualPoint) => Math.max(
+      sample.continuity,
+      sample.axialMomentum,
+      sample.radialMomentum,
+      sample.energy,
+      1e-20
+    );
+    const ratio = metric(previous) / metric(point);
+    const exponent = ratio >= 1 ? 0.08 : 0.28;
+    const factor = clamp(ratio ** exponent, 0.72, 1.06);
+    this.cflScale = clamp(this.cflScale * factor, 0.2, 6);
   }
 
   private precomputeTimeStepGeometry() {
@@ -1343,8 +1495,8 @@ export class AxisymmetricRansSolver {
 
   private advanceOne() {
     if (this.failed) return;
+    this.igniteColdStartChamber();
     this.computeResidual();
-    const timeSteps = this.computeTimeSteps();
     const point = residualNorm(
       this.residual,
       this.mesh,
@@ -1356,6 +1508,9 @@ export class AxisymmetricRansSolver {
         kinematicViscosityM2S: this.referenceKinematicViscosityM2S
       }
     );
+    this.adaptCflFromResidual(point);
+    this.smoothResidualForSteadyState();
+    const timeSteps = this.computeTimeSteps();
     let accepted = false;
     let retries = 0;
     let timeStepScale = 1;
@@ -1376,6 +1531,7 @@ export class AxisymmetricRansSolver {
           this.nextState = secondStageBuffer;
           this.decodeState(false);
           this.computeResidual();
+          this.smoothResidualForSteadyState();
           const secondStage = this.attemptUpdate(
             timeStepScale,
             timeSteps.min,
@@ -1400,14 +1556,19 @@ export class AxisymmetricRansSolver {
       this.cflScale = Math.max(this.cflScale * 0.5, 0.02);
       this.effectiveCfl = Math.max(this.effectiveCfl * 0.5, 0.001);
       timeStepScale *= 0.5;
-      if (this.config.timeIntegrator === "sspRk2") this.computeResidual();
+      if (this.config.timeIntegrator === "sspRk2") {
+        this.computeResidual();
+        this.smoothResidualForSteadyState();
+      }
     }
     if (!accepted) {
       this.failed = true;
       this.failureReason = "The timestep remained nonphysical after adaptive CFL and positivity recovery.";
       return;
     }
-    if (retries === 0) this.cflScale = Math.min(this.cflScale * 1.03, 1);
+    if (retries === 0 && !this.config.cflRamp) {
+      this.cflScale = Math.min(this.cflScale * 1.03, 1);
+    }
     this.iteration += 1;
     this.lastDtS = timeSteps.min * timeStepScale;
     this.maxLocalDtS = timeSteps.max * timeStepScale;
@@ -1415,6 +1576,7 @@ export class AxisymmetricRansSolver {
     this.residualHistory.push(point);
     if (this.residualHistory.length > 600) this.residualHistory.shift();
     this.decodeState(false);
+    this.updateHighOrderUnlock();
   }
 
   step(iterations = 1) {
@@ -1424,27 +1586,29 @@ export class AxisymmetricRansSolver {
   }
 
   private massFlowDiagnostics(): MassFlowDiagnostic[] {
-    const throatIndex = this.mesh.throatIndex;
-    const exitIndex = this.mesh.nozzleExitIndex;
-    const stations: Array<[MassFlowDiagnostic["station"], number]> = [
-      ["chamber", Math.max(0, Math.round(throatIndex * 0.35))],
-      ["preThroat", Math.max(0, throatIndex - Math.max(2, Math.round(exitIndex * 0.04)))],
-      ["throat", throatIndex],
-      ["midDivergent", Math.round(0.5 * (throatIndex + exitIndex))],
-      ["exit", exitIndex]
-    ];
-    return stations.map(([station, i]) => {
-      let massFlowKgS = 0;
-      for (let j = 0; j < this.mesh.nr; j += 1) {
-        const index = ransCellIndex(i, j, this.mesh);
-        massFlowKgS += this.primitive.rho[index] * this.primitive.u[index] * ringAreaAtCell(this.mesh, i, j);
+    const exitFace = this.mesh.nozzleExitIndex + 1;
+    const targetThroatX = throatX(this.config.geometry);
+    let throatFace = 1;
+    for (let face = 2; face <= exitFace; face += 1) {
+      if (
+        Math.abs(this.mesh.xFaces[face] - targetThroatX) <
+        Math.abs(this.mesh.xFaces[throatFace] - targetThroatX)
+      ) {
+        throatFace = face;
       }
-      return {
-        station,
-        xM: this.mesh.xCenters[i],
-        massFlowKgS
-      };
-    });
+    }
+    const stations: Array<[MassFlowDiagnostic["station"], number]> = [
+      ["chamber", Math.max(1, Math.round(throatFace * 0.35))],
+      ["preThroat", Math.max(1, throatFace - Math.max(2, Math.round(exitFace * 0.04)))],
+      ["throat", throatFace],
+      ["midDivergent", Math.round(0.5 * (throatFace + exitFace))],
+      ["exit", exitFace]
+    ];
+    return stations.map(([station, face]) => ({
+      station,
+      xM: this.mesh.xFaces[face],
+      massFlowKgS: this.axialMassFlowByFace[face]
+    }));
   }
 
   getDiagnostics(): SolverDiagnostics {
@@ -1479,7 +1643,16 @@ export class AxisymmetricRansSolver {
       .filter((value) => value > 1e-12);
     const meanMassFlow = positiveMassFlow.reduce((sum, value) => sum + value, 0) /
       Math.max(positiveMassFlow.length, 1);
-    const massFlowRelativeSpread = positiveMassFlow.length === massFlow.length
+    const maximumPositiveMassFlow = positiveMassFlow.length > 0
+      ? Math.max(...positiveMassFlow)
+      : 0;
+    const minimumPositiveMassFlow = positiveMassFlow.length > 0
+      ? Math.min(...positiveMassFlow)
+      : 0;
+    const flowEstablished = positiveMassFlow.length === massFlow.length &&
+      maximumPositiveMassFlow > 1e-8 &&
+      minimumPositiveMassFlow > maximumPositiveMassFlow * 0.05;
+    const massFlowRelativeSpread = flowEstablished
       ? (Math.max(...positiveMassFlow) - Math.min(...positiveMassFlow)) /
         Math.max(Math.abs(meanMassFlow), 1e-12)
       : 1e9;

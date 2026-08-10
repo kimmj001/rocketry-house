@@ -225,7 +225,7 @@ export const DEFAULT_RANS_CONFIG: RansSolverConfig = {
   timeIntegrator: "sspRk2",
   turbulence: "spalartAllmaras",
   reconstruction: "musclVenkatakrishnan",
-  cfl: 0.05,
+  cfl: 0.02,
   cflRamp: true,
   turbulentPrandtl: 0.9,
   maxModifiedViscosityRatio: 10000,

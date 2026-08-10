@@ -23,10 +23,19 @@ function ambientState(config: RansSolverConfig) {
 
 export function stagnationInletFace(
   interior: FacePrimitive,
-  config: RansSolverConfig
+  config: RansSolverConfig,
+  totalPressureOverridePa?: number,
+  totalTemperatureOverrideK?: number,
+  relaxation = 1
 ): FacePrimitive {
-  const totalTemperature = Math.max(config.chamberTemperatureK, config.temperatureMin);
-  const totalPressure = Math.max(config.chamberPressurePa, config.pressureMin);
+  const totalTemperature = Math.max(
+    totalTemperatureOverrideK ?? config.chamberTemperatureK,
+    config.temperatureMin
+  );
+  const totalPressure = Math.max(
+    totalPressureOverridePa ?? config.chamberPressurePa,
+    config.pressureMin
+  );
   const thermo = thermodynamicProperties(0, totalTemperature, config);
   const gamma = thermo.gamma;
   const gasConstant = thermo.gasConstant;
@@ -69,14 +78,30 @@ export function stagnationInletFace(
   const nuTilde = config.turbulence === "spalartAllmaras"
     ? 3 * localThermo.viscosity / rho
     : 0;
+  const inletRelaxation = clamp(relaxation, 0.01, 1);
+  if (inletRelaxation >= 1 - 1e-12) {
+    return {
+      rho,
+      u: mach * soundSpeed,
+      v: 0,
+      p,
+      temperature,
+      nuTilde,
+      thermo: localThermo
+    };
+  }
+  const relaxedTemperature = interior.temperature +
+    inletRelaxation * (temperature - interior.temperature);
+  const relaxedPressure = interior.p + inletRelaxation * (p - interior.p);
+  const relaxedThermo = thermodynamicProperties(0, relaxedTemperature, config);
   return {
-    rho,
-    u: mach * soundSpeed,
-    v: 0,
-    p,
-    temperature,
-    nuTilde,
-    thermo: localThermo
+    rho: relaxedPressure / Math.max(relaxedThermo.gasConstant * relaxedTemperature, 1e-30),
+    u: interior.u + inletRelaxation * (mach * soundSpeed - interior.u),
+    v: interior.v * (1 - inletRelaxation),
+    p: relaxedPressure,
+    temperature: relaxedTemperature,
+    nuTilde: interior.nuTilde + inletRelaxation * (nuTilde - interior.nuTilde),
+    thermo: relaxedThermo
   };
 }
 
