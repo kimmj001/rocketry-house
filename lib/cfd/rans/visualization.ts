@@ -16,12 +16,11 @@ export function pressureContrastScale(
     if (Number.isFinite(deviation)) deviations.push(deviation);
   }
   deviations.sort((left, right) => left - right);
-  const percentileIndex = Math.floor(Math.max(0, deviations.length - 1) * 0.97);
-  return Math.max(
-    ambientPressurePa * 0.15,
-    (deviations[percentileIndex] ?? 0) * 1.75,
-    750
-  );
+  const percentileIndex = Math.floor(Math.max(0, deviations.length - 1) * 0.82);
+  const minimumScalePa = Math.max(ambientPressurePa * 0.05, 750);
+  const maximumScalePa = Math.max(ambientPressurePa * 0.18, minimumScalePa);
+  const representativeScalePa = (deviations[percentileIndex] ?? 0) * 1.2;
+  return Math.min(Math.max(representativeScalePa, minimumScalePa), maximumScalePa);
 }
 
 export function pressureContrastPosition(

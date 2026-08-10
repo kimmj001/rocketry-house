@@ -1,8 +1,8 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, ChevronDown, ChevronUp, Clock3, Cloud, CreditCard, Database, Download, FolderKanban, Heart, Lock, MessageSquare, RefreshCw, Search, ShieldAlert, UserCog, Users } from "lucide-react";
+import { Activity, ChevronRight, Clock3, Cloud, CreditCard, Database, Download, ExternalLink, FolderKanban, Heart, Lock, MessageSquare, RefreshCw, Search, ShieldAlert, UserCog, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AUTH_ACCOUNTS_KEY, AUTH_STORAGE_KEY, normalizeEmail, type AccountAccessStatus, type AuthUser } from "@/lib/auth";
@@ -79,7 +79,7 @@ export function AccountStatusManager() {
   const [statusFilter, setStatusFilter] = useState<AccountAccessStatus | "all">("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | "cloud" | "browser">("all");
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
-  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [activityAccountKey, setActivityAccountKey] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [directoryStatus, setDirectoryStatus] = useState<DirectoryStatus>({
     loading: true,
@@ -107,6 +107,11 @@ export function AccountStatusManager() {
     () => accounts.filter((account) => selectedKeys.includes(account.key)),
     [accounts, selectedKeys]
   );
+  const activityAccount = useMemo(
+    () => accounts.find((account) => account.key === activityAccountKey) ?? null,
+    [accounts, activityAccountKey]
+  );
+  const closeActivityDialog = useCallback(() => setActivityAccountKey(null), []);
 
   const stats = useMemo(() => {
     const reviewCount = accounts.filter((account) => account.accessStatus === "review" || account.approvalStatus === "requested").length;
@@ -404,8 +409,7 @@ export function AccountStatusManager() {
               </thead>
               <tbody>
                 {filteredAccounts.map((account) => (
-                  <Fragment key={account.key}>
-                  <tr className="bg-white/[0.045] align-top">
+                  <tr key={account.key} className="bg-white/[0.045] align-top">
                     <td className="rounded-l-md px-3 py-3">
                       <input
                         type="checkbox"
@@ -468,12 +472,18 @@ export function AccountStatusManager() {
                       </div>
                     </td>
                     <td className="px-3 py-3">
-                      <button type="button" onClick={() => setExpandedKey((current) => current === account.key ? null : account.key)} className="flex min-w-32 items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-left hover:bg-white/[0.08]" aria-expanded={expandedKey === account.key}>
+                      <button
+                        type="button"
+                        onClick={() => setActivityAccountKey(account.key)}
+                        className="flex min-w-40 items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-left transition hover:border-orange-200/30 hover:bg-white/[0.08]"
+                        aria-haspopup="dialog"
+                        aria-label={`View all activity for ${account.name}`}
+                      >
                         <span>
                           <span className="block font-semibold">{account.activityCount} events</span>
                           <span className="mt-1 block text-xs text-orange-50/45">{formatRelativeActivity(account.lastActiveAt)}</span>
                         </span>
-                        {expandedKey === account.key ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        <ChevronRight className="h-4 w-4 text-orange-200" />
                       </button>
                     </td>
                     <td className="rounded-r-md px-3 py-3">
@@ -486,20 +496,16 @@ export function AccountStatusManager() {
                       />
                     </td>
                   </tr>
-                  {expandedKey === account.key ? (
-                    <tr>
-                      <td colSpan={10} className="rounded-md border border-white/10 bg-[#101520] px-5 py-4">
-                        <AccountActivityTimeline account={account} />
-                      </td>
-                    </tr>
-                  ) : null}
-                  </Fragment>
                 ))}
               </tbody>
             </table>
             {!filteredAccounts.length ? <EmptyAccounts /> : null}
           </div>
         </Card>
+
+        {activityAccount ? (
+          <AccountActivityDialog account={activityAccount} onClose={closeActivityDialog} />
+        ) : null}
 
         <div className="mt-6 grid gap-5 lg:grid-cols-[1fr_360px]">
           <Card className="p-5">
@@ -893,38 +899,194 @@ function titleCase(value: string) {
   return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
 }
 
-function AccountActivityTimeline({ account }: { account: ManagedAccount }) {
+function AccountActivityDialog({ account, onClose }: { account: ManagedAccount; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<AccountActivityTypeFilter>("all");
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const activityTypes = useMemo(
+    () => Array.from(new Set(account.activities.map((activity) => activity.type))).sort(),
+    [account.activities]
+  );
+  const visibleActivities = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return account.activities.filter((activity) => {
+      const matchesType = typeFilter === "all" || activity.type === typeFilter;
+      const matchesQuery = !normalizedQuery || [
+        activity.title,
+        activity.detail ?? "",
+        activity.collection ?? "",
+        activity.subjectId ?? "",
+        activity.type
+      ].some((value) => value.toLowerCase().includes(normalizedQuery));
+      return matchesType && matchesQuery;
+    });
+  }, [account.activities, query, typeFilter]);
+  const selectedActivity = account.activities.find((activity) => activity.id === selectedActivityId) ?? null;
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [onClose]);
+
   return (
-    <div>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className="font-semibold text-orange-50">Activity timeline for {account.name}</h3>
-          <p className="mt-1 text-xs text-orange-50/48">Every event includes the time recorded by the account or source record.</p>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6" data-testid="activity-dialog">
+      <button type="button" className="absolute inset-0 bg-black/78" onClick={onClose} aria-label="Close activity history" />
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="activity-dialog-title"
+        className="relative flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-md border border-white/14 bg-[#0d1119] shadow-2xl"
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4 sm:px-6">
+          <div className="min-w-0">
+            <p className="text-xs uppercase tracking-[0.14em] text-cyan-100/52">Account activity</p>
+            <h2 id="activity-dialog-title" className="mt-1 truncate text-xl font-semibold text-orange-50">{account.name}</h2>
+            <p className="mt-1 truncate text-sm text-orange-50/52">{account.email || account.id}</p>
+          </div>
+          <button type="button" onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/12 text-orange-50/65 transition hover:bg-white/10 hover:text-orange-50" aria-label="Close activity history" title="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+
+        <div className="grid gap-3 border-b border-white/10 px-5 py-4 text-sm sm:grid-cols-2 lg:grid-cols-4 sm:px-6">
+          <ActivityMetric label="Recorded events" value={account.activities.length.toLocaleString()} />
+          <ActivityMetric label="Latest activity" value={formatRelativeActivity(account.lastActiveAt)} />
+          <ActivityMetric label="Account created" value={formatAdminDateTime(account.createdAt)} />
+          <ActivityMetric label="Pricing plan" value={planName(account)} />
         </div>
-        <div className="flex flex-wrap gap-2 text-xs">
-          <span className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1.5">Created {formatAdminDateTime(account.createdAt)}</span>
-          <span className="rounded-md bg-orange-300 px-2.5 py-1.5 font-semibold text-slate-950">{planName(account)}</span>
+
+        <div className="flex flex-col gap-3 border-b border-white/10 px-5 py-3 sm:flex-row sm:items-center sm:px-6">
+          <label className="relative block min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-orange-50/38" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="h-10 w-full rounded-md border border-white/12 bg-white/[0.045] pl-9 pr-3 text-sm text-orange-50 outline-none focus:border-orange-300"
+              placeholder="Search title, detail, collection, or record ID"
+              aria-label="Search account activity"
+            />
+          </label>
+          <select
+            value={typeFilter}
+            onChange={(event) => setTypeFilter(event.target.value as AccountActivityTypeFilter)}
+            className="h-10 rounded-md border border-white/12 bg-[#151a27] px-3 text-sm text-orange-50 outline-none"
+            aria-label="Filter activity type"
+          >
+            <option value="all">All activity types</option>
+            {activityTypes.map((type) => <option key={type} value={type}>{activityTypeLabel(type)}</option>)}
+          </select>
+          <p className="shrink-0 text-xs text-orange-50/45">{visibleActivities.length} shown</p>
         </div>
-      </div>
-      {account.activities.length ? (
-        <ol className="mt-4 divide-y divide-white/8 border-y border-white/8">
-          {account.activities.map((activity) => (
-            <li key={activity.id} className="grid gap-2 py-3 sm:grid-cols-[28px_minmax(0,1fr)_220px] sm:items-start">
-              <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md bg-white/[0.06] text-orange-200">{activityGlyph(activity)}</span>
-              <div className="min-w-0">
-                {activity.subjectUrl ? <a href={activity.subjectUrl} className="font-medium text-orange-50 hover:text-orange-200">{activity.title}</a> : <p className="font-medium text-orange-50">{activity.title}</p>}
-                {activity.detail ? <p className="mt-1 truncate text-xs text-orange-50/50">{activity.detail}</p> : null}
-                <p className="mt-1 text-xs text-cyan-100/48">{activity.collection?.replace(/[_-]+/g, " ") ?? titleCase(activity.type.replace(/_/g, " "))}</p>
+
+        <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-h-0 overflow-y-auto px-5 py-3 sm:px-6">
+            {visibleActivities.length ? (
+              <ol className="divide-y divide-white/8">
+                {visibleActivities.map((activity) => {
+                  const selected = selectedActivity?.id === activity.id;
+                  return (
+                    <li key={activity.id}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedActivityId(activity.id)}
+                        className={`grid w-full gap-3 px-2 py-4 text-left transition sm:grid-cols-[32px_minmax(0,1fr)_190px] ${selected ? "bg-orange-300/10" : "hover:bg-white/[0.045]"}`}
+                        aria-pressed={selected}
+                        data-testid="activity-event"
+                      >
+                        <span className="flex h-8 w-8 items-center justify-center rounded-md bg-white/[0.06] text-orange-200">{activityGlyph(activity)}</span>
+                        <span className="min-w-0">
+                          <span className="block font-medium text-orange-50">{activity.title}</span>
+                          {activity.detail ? <span className="mt-1 block whitespace-pre-wrap break-words text-xs leading-5 text-orange-50/55">{activity.detail}</span> : null}
+                          <span className="mt-2 block text-xs text-cyan-100/48">{activityTypeLabel(activity.type)}{activity.collection ? ` | ${activity.collection.replace(/[_-]+/g, " ")}` : ""}</span>
+                        </span>
+                        <span className="text-xs text-orange-50/52 sm:text-right">
+                          <time dateTime={activity.occurredAt}>{formatAdminDateTime(activity.occurredAt)}</time>
+                          <span className="mt-1 block text-orange-50/35">{formatRelativeActivity(activity.occurredAt)}</span>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : (
+              <div className="my-4 rounded-md border border-dashed border-white/12 px-4 py-8 text-center text-sm text-orange-50/55">
+                {account.activities.length ? "No activity matches the current filters." : "No activity records have been captured for this account yet."}
               </div>
-              <time dateTime={activity.occurredAt} className="text-xs text-orange-50/55 sm:text-right">{formatAdminDateTime(activity.occurredAt)}</time>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <p className="mt-4 rounded-md border border-dashed border-white/12 px-4 py-5 text-sm text-orange-50/55">No activity records have been captured for this account yet.</p>
-      )}
+            )}
+          </div>
+
+          <aside className="min-h-0 overflow-y-auto border-t border-white/10 bg-white/[0.025] p-5 lg:border-l lg:border-t-0">
+            {selectedActivity ? (
+              <ActivityDetail activity={selectedActivity} />
+            ) : (
+              <div className="flex min-h-48 flex-col items-center justify-center text-center">
+                <Activity className="h-6 w-6 text-orange-200/70" />
+                <h3 className="mt-3 font-semibold text-orange-50">Select an event</h3>
+                <p className="mt-1 max-w-64 text-sm leading-6 text-orange-50/48">Click any activity to inspect its exact time, source collection, record identifier, and related page.</p>
+              </div>
+            )}
+          </aside>
+        </div>
+      </section>
     </div>
   );
+}
+
+type AccountActivityTypeFilter = "all" | AccountActivity["type"];
+
+function ActivityMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border-l border-white/10 pl-3">
+      <p className="text-xs text-orange-50/42">{label}</p>
+      <p className="mt-1 truncate font-semibold text-orange-50/88">{value}</p>
+    </div>
+  );
+}
+
+function ActivityDetail({ activity }: { activity: AccountActivity }) {
+  return (
+    <div data-testid="activity-detail">
+      <p className="text-xs uppercase tracking-[0.14em] text-cyan-100/48">Event detail</p>
+      <h3 className="mt-2 text-lg font-semibold leading-7 text-orange-50">{activity.title}</h3>
+      {activity.detail ? <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-orange-50/62">{activity.detail}</p> : <p className="mt-3 text-sm text-orange-50/38">No additional detail was recorded.</p>}
+
+      <dl className="mt-5 divide-y divide-white/8 border-y border-white/8 text-sm">
+        <ActivityDetailRow label="Action" value={activityTypeLabel(activity.type)} />
+        <ActivityDetailRow label="Exact time" value={formatAdminDateTime(activity.occurredAt)} />
+        <ActivityDetailRow label="Collection" value={activity.collection?.replace(/[_-]+/g, " ") || "Not recorded"} />
+        <ActivityDetailRow label="Record ID" value={activity.subjectId || activity.id} mono />
+        <ActivityDetailRow label="Event ID" value={activity.id} mono />
+      </dl>
+
+      {activity.subjectUrl ? (
+        <a href={activity.subjectUrl} className="mt-5 inline-flex h-10 items-center gap-2 rounded-md bg-orange-300 px-4 text-sm font-semibold text-slate-950 transition hover:bg-orange-200">
+          Open related page
+          <ExternalLink className="h-4 w-4" />
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
+function ActivityDetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="grid gap-1 py-3">
+      <dt className="text-xs text-orange-50/40">{label}</dt>
+      <dd className={`break-all text-orange-50/78 ${mono ? "font-mono text-xs" : ""}`}>{value}</dd>
+    </div>
+  );
+}
+
+function activityTypeLabel(type: AccountActivity["type"]) {
+  return type.split("_").map(titleCase).join(" ");
 }
 
 function activityGlyph(activity: AccountActivity) {
