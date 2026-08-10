@@ -40,14 +40,14 @@ import { SAVED_NOZZLE_COLLECTION, type SavedNozzleDesign } from "@/types/nozzle"
 
 function createInteractiveConfig(): RansSolverConfig {
   const base = structuredClone(DEFAULT_RANS_CONFIG);
-  base.resolution = "standard";
+  base.resolution = "development";
   const dimensions = INTERACTIVE_RANS_DIMENSIONS[base.resolution];
   return {
     ...base,
     ...dimensions,
     reconstruction: "musclVenkatakrishnan",
     timeIntegrator: "sspRk2",
-    iterationsPerBatch: 4
+    iterationsPerBatch: 6
   };
 }
 
@@ -837,7 +837,7 @@ export function NozzleCfdLab() {
                     updateConfig({ ...config, resolution, ...INTERACTIVE_RANS_DIMENSIONS[resolution] });
                   }}
                 >
-                  <option value="development">Development - 96 x 18</option>
+                  <option value="development">Interactive - 112 x 22</option>
                   <option value="standard">Standard - 144 x 28</option>
                   <option value="high">High - 208 x 40</option>
                 </SelectControl>
@@ -869,7 +869,7 @@ export function NozzleCfdLab() {
                   />
                 </label>
                 <p className="border-l-2 border-orange-400/55 pl-3 text-[11px] leading-5 text-white/48">
-                  Compressible finite volume with MUSCL reconstruction, HLLC shock flux, and two-stage SSP-RK2 integration.
+                  Conservative finite volume with accelerated pseudo-time startup, then MUSCL reconstruction, HLLC shock flux, and SSP-RK2 integration.
                 </p>
               </div>
             </section>

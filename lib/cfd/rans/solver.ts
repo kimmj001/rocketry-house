@@ -58,8 +58,8 @@ const SA_CW3_SIXTH = SA_CW3 * SA_CW3 * SA_CW3 * SA_CW3 * SA_CW3 * SA_CW3;
 const LOCAL_DT_NEIGHBOR_RATIO = 2;
 const LOCAL_DT_GLOBAL_RATIO_CAP = 16;
 const COLD_START_STABILIZATION_ITERATIONS = 240;
-const RESIDUAL_SMOOTHING_PASSES = 3;
-const RESIDUAL_SMOOTHING_EPSILON = 0.11;
+const RESIDUAL_SMOOTHING_PASSES = 1;
+const RESIDUAL_SMOOTHING_EPSILON = 0.12;
 
 type GradientSet = {
   rho: ScalarReconstruction;
@@ -1166,19 +1166,24 @@ export class AxisymmetricRansSolver {
     if (this.config.timeStepping !== "localPseudoTime") return;
     const keys = ["rho", "rhoU", "rhoV", "rhoE", "rhoNuTilde"] as const;
     const exchangePair = (
-      source: Float64Array,
-      target: Float64Array,
       leftIndex: number,
       rightIndex: number
     ) => {
       const leftVolume = this.mesh.volumes[leftIndex];
       const rightVolume = this.mesh.volumes[rightIndex];
-      const exchange = RESIDUAL_SMOOTHING_EPSILON * Math.min(leftVolume, rightVolume) * (
-        source[rightIndex] / Math.max(rightVolume, 1e-30) -
-        source[leftIndex] / Math.max(leftVolume, 1e-30)
-      );
-      target[leftIndex] += exchange;
-      target[rightIndex] -= exchange;
+      const scale = RESIDUAL_SMOOTHING_EPSILON * Math.min(leftVolume, rightVolume);
+      const inverseLeftVolume = 1 / Math.max(leftVolume, 1e-30);
+      const inverseRightVolume = 1 / Math.max(rightVolume, 1e-30);
+      for (const key of keys) {
+        const source = this.residual[key];
+        const target = this.smoothedResidual[key];
+        const exchange = scale * (
+          source[rightIndex] * inverseRightVolume -
+          source[leftIndex] * inverseLeftVolume
+        );
+        target[leftIndex] += exchange;
+        target[rightIndex] -= exchange;
+      }
     };
 
     for (let pass = 0; pass < RESIDUAL_SMOOTHING_PASSES; pass += 1) {
@@ -1187,9 +1192,7 @@ export class AxisymmetricRansSolver {
         for (let j = 1; j < this.mesh.nr; j += 1) {
           const inner = ransCellIndex(i, j - 1, this.mesh);
           const outer = ransCellIndex(i, j, this.mesh);
-          for (const key of keys) {
-            exchangePair(this.residual[key], this.smoothedResidual[key], inner, outer);
-          }
+          exchangePair(inner, outer);
         }
       }
       for (let i = 1; i < this.mesh.nx; i += 1) {
@@ -1197,9 +1200,7 @@ export class AxisymmetricRansSolver {
         for (let j = 0; j < this.mesh.nr; j += 1) {
           const left = ransCellIndex(i - 1, j, this.mesh);
           const right = ransCellIndex(i, j, this.mesh);
-          for (const key of keys) {
-            exchangePair(this.residual[key], this.smoothedResidual[key], left, right);
-          }
+          exchangePair(left, right);
         }
       }
       const previousResidual = this.residual;
@@ -1511,11 +1512,16 @@ export class AxisymmetricRansSolver {
     this.adaptCflFromResidual(point);
     this.smoothResidualForSteadyState();
     const timeSteps = this.computeTimeSteps();
+    const useSingleStageStartup =
+      this.config.timeStepping === "localPseudoTime" &&
+      this.config.initializationMode === "coldStart" &&
+      !this.highOrderUnlocked;
+    const useRk2Step = this.config.timeIntegrator === "sspRk2" && !useSingleStageStartup;
     let accepted = false;
     let retries = 0;
     let timeStepScale = 1;
     for (; retries < 12; retries += 1) {
-      if (this.config.timeIntegrator === "forwardEuler") {
+      if (!useRk2Step) {
         const next = this.attemptUpdate(timeStepScale, timeSteps.min);
         if (next) {
           this.nextState = this.state;
@@ -1556,7 +1562,7 @@ export class AxisymmetricRansSolver {
       this.cflScale = Math.max(this.cflScale * 0.5, 0.02);
       this.effectiveCfl = Math.max(this.effectiveCfl * 0.5, 0.001);
       timeStepScale *= 0.5;
-      if (this.config.timeIntegrator === "sspRk2") {
+      if (useRk2Step) {
         this.computeResidual();
         this.smoothResidualForSteadyState();
       }

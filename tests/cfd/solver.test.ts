@@ -47,14 +47,15 @@ test("saved nozzle dimensions become the exact conical CFD wall profile", () => 
   assert.ok(Math.abs(wallRadiusAt(divergenceMidpoint, geometry) - 0.00975) < 1e-12);
 });
 
-test("interactive resolution presets use one quarter of the production cell count", () => {
+test("interactive resolution presets cap browser cell count below production meshes", () => {
   const presets: ResolutionPreset[] = ["development", "standard", "high"];
   for (const preset of presets) {
     const production = resolutionDimensions(preset);
     const interactive = INTERACTIVE_RANS_DIMENSIONS[preset];
     const productionCells = (production.nozzleNx + production.externalNx) * production.nr;
-    assert.equal(interactive.nx * interactive.nr, productionCells / 4);
+    assert.ok(interactive.nx * interactive.nr <= productionCells * 0.4);
   }
+  assert.deepEqual(INTERACTIVE_RANS_DIMENSIONS.development, { nx: 112, nr: 22 });
 });
 
 test("low-resolution nozzle remains finite and accelerates downstream", () => {
@@ -93,7 +94,7 @@ test("SSP-RK2 is the default and performs a distinct two-stage conservative upda
     nx: 30,
     nr: 10,
     resolution: "development" as const,
-    initializationMode: "coldStart" as const,
+    initializationMode: "quasiSteady" as const,
     turbulence: "laminar" as const,
     reconstruction: "firstOrder" as const,
     fixedTimeStepS: 1e-8,
@@ -114,6 +115,26 @@ test("SSP-RK2 is the default and performs a distinct two-stage conservative upda
   assert.ok(rk2Snapshot.diagnostics.minDensityKgM3 > 0);
   assert.ok(rk2Snapshot.diagnostics.minPressurePa > 0);
   assert.ok(pressureDifference > 1e-6, "RK2 must recompute and apply the second-stage flux");
+});
+
+test("cold-start steady solve uses the single-stage startup accelerator", () => {
+  const shared = {
+    ...DEFAULT_RANS_CONFIG,
+    nx: 30,
+    nr: 10,
+    resolution: "development" as const,
+    initializationMode: "coldStart" as const,
+    turbulence: "laminar" as const,
+    reconstruction: "firstOrder" as const,
+    fixedTimeStepS: 1e-8,
+    cflRamp: false
+  };
+  const accelerated = new AxisymmetricRansSolver({ ...shared, timeIntegrator: "sspRk2" });
+  const euler = new AxisymmetricRansSolver({ ...shared, timeIntegrator: "forwardEuler" });
+  const acceleratedPressure = accelerated.step(1).fields.pressure;
+  const eulerPressure = euler.step(1).fields.pressure;
+
+  assert.deepEqual(acceleratedPressure, eulerPressure);
 });
 
 test("default mesh includes a long, finite external plume domain at one atmosphere", () => {
