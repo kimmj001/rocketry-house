@@ -31,6 +31,7 @@ import {
 } from "@/lib/cfd/rans/types";
 import {
   colorSensitivityPosition,
+  PRESSURE_AMBIENT_POSITION,
   pressureContrastPosition,
   pressureContrastScale
 } from "@/lib/cfd/rans/visualization";
@@ -71,21 +72,21 @@ const VIRIDIS = [
 ] as const;
 
 const PRESSURE_CONTINUOUS = [
-  [6, 12, 86],
-  [4, 18, 116],
-  [2, 27, 150],
-  [0, 39, 185],
-  [0, 52, 215],
-  [0, 68, 238],
-  [0, 82, 252],
-  [0, 96, 252],
-  [0, 165, 255],
-  [0, 218, 225],
-  [0, 215, 130],
-  [50, 220, 45],
-  [205, 235, 0],
-  [255, 165, 0],
-  [230, 32, 25]
+  [20, 5, 30],
+  [35, 6, 43],
+  [53, 7, 55],
+  [75, 9, 64],
+  [100, 14, 69],
+  [129, 22, 69],
+  [160, 32, 64],
+  [190, 45, 56],
+  [216, 61, 47],
+  [235, 79, 39],
+  [244, 96, 35],
+  [249, 117, 38],
+  [253, 143, 45],
+  [255, 172, 56],
+  [255, 205, 82]
 ] as const;
 
 const STANDARD_ATMOSPHERE_PA = 101325;
@@ -403,7 +404,11 @@ function NozzleFieldCanvas({
       if (pressurePaletteActive) {
         const ambientText = formatNumber(ambientPressurePa);
         const ambientWidth = context.measureText(ambientText).width;
-        context.fillText(ambientText, legendLeft + 0.5 * legendWidth - 0.5 * ambientWidth, legendTop - 2);
+        context.fillText(
+          ambientText,
+          legendLeft + PRESSURE_AMBIENT_POSITION * legendWidth - 0.5 * ambientWidth,
+          legendTop - 2
+        );
       }
       const maxText = formatNumber(legendMax);
       const maxWidth = context.measureText(maxText).width;

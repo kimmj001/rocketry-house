@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   colorSensitivityPosition,
+  PRESSURE_AMBIENT_POSITION,
   pressureContrastPosition,
   pressureContrastScale
 } from "../../lib/cfd/rans/visualization";
@@ -13,7 +14,7 @@ test("color sensitivity expands contrast around the palette midpoint", () => {
   assert.equal(colorSensitivityPosition(0.25, 1), 0.25);
 });
 
-test("pressure contrast ignores chamber extremes and separates pressure around ambient", () => {
+test("pressure contrast remains stable between frames and separates pressure around ambient", () => {
   const ambientPressurePa = 101325;
   const pressure = Float32Array.from([
     4.8e6,
@@ -26,19 +27,27 @@ test("pressure contrast ignores chamber extremes and separates pressure around a
     900000
   ]);
   const scale = pressureContrastScale(pressure, ambientPressurePa, 2);
-  assert.ok(scale >= ambientPressurePa * 0.05, `ambient contrast became too narrow: ${scale}`);
-  assert.ok(scale <= ambientPressurePa * 0.18, `external contrast was dominated by an outlier: ${scale}`);
-  assert.equal(pressureContrastPosition(ambientPressurePa, ambientPressurePa, scale), 0.5);
-  assert.ok(pressureContrastPosition(90000, ambientPressurePa, scale) < 0.5);
-  assert.ok(pressureContrastPosition(120000, ambientPressurePa, scale) > 0.5);
+  const nextFrameScale = pressureContrastScale(
+    Float32Array.from([ambientPressurePa, 72000, 118000, 2.4e6]),
+    ambientPressurePa,
+    1
+  );
+  assert.equal(scale, ambientPressurePa * 0.18);
+  assert.equal(nextFrameScale, scale);
+  assert.equal(
+    pressureContrastPosition(ambientPressurePa, ambientPressurePa, scale),
+    PRESSURE_AMBIENT_POSITION
+  );
+  assert.ok(pressureContrastPosition(90000, ambientPressurePa, scale) < PRESSURE_AMBIENT_POSITION);
+  assert.ok(pressureContrastPosition(120000, ambientPressurePa, scale) > PRESSURE_AMBIENT_POSITION);
   const nearbyDeficit = pressureContrastPosition(99000, ambientPressurePa, scale);
   const nearbyRise = pressureContrastPosition(104000, ambientPressurePa, scale);
   assert.ok(
-    nearbyDeficit > 0.15 && nearbyDeficit < 0.5,
+    nearbyDeficit > 0.45 && nearbyDeficit < PRESSURE_AMBIENT_POSITION,
     "near-ambient pressure deficits should remain distinct"
   );
   assert.ok(
-    nearbyRise > 0.5 && nearbyRise < 0.85,
+    nearbyRise > PRESSURE_AMBIENT_POSITION && nearbyRise < 0.9,
     "near-ambient pressure rises should remain distinct"
   );
 });
@@ -51,7 +60,7 @@ test("pressure legend stays tightly centered on one atmosphere", () => {
     0
   );
 
-  assert.equal(scale, ambientPressurePa * 0.05);
-  assert.ok(ambientPressurePa - scale > 96000);
-  assert.ok(ambientPressurePa + scale < 107000);
+  assert.equal(scale, ambientPressurePa * 0.18);
+  assert.ok(ambientPressurePa - scale > 83000);
+  assert.ok(ambientPressurePa + scale < 120000);
 });
