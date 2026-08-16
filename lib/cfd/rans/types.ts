@@ -16,7 +16,7 @@ export type CfdFieldName =
   | "residual";
 
 export const INTERACTIVE_RANS_DIMENSIONS = {
-  development: { nx: 112, nr: 22 },
+  development: { nx: 32, nr: 8 },
   standard: { nx: 144, nr: 28 },
   high: { nx: 208, nr: 40 }
 } satisfies Record<ResolutionPreset, { nx: number; nr: number }>;

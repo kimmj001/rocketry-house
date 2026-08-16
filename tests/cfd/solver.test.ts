@@ -55,7 +55,28 @@ test("interactive resolution presets cap browser cell count below production mes
     const productionCells = (production.nozzleNx + production.externalNx) * production.nr;
     assert.ok(interactive.nx * interactive.nr <= productionCells * 0.4);
   }
-  assert.deepEqual(INTERACTIVE_RANS_DIMENSIONS.development, { nx: 112, nr: 22 });
+  assert.deepEqual(INTERACTIVE_RANS_DIMENSIONS.development, { nx: 32, nr: 8 });
+});
+
+test("ultra-fast preview remains physical through cold-start propagation", () => {
+  const solver = new AxisymmetricRansSolver({
+    ...DEFAULT_RANS_CONFIG,
+    ...INTERACTIVE_RANS_DIMENSIONS.development,
+    resolution: "development",
+    initializationMode: "coldStart",
+    reconstruction: "musclVenkatakrishnan",
+    timeIntegrator: "sspRk2",
+    cfl: 0.02
+  });
+  const snapshot = solver.step(600);
+
+  assert.equal(snapshot.diagnostics.iteration, 600);
+  assert.equal(snapshot.diagnostics.failed, false, snapshot.diagnostics.failureReason);
+  assert.equal(snapshot.diagnostics.rejectedSteps, 0);
+  assert.equal(snapshot.diagnostics.nanCount, 0);
+  assert.ok(snapshot.diagnostics.minDensityKgM3 > 0);
+  assert.ok(snapshot.diagnostics.minPressurePa > 0);
+  assert.ok(snapshot.fields.mach.every(Number.isFinite));
 });
 
 test("low-resolution nozzle remains finite and accelerates downstream", () => {

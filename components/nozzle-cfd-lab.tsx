@@ -47,7 +47,8 @@ function createInteractiveConfig(): RansSolverConfig {
     ...dimensions,
     reconstruction: "musclVenkatakrishnan",
     timeIntegrator: "sspRk2",
-    iterationsPerBatch: 6
+    cfl: 0.02,
+    iterationsPerBatch: 64
   };
 }
 
@@ -837,7 +838,7 @@ export function NozzleCfdLab() {
                     updateConfig({ ...config, resolution, ...INTERACTIVE_RANS_DIMENSIONS[resolution] });
                   }}
                 >
-                  <option value="development">Interactive - 112 x 22</option>
+                  <option value="development">Ultra-fast preview - 32 x 8</option>
                   <option value="standard">Standard - 144 x 28</option>
                   <option value="high">High - 208 x 40</option>
                 </SelectControl>
@@ -857,7 +858,7 @@ export function NozzleCfdLab() {
                   <option value="sspRk2">SSP-RK2 - shock-resolving</option>
                   <option value="forwardEuler">Forward Euler - fast preview</option>
                 </SelectControl>
-                <NumberControl label="Initial CFL" value={config.cfl} step={0.01} min={0.005} max={0.5} onChange={(value) => updateConfig({ ...config, cfl: value })} />
+                <NumberControl label="Initial CFL" value={config.cfl} step={0.005} min={0.005} max={0.5} onChange={(value) => updateConfig({ ...config, cfl: value })} />
                 <NumberControl label="Iterations per batch" value={config.iterationsPerBatch} step={1} min={1} max={64} onChange={(value) => updateConfig({ ...config, iterationsPerBatch: value })} />
                 <label className="flex items-center justify-between gap-3 text-xs text-white/58">
                   CFL ramp
